@@ -2,7 +2,7 @@ import { asc, eq } from "drizzle-orm";
 import type { Component, ComponentPatch, NewComponent } from "shared/components";
 import { NameTakenError, type ComponentRepository } from "../../ports/ComponentRepository";
 import type { Db } from "./client";
-import { components, type ComponentRow } from "./schema";
+import { components, type ComponentRow, type NewComponentRow } from "./schema";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -55,7 +55,7 @@ export class DrizzleComponentRepository implements ComponentRepository {
 
   async update(id: string, patch: ComponentPatch): Promise<Component | undefined> {
     if (!UUID_RE.test(id)) return undefined;
-    const values: Partial<typeof components.$inferInsert> = { updatedAt: new Date() };
+    const values: Partial<NewComponentRow> = { updatedAt: new Date() };
     if (patch.name !== undefined) values.name = patch.name;
     if (patch.spec !== undefined) values.spec = patch.spec;
     if (patch.propsSchema !== undefined) values.propsSchema = patch.propsSchema;
