@@ -2,9 +2,9 @@
 
 Add a backend to the prototype. A Fastify + TypeScript API runs the OpenAI agent loop ported from CapheVietPOS, the chat pane sends its prompts to that API, and a Postgres database (through Drizzle) holds a `components` table for generated UI component structures.
 
-**Status:** not started · **Source of the agent:** [`../CapheVietPOS/server/agent/`](../../../CapheVietPOS/server/agent/) at `60764e5`
+**Status:** shipped, merged into main in #8 (`700c3ee`) · **Source of the agent:** [`../CapheVietPOS/server/agent/`](../../../CapheVietPOS/server/agent/) at `60764e5`
 
-Related: [Architecture](../ARCHITECTURE.md) · [Plans](./README.md)
+Related: [Architecture](../ARCHITECTURE.md) · [Milestones](./README.md) · [Plans](../plans/README.md)
 
 ## Index
 

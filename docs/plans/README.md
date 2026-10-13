@@ -4,4 +4,4 @@ One markdown file per implementation plan for work that is not the system as it 
 
 **Active:**
 
-- [Agent API service and Postgres](./agent-api-and-database.md): Fastify API with the ported OpenAI agent loop, chat pane wired to it, Postgres `components` table, Drizzle and OpenAI adapters.
+- [Predefined component catalog and seed](./component-catalog.md): `components` becomes a read-only catalog of twelve basic components (description, category, children, props schema, example props), seeded from a typed file in the repo.
