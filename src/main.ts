@@ -1,10 +1,20 @@
 import "./style.css";
+import type { AgentEvent } from "shared/api";
+import { streamChat } from "./agentClient";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("#app missing");
 
 const userTurnClass =
   "self-end max-w-[85%] rounded-2xl rounded-br-md bg-sky-600 px-4 py-2.5 text-sm leading-snug text-white shadow-sm";
+const assistantTurnClass =
+  "self-start max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-bl-md bg-zinc-100 px-4 py-2.5 text-sm leading-snug text-zinc-900 shadow-sm";
+const systemLineClass = "self-start px-1 text-xs text-zinc-500";
+const errorLineClass = "self-start rounded-md bg-red-50 px-2 py-1 text-xs text-red-700";
+const toolLineClass = "self-start px-1 font-mono text-xs text-zinc-500";
+
+/** One conversation per page load; the server keeps its history. */
+const conversationId = crypto.randomUUID();
 
 app.innerHTML = `
   <div class="grid h-full min-h-0 grid-cols-2 bg-zinc-50 text-zinc-900">
@@ -50,22 +60,99 @@ app.innerHTML = `
 const form = app.querySelector<HTMLFormElement>(".composer");
 const textarea = app.querySelector<HTMLTextAreaElement>('textarea[name="message"]');
 const thread = app.querySelector<HTMLDivElement>(".thread");
+const submitButton = form?.querySelector<HTMLButtonElement>('button[type="submit"]');
+
+/** Set while a turn streams; aborting it closes the stream. */
+let activeTurn: AbortController | null = null;
+
+function appendLine(className: string, text: string, tag = "p"): HTMLElement {
+  const el = document.createElement(tag);
+  el.className = className;
+  el.textContent = text;
+  thread?.appendChild(el);
+  scrollToBottom();
+  return el;
+}
+
+function scrollToBottom() {
+  if (thread) thread.scrollTop = thread.scrollHeight;
+}
+
+function setStreaming(streaming: boolean) {
+  if (submitButton) submitButton.textContent = streaming ? "Stop" : "Send";
+}
+
+function renderEvent(event: AgentEvent, bubble: HTMLElement) {
+  switch (event.type) {
+    case "text":
+      bubble.textContent += event.text;
+      scrollToBottom();
+      break;
+    case "tool_call":
+      appendLine(toolLineClass, `→ ${event.call.name}`);
+      break;
+    case "tool_result":
+      appendLine(
+        event.result.ok ? toolLineClass : errorLineClass,
+        `${event.result.ok ? "✓" : "✗"} ${event.call.name}: ${event.result.summary}`,
+      );
+      break;
+    case "notice":
+      appendLine(systemLineClass, event.message);
+      break;
+    case "error":
+      appendLine(errorLineClass, event.message);
+      break;
+    case "done":
+      break;
+  }
+}
+
+async function sendTurn(message: string) {
+  const controller = new AbortController();
+  activeTurn = controller;
+  setStreaming(true);
+
+  appendLine(userTurnClass, message, "article");
+  const bubble = appendLine(assistantTurnClass, "", "article");
+
+  try {
+    await streamChat(
+      { conversationId, message },
+      (event) => {
+        // Text after Stop belongs to an aborted turn.
+        if (!controller.signal.aborted) renderEvent(event, bubble);
+      },
+      controller.signal,
+    );
+  } finally {
+    if (!bubble.textContent) bubble.remove();
+    if (activeTurn === controller) {
+      activeTurn = null;
+      setStreaming(false);
+    }
+  }
+}
 
 form?.addEventListener("submit", (e) => {
   e.preventDefault();
+  if (activeTurn) {
+    activeTurn.abort();
+    activeTurn = null;
+    setStreaming(false);
+    appendLine(systemLineClass, "Stopped.");
+    return;
+  }
   const text = textarea?.value.trim();
   if (!text || !thread) return;
-  const turn = document.createElement("article");
-  turn.className = userTurnClass;
-  turn.textContent = text;
-  thread.appendChild(turn);
-  thread.scrollTop = thread.scrollHeight;
   if (textarea) textarea.value = "";
+  void sendTurn(text);
 });
 
 textarea?.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
-    form?.requestSubmit();
+    // Enter never starts (or stops) a turn while one is streaming.
+    if (!activeTurn) form?.requestSubmit();
   }
 });
