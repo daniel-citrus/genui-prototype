@@ -14,3 +14,22 @@ services:
     build: .
     ports:
       - "8080:80"
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-genui}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-genui}
+      POSTGRES_DB: ${POSTGRES_DB:-genui}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U genui -d genui"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
