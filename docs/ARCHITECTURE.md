@@ -107,6 +107,7 @@ Entry HTML is [index.html](../index.html). Browser code starts at [src/main.ts](
 
 ```
 genui-prototype/
+├── .github/workflows/ci.yml   # checks on every PR and on pushes to main
 ├── docs/                      # plans, goals, milestones, abandoned (+ this file)
 ├── src/                       # browser app
 │   ├── main.ts                # shell UI, chat rendering, composer handlers
@@ -158,6 +159,8 @@ There is a single package (no monorepo). Runtime dependencies are the API's: `fa
 | `npm run db:studio` | drizzle-kit Studio |
 
 Vite bundles ESM from `src/main.ts`. Both Vite and the server resolve `shared/*` to [shared/](../shared/). Tests use fakes for the LLM and need no API key; the repository tests run only when `DATABASE_URL` is set (they apply migrations first) and are skipped otherwise.
+
+**CI.** [.github/workflows/ci.yml](../.github/workflows/ci.yml) runs on every pull request and on pushes to `main`. Its `checks` job starts a Postgres 17 service, sets `DATABASE_URL` so the repository tests run, then runs `npm ci`, `typecheck`, `test`, `build`, and `build:api` on Node 24.
 
 ## 6. Docker
 
