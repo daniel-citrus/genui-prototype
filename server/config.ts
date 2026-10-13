@@ -1,6 +1,6 @@
 /**
  * Server configuration, read from the environment once at startup. This is the
- * only file that reads secrets. See .env.example for every variable.
+ * only file that reads secrets. Every value has a default except OPENAI_API_KEY.
  */
 
 const env = process.env;
