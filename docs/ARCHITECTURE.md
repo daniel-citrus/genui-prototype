@@ -97,7 +97,7 @@ flowchart LR
 
 **API startup.** [server/index.ts](../server/index.ts) builds the real adapters (Postgres client and repository, OpenAI LLM when `OPENAI_API_KEY` is set) and registers `/api/health` and `/api/agent`. With `NODE_ENV=production` it first applies the Drizzle migrations in `server/adapters/db/migrations` (relative to the working directory) and exits with status 1 if they fail. In development migrations are manual (`npm run db:migrate`) and the API starts even without Postgres (`"db": false` in health). Without a key the API still starts: health reports `"agent": false`, and a chat turn returns a single SSE `error` event asking for `OPENAI_API_KEY`. SIGINT/SIGTERM close the server and the Postgres pool.
 
-**Configuration.** [server/config.ts](../server/config.ts) is the only server file that reads the environment. Every variable is listed in [.env.example](../.env.example): `API_PORT` (3001), `API_HOST` (`127.0.0.1`; `0.0.0.0` in containers), `LOG_LEVEL`, `OPENAI_API_KEY`, `AGENT_MODEL`, `DATABASE_URL`. `vite.config.ts` reads `API_PROXY_TARGET` (default `http://localhost:3001`).
+**Configuration.** [server/config.ts](../server/config.ts) is the only server file that reads the environment, and it defines every variable and its default: `API_PORT` (3001), `API_HOST` (`127.0.0.1`; `0.0.0.0` in containers), `LOG_LEVEL` (`info`), `OPENAI_API_KEY` (no default; the agent is off without it), `AGENT_MODEL` (`gpt-4.1`), `DATABASE_URL` (`postgres://genui:genui@localhost:5432/genui`). [vite.config.ts](../vite.config.ts) reads `API_PROXY_TARGET` (default `http://localhost:3001`). [.env.example](../.env.example) holds only what you usually set: `OPENAI_API_KEY`, with `AGENT_MODEL` and `DATABASE_URL` commented out.
 
 **Agent.** [server/agent/loop.ts](../server/agent/loop.ts) runs a turn: it appends the user message to the conversation history ([server/agent/conversations.ts](../server/agent/conversations.ts)), calls the `AgentLlm` port, streams text as `text` events, and runs any tool calls through the `ToolRegistry`; the registry wired today is empty. Turns of one conversation run one at a time. If the server has forgotten a conversation the chat resumes, the agent sends a `notice` saying so.
 
@@ -131,7 +131,7 @@ genui-prototype/
 ├── tsconfig.app.json          # strict TS for src/
 ├── tsconfig.node.json         # TS for vite.config.ts
 ├── tsconfig.server.json       # TS for server/, shared/, drizzle.config.ts, tests
-├── .env.example               # every server variable; copy to .env.local
+├── .env.example               # OPENAI_API_KEY (+ commented AGENT_MODEL, DATABASE_URL); copy to .env.local
 ├── Dockerfile                 # web: build stage + nginx
 ├── Dockerfile.api             # api: esbuild bundle + production deps + migrations
 ├── docker-compose.yml         # dev, api-dev, web, api, db

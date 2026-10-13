@@ -12,7 +12,7 @@ Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Tracked work: [pla
    npm ci
    ```
 
-2. Create your env file, then set `OPENAI_API_KEY` in it (every variable is described in `.env.example`):
+2. Create your env file, then set `OPENAI_API_KEY` in it. It is the only required value; `AGENT_MODEL` and `DATABASE_URL` are shown commented out, and every variable with its default is in `server/config.ts`:
 
    ```bash
    cp .env.example .env.local
