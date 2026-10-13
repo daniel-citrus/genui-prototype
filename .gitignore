@@ -4,3 +4,4 @@ dist
 .DS_Store
 *.tsbuildinfo
 .playwright-mcp
+server-dist/
