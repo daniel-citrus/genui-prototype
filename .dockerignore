@@ -6,3 +6,4 @@ README.md
 *.md
 .DS_Store
 server-dist/
+*.local

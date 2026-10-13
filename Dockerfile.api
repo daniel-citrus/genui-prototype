@@ -1,0 +1,20 @@
+# API image: esbuild bundle + production dependencies + migrations.
+
+FROM node:24-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build:api
+
+FROM node:24-alpine
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+COPY --from=build /app/server-dist ./server-dist
+# Applied on start in production; the path is relative to WORKDIR.
+COPY --from=build /app/server/adapters/db/migrations ./server/adapters/db/migrations
+ENV NODE_ENV=production API_HOST=0.0.0.0 API_PORT=3001
+USER node
+EXPOSE 3001
+CMD ["node", "server-dist/index.mjs"]
