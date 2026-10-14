@@ -21,20 +21,6 @@ export const FORGOTTEN_NOTICE =
   "I no longer have the earlier messages in this chat (the server restarted or the chat was set aside), so I'm answering this one on its own.";
 
 /**
- * Instructions for the model. The loop does not send these: the LLM adapter
- * prepends them (its `systemPrompt` option), so they are never stored in
- * history.
- */
-export const SYSTEM_PROMPT = `You are an assistant that helps people design and describe UI components.
-
-Guidelines:
-- Keep replies brief: a sentence or two, then the result.
-- Use the provided tools when they fit the request.
-- Use only the predefined components. Call list_components to see them, and get_component before relying on a component's props.
-- If no component fits the request, say so instead of inventing one.
-- If you cannot do something, say so plainly instead of guessing.`;
-
-/**
  * The tool-use loop, server-side. Streams events through `run`. Turns on one
  * conversation run one at a time, since they share its history.
  */
