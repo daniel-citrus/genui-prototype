@@ -232,4 +232,4 @@ Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, `pg`, an
 
 **Planned**
 
-- Tools that use the rendered components.
+- Tools that use the rendered components. ([plan](../daniel-super-secret-workflow/plans/rendered-component-tools.md))
