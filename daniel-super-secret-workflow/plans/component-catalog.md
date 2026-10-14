@@ -4,7 +4,7 @@ Turn the `components` table into a catalog of predefined UI components that the 
 
 **Status:** not started · **Builds on:** [Agent API service and Postgres](../milestones/agent-api-and-database.md)
 
-Related: [Architecture](../ARCHITECTURE.md) · [Plans](./README.md)
+Related: [Architecture](../../docs/ARCHITECTURE.md) · [Plans](./README.md)
 
 ## Index
 
@@ -196,7 +196,7 @@ Application code reads the catalog; only the seed writes it.
 
 - `docs/ARCHITECTURE.md`: the new columns, the catalog and seed, `npm run db:seed`, and production seeding on start.
 - `README.md`: add `npm run db:seed` after `npm run db:migrate` in the setup steps.
-- `docs/plans/README.md`: list this plan under **Active**.
+- `daniel-super-secret-workflow/plans/README.md`: list this plan under **Active**.
 - CI needs no change: the `checks` job already sets `DATABASE_URL`, so the seed and repository tests run there.
 
 **Final checks:** `npm run typecheck`, `npm test`, `npm run build`, and `npm run build:api` pass, and `docker compose up web --build` serves the app with a seeded table.

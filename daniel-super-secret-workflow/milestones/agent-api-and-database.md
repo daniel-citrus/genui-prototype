@@ -4,7 +4,7 @@ Add a backend to the prototype. A Fastify + TypeScript API runs the OpenAI agent
 
 **Status:** shipped, merged into main in #8 (`700c3ee`) · **Source of the agent:** [`../CapheVietPOS/server/agent/`](../../../CapheVietPOS/server/agent/) at `60764e5`
 
-Related: [Architecture](../ARCHITECTURE.md) · [Milestones](./README.md) · [Plans](../plans/README.md)
+Related: [Architecture](../../docs/ARCHITECTURE.md) · [Milestones](./README.md) · [Plans](../plans/README.md)
 
 ## Index
 

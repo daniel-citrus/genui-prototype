@@ -4,7 +4,7 @@ Give the agent its first tools. A tool registry defines which tools exist, check
 
 **Status:** not started · **Builds on:** [Predefined component catalog and seed](./component-catalog.md)
 
-Related: [Architecture](../ARCHITECTURE.md) · [Plans](./README.md)
+Related: [Architecture](../../docs/ARCHITECTURE.md) · [Plans](./README.md)
 
 ## Index
 
@@ -145,7 +145,7 @@ The list leaves out `propsSchema` and `exampleProps` so it stays short; the mode
 **Docs**
 
 - `docs/ARCHITECTURE.md`: the tool registry is no longer empty; list the two tools, and update the overview diagram and "Current limits".
-- `docs/plans/README.md`: list this plan under **Active**.
+- `daniel-super-secret-workflow/plans/README.md`: list this plan under **Active**.
 
 **Final checks:** `npm run typecheck`, `npm test`, `npm run build`, and `npm run build:api` pass.
 

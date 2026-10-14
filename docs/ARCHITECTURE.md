@@ -2,7 +2,7 @@
 
 genui-prototype is a two-pane web app: on the left you chat with an AI agent, on the right a sandbox will show the UI it generates. It is a **Vite + TypeScript** browser app and a **Fastify** API in one repository. The API runs the agent on **OpenAI** and streams replies to the browser over server-sent events (SSE), and it owns a **Postgres** database accessed through **Drizzle**.
 
-Related: [Plans](./plans/) · [Milestones](./milestones/) · [Goals](./goals/) · [Abandoned](./abandoned/) · [README](../README.md)
+Related: [README](../README.md)
 
 ## Index
 
@@ -135,7 +135,7 @@ sequenceDiagram
 | Conversation history | API memory | Until the API restarts. At most 500 conversations; the least recently used is dropped first |
 | UI components | Postgres, `components` table | Durable. Schema changes only through committed Drizzle migrations |
 
-**`components` table:** `id`, `name` (unique), `spec` (JSON), `props_schema` (JSON Schema), and timestamps. The API has a repository for it, but no route or agent tool uses it yet. The [component catalog plan](./plans/component-catalog.md) turns it into a catalog of predefined components.
+**`components` table:** `id`, `name` (unique), `spec` (JSON), `props_schema` (JSON Schema), and timestamps. The API has a repository for it, but no route or agent tool uses it yet. A planned next step turns it into a catalog of predefined components (§10).
 
 ## 6. Environments
 
@@ -183,7 +183,7 @@ genui-prototype/
 │   ├── ports/      interfaces the app depends on
 │   └── adapters/   OpenAI and Postgres (Drizzle) implementations, migrations
 ├── shared/         types used by both the browser and the API
-├── docs/           this file, plans, milestones, goals, abandoned
+├── docs/           this file
 ├── .github/        CI workflow
 ├── Dockerfile      web image (build + nginx)
 ├── Dockerfile.api  API image (esbuild bundle + production dependencies)
@@ -215,4 +215,8 @@ Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, and `pg`
 - The `components` table is not exposed to the agent or over HTTP.
 - There is no authentication.
 
-**Planned:** [Predefined component catalog and seed](./plans/component-catalog.md): twelve basic components stored as a catalog the agent can read, seeded from a file in the repo. Rendering components in the sandbox and giving the agent tools to use them come after.
+**Planned**
+
+- **Component catalog:** twelve basic components stored as a catalog the agent can read, seeded from a file in the repo.
+- **Tool registry:** the agent's first tools, `list_components` and `get_component`, reading that catalog.
+- **Later:** rendering components in the sandbox and tools that use them.

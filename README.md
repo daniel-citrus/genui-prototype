@@ -2,7 +2,7 @@
 
 A Vite + TypeScript chat shell backed by a Fastify agent API (OpenAI, streamed over SSE) and Postgres, with Docker for dev and production.
 
-Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Tracked work: [plans](docs/plans/), [goals](docs/goals/), [milestones](docs/milestones/), [abandoned](docs/abandoned/).
+Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Local (Node 24+)
 
