@@ -2,10 +2,16 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { AgentEvent, ToolResult } from "shared/api";
 import type { AgentLlm, HistoryMessage, LlmTurn } from "../ports/AgentLlm";
+import { catalog } from "../catalog/components";
+import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
 import { getHistory, resetConversation } from "./conversations";
 import { FORGOTTEN_NOTICE, MAX_STEPS, runAgent } from "./loop";
+import { createToolRegistry } from "./registry";
 import type { AgentRun } from "./run";
-import type { ToolRegistry, ToolSpec } from "./tools";
+import type { ToolContext, ToolLogger, ToolRegistry, ToolSpec } from "./tools";
+import { createAgentTools } from "./tools/index";
+
+const noopLogger: ToolLogger = { debug() {}, error() {} };
 
 const specs: ToolSpec[] = [
   {
@@ -33,13 +39,19 @@ function scriptedLlm(turns: LlmTurn[]): ScriptedLlm {
   };
 }
 
-function stubTools(): ToolRegistry & { ran: Array<{ name: string; args: Record<string, unknown> }> } {
+function stubTools(): ToolRegistry & {
+  ran: Array<{ name: string; args: Record<string, unknown> }>;
+  contexts: ToolContext[];
+} {
   const ran: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const contexts: ToolContext[] = [];
   return {
     ran,
+    contexts,
     specs,
-    async run(name, args): Promise<ToolResult> {
+    async run(name, args, ctx): Promise<ToolResult> {
       ran.push({ name, args });
+      contexts.push(ctx);
       return { ok: true, summary: `ran ${name}`, data: args };
     },
   };
@@ -56,6 +68,7 @@ function makeRun(
     },
     signal: opts.signal ?? new AbortController().signal,
     tools,
+    log: noopLogger,
     resume: opts.resume,
   };
   return { run, events };
@@ -101,6 +114,7 @@ describe("runAgent", () => {
     );
     assert.deepEqual(llm.calls[0].tools, specs);
     assert.deepEqual(tools.ran, [{ name: "list_components", args: { limit: 3 } }]);
+    assert.deepEqual(tools.contexts, [{ signal: run.signal, log: run.log }]);
 
     const call = { id: "call_1", name: "list_components", args: { limit: 3 } };
     assert.deepEqual(events, [
@@ -125,6 +139,71 @@ describe("runAgent", () => {
     const assistant = history[1];
     assert.equal(assistant.role, "assistant");
     assert.equal(assistant.tool_calls?.[0].id, "call_1");
+  });
+
+  it("looks up components with the real tools, then replies", async () => {
+    const conversationId = "component-tools";
+    const tools = createToolRegistry(
+      createAgentTools({ components: new InMemoryComponentRepository(catalog) }),
+    );
+    const { run, events } = makeRun(tools);
+    const llm = scriptedLlm([
+      {
+        content: null,
+        toolCalls: [{ id: "call_list", name: "list_components", arguments: "{}" }],
+      },
+      {
+        content: null,
+        toolCalls: [{ id: "call_get", name: "get_component", arguments: '{"name":"Button"}' }],
+      },
+      { content: "Use a Button.", toolCalls: [] },
+    ]);
+
+    await runAgent("what components can I use?", conversationId, run, llm);
+    const history = getHistory(conversationId);
+    resetConversation(conversationId);
+
+    assert.equal(llm.calls.length, 3);
+    assert.deepEqual(
+      llm.calls[0].tools.map((t) => t.name),
+      ["list_components", "get_component"],
+    );
+
+    const listCall = { id: "call_list", name: "list_components", args: {} };
+    const getCall = { id: "call_get", name: "get_component", args: { name: "Button" } };
+    assert.deepEqual(
+      events.map((e) => e.type),
+      ["tool_call", "tool_result", "tool_call", "tool_result", "text"],
+    );
+    assert.deepEqual(events[0], { type: "tool_call", call: listCall });
+    assert.deepEqual(events[2], { type: "tool_call", call: getCall });
+    const [listResult, getResult] = [events[1], events[3]];
+    assert.ok(listResult.type === "tool_result" && getResult.type === "tool_result");
+    assert.deepEqual(listResult.call, listCall);
+    assert.deepEqual(
+      [listResult.result.ok, listResult.result.summary],
+      [true, `Listed ${catalog.length} components`],
+    );
+    assert.deepEqual(getResult.call, getCall);
+    assert.deepEqual([getResult.result.ok, getResult.result.summary], [true, "Read Button"]);
+    assert.deepEqual(events[4], { type: "text", text: "Use a Button." });
+
+    const toolRows = history.filter(
+      (m): m is Extract<HistoryMessage, { role: "tool" }> => m.role === "tool",
+    );
+    assert.deepEqual(
+      toolRows.map((m) => m.tool_call_id),
+      ["call_list", "call_get"],
+    );
+    const listed = JSON.parse(toolRows[0].content);
+    assert.equal(listed.data.components.length, catalog.length);
+    const read = JSON.parse(toolRows[1].content);
+    assert.equal(read.summary, "Read Button");
+    assert.deepEqual(
+      read.data.propsSchema,
+      catalog.find((c) => c.name === "Button")!.propsSchema,
+    );
+    assert.deepEqual(history.at(-1), { role: "assistant", content: "Use a Button." });
   });
 
   it("emits an error after MAX_STEPS tool-use steps", async () => {

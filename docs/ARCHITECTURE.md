@@ -1,45 +1,76 @@
 # Architecture
 
-This repo is a **Vite + TypeScript** browser app plus a **Fastify** API: a
-two-column shell where the left pane chats with an OpenAI-backed agent (replies
-stream over SSE) and the right pane is a sandbox preview. The API also owns a
-**Postgres** database (Drizzle ORM). The browser bundle is built to `dist/` and
-served by Vite in dev or nginx in production; the API is bundled to
-`server-dist/` and runs under Node.
+genui-prototype is a two-pane web app: on the left you chat with an AI agent, on the right a sandbox will show the UI it generates. It is a **Vite + TypeScript** browser app and a **Fastify** API in one repository. The API runs the agent on **OpenAI** and streams replies to the browser over server-sent events (SSE), and it owns a **Postgres** database accessed through **Drizzle**.
 
-Related: [Plans](./plans/) · [Goals](./goals/) · [Milestones](./milestones/) · [Abandoned](./abandoned/) · [README](../README.md)
+Related: [README](../README.md)
 
 ## Index
 
-1. [Purpose](#1-purpose)
-2. [User interface](#2-user-interface)
-3. [Runtime shapes](#3-runtime-shapes)
-4. [Repository layout](#4-repository-layout)
-5. [Build and typecheck](#5-build-and-typecheck)
-6. [Docker](#6-docker)
+1. [System overview](#1-system-overview)
+2. [Browser app](#2-browser-app)
+3. [API](#3-api)
+4. [A chat turn, end to end](#4-a-chat-turn-end-to-end)
+5. [Data](#5-data)
+6. [Environments](#6-environments)
+7. [Configuration](#7-configuration)
+8. [Repository layout](#8-repository-layout)
+9. [Build, test, and CI](#9-build-test-and-ci)
+10. [Current limits and what's next](#10-current-limits-and-whats-next)
 
-## 1. Purpose
+## 1. System overview
 
-- **Product direction:** chat with an agent on the left; show generated output in a sandbox on the right.
-- **Today:**
-  - The chat sends each message to `POST /api/agent/chat` and streams the agent's reply into the thread as it is generated. The agent runs on OpenAI (`AGENT_MODEL`, default `gpt-4.1`) and has **no tools yet**.
-  - Conversations live **in memory** on the API server (one per page load, at most 500, least recently used forgotten first). Restarting the API resets them.
-  - Postgres holds a `components` table (`name`, `spec`, `props_schema`). It has a repository (`DrizzleComponentRepository`) but **no HTTP routes** yet.
-  - `GET /api/health` reports `{ ok, db, agent }`: whether Postgres answers and whether `OPENAI_API_KEY` is set.
-  - The session dropdown is empty. The sandbox is a placeholder panel.
-- **Develop** with the Vite dev server (HMR) on port **5173** and the API (`tsx watch`) on **3001**. Vite proxies `/api` to the API.
-- **Run production** as nginx serving `dist/` and proxying `/api/` to the API container (port **8080** via Compose).
+```mermaid
+flowchart LR
+  subgraph Browser
+    Chat["Chat pane"]
+    Sandbox["Sandbox pane<br/>(placeholder)"]
+    Client["Agent client<br/>fetch + SSE reader"]
+    Chat --> Client
+  end
 
-Node **24+** is required (`package.json` `engines`).
+  Edge["Web server<br/>Vite :5173 in dev<br/>nginx :8080 in production"]
 
-## 2. User interface
+  subgraph API ["API (Fastify, Node 24, :3001)"]
+    Routes["HTTP routes<br/>GET /api/health<br/>POST /api/agent/chat"]
+    Loop["Agent loop"]
+    Convos["Conversations<br/>(in memory)"]
+    Tools["Tool registry<br/>list_components, get_component"]
+    LlmPort["AgentLlm port"]
+    RepoPort["ComponentRepository port"]
+    OpenAIAdapter["OpenAI adapter"]
+    DbAdapter["Drizzle adapter"]
+    Routes --> Loop
+    Loop --> Convos
+    Loop --> Tools
+    Loop --> LlmPort
+    Tools --> RepoPort
+    LlmPort --> OpenAIAdapter
+    RepoPort --> DbAdapter
+  end
+
+  OpenAI["OpenAI<br/>Chat Completions"]
+  DB[("Postgres<br/>components table")]
+
+  Client -- "POST /api/agent/chat" --> Edge
+  Edge -- "proxies /api" --> Routes
+  Edge -. "SSE events" .-> Client
+  OpenAIAdapter -- "streaming HTTPS" --> OpenAI
+  DbAdapter --> DB
+  Routes -. "health check" .-> DB
+```
+
+- **The browser only talks to its own origin.** The web server serves the app and proxies `/api` to the API, so there is no CORS setup.
+- **The API follows ports and adapters.** The agent loop and future features depend on small interfaces (`AgentLlm`, `ComponentRepository`). The OpenAI and Drizzle adapters implement them, and [server/index.ts](../server/index.ts) is the one place that wires real adapters in. Tests swap in fakes.
+- **Types shared by both sides** (request bodies, SSE event shapes, component types) live in [shared/](../shared/), so the browser and the API can't disagree about the wire format.
+
+## 2. Browser app
 
 ```
 ┌──────────────────────────────┬──────────────────────────────┐
 │ [ session ▾ ]  (empty)       │                              │
 ├──────────────────────────────┤                              │
-│  agent chat thread           │  empty sandbox panel         │
-│  (user + streamed agent      │                              │
+│  agent chat thread           │  sandbox panel               │
+│  (user + streamed agent      │  (placeholder)               │
 │   bubbles, notices, errors)  │                              │
 ├──────────────────────────────┤                              │
 │ [ Message the agent…     ]   │                              │
@@ -47,145 +78,153 @@ Node **24+** is required (`package.json` `engines`).
 └──────────────────────────────┴──────────────────────────────┘
 ```
 
-| Region | DOM / class | Behaviour today |
+- **Chat pane:** each message opens an agent bubble that fills in as text streams back. Tool calls, notices, and errors render as small lines in the thread. While a reply streams, **Send** becomes **Stop**, which aborts the request; the API sees the connection close and stops the turn.
+- **Conversation identity:** one conversation per page load (a random id). Reloading starts a new one.
+- **Sandbox pane and session menu:** placeholders for now.
+- **Stack:** plain TypeScript and DOM APIs, no UI framework; styling with Tailwind. Code is in [src/](../src/): the shell and chat rendering, the agent client, and an SSE parser.
+
+## 3. API
+
+| Part | Role |
+|---|---|
+| **Routes** ([server/routes/](../server/routes/)) | `GET /api/health` returns `{ ok, db, agent }`: whether Postgres answers and whether an OpenAI key is set. `POST /api/agent/chat` runs one agent turn and streams it back as SSE |
+| **Agent** ([server/agent/](../server/agent/)) | The tool-use loop (§4), the in-memory conversation store, the tool registry, and the agent's tools (`tools/`): `list_components` lists the catalog by name, category, description and children; `get_component` returns one component's props schema and example props |
+| **Ports** ([server/ports/](../server/ports/)) | `AgentLlm`: run one model turn with streaming. `ComponentRepository`: read the component catalog. `fakes/`: in-memory versions for tests |
+| **Adapters** ([server/adapters/](../server/adapters/)) | `openai/`: streaming Chat Completions. `db/`: Drizzle client, schema, migrations, the repository, and the catalog seed |
+| **Catalog** ([server/catalog/](../server/catalog/)) | `components.ts`: the predefined UI components, the source of truth for the `components` table. `validate.ts`: the rules every entry follows (§5) |
+| **Config** ([server/config.ts](../server/config.ts)) | The only place the API reads environment variables (§7) |
+
+**Startup.** The API builds its adapters and registers the routes. In production it first applies database migrations, then seeds the component catalog (§5), and exits with status 1 if either fails. In development both are run by hand (`npm run db:migrate`, then `npm run db:seed`) and the API starts even when Postgres is down (health then reports `db: false`, and component tool calls fail until it is up). Without an OpenAI key the API still starts; health reports `agent: false` and a chat turn answers with one `error` event naming the missing key.
+
+## 4. A chat turn, end to end
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant B as Browser
+  participant R as Chat route
+  participant L as Agent loop
+  participant O as OpenAI
+  participant T as Tool registry
+
+  User->>B: types a message
+  B->>R: POST /api/agent/chat
+  R->>L: run the turn
+  Note over L: one turn at a time per conversation
+  loop up to 10 model calls
+    L->>O: history and tool definitions
+    O-->>L: streamed text and tool calls
+    L-->>B: text events (SSE)
+    opt the model asked for tools
+      L->>T: run each tool
+      T-->>L: result, added to history
+      L-->>B: tool_call and tool_result events
+    end
+  end
+  R-->>B: done, or error
+```
+
+- The loop sends the conversation history and the available tools to the model, streams its text to the browser as it arrives, runs any tools the model asks for, and calls the model again with the results. A reply with no tool calls ends the turn.
+- After 10 model calls without a final reply, the turn ends with an `error` event.
+- The system prompt is added by the OpenAI adapter on each call, so it is never stored in history.
+- The registry checks each call's arguments against the tool's schema before running it. An unknown tool, invalid arguments, or a tool that throws (Postgres down, for example) comes back as an `ok: false` result the model can read; failures are logged.
+- SSE event types: `text`, `tool_call`, `tool_result`, `notice`, `done`, `error` (defined in [shared/api.ts](../shared/api.ts)).
+- If the API has forgotten a conversation the browser is continuing (after a restart, for example), the agent sends a `notice` saying so and answers the message on its own.
+
+## 5. Data
+
+| Data | Where | Lifetime |
 |---|---|---|
-| Session menu | `#session-select` in the chat header | Empty `<select>`; no options or handler |
-| Chat thread | `.thread` | User bubble per message, then an agent bubble that fills as `text` events arrive. Tool calls/results, notices, and errors render as small lines |
-| Composer | `.composer` | Enter sends (Shift+Enter newline). While a reply streams the button reads **Stop** and aborts the request, which stops the turn on the server |
-| Sandbox | dashed panel in sandbox section | Empty; no iframe or generated UI yet |
+| Conversation history | API memory | Until the API restarts. At most 500 conversations; the least recently used is dropped first |
+| UI components | [server/catalog/components.ts](../server/catalog/components.ts), copied to Postgres `components` table by the seed | The file is the source of truth; the table can be dropped and reseeded at any time. Schema changes only through committed Drizzle migrations |
 
-Markup and chat rendering are in [src/main.ts](../src/main.ts). [src/agentClient.ts](../src/agentClient.ts) posts a turn and reads the SSE response with the parser in [src/sse.ts](../src/sse.ts). The wire types (`AgentChatRequest`, `AgentEvent`) are shared with the server in [shared/api.ts](../shared/api.ts). Styling uses Tailwind utilities ([src/style.css](../src/style.css) imports Tailwind).
+**`components` table:** a catalog of predefined UI components. Columns: `id`, `name` (unique), `description`, `category` (check: `layout`, `text`, `input`, or `display`), `children` (check: `none` or `any`), `props_schema` (JSON Schema), `example_props` (JSON), and timestamps. Rendering lives in browser code keyed by `name`, so no render spec is stored. The API's `ComponentRepository` is read-only (`list`, `get`, `getByName`); only the seed writes rows. The agent reads it through the `list_components` and `get_component` tools; no HTTP route exposes it (§10).
 
-## 3. Runtime shapes
+**Catalog and seed.** `server/catalog/components.ts` exports the twelve basic components (`Stack`, `Card`, `Divider`, `Heading`, `Text`, `Button`, `TextInput`, `Checkbox`, `Select`, `Image`, `Badge`, `Alert`). Text content is a prop, so only `Stack` and `Card` take children. `validateCatalog` (Ajv, the shared strict instance in `server/validation/jsonSchema.ts`) checks that every name matches `^[A-Z][A-Za-z0-9]*$` and is unique, the description is non-empty, `propsSchema` is valid JSON Schema with `type: "object"`, `additionalProperties: false`, and a `description` on every property, and every `default` and `exampleProps` is valid against it. `seedComponents(db, catalog)` (`server/adapters/db/seed.ts`) validates first and, on any problem, throws listing them all and writes nothing. Otherwise, in one transaction, it inserts missing entries, updates rows whose fields differ (setting `updated_at`), deletes rows whose name left the catalog, leaves the rest untouched, and returns `{ added, updated, removed, unchanged }`. Running it twice ends in the same state.
+
+- **Development:** `npm run db:seed` after `npm run db:migrate` prints `components: N added, N updated, N removed, N unchanged`.
+- **Production:** the API seeds right after migrating on start, logs the same counts, and exits with status 1 if the seed fails. The catalog is bundled into the API, so the image needs no extra files.
+
+## 6. Environments
+
+| Mode | Command | Web | API | Database | URL |
+|---|---|---|---|---|---|
+| Dev | `npm run dev` | Vite dev server with hot reload | `tsx watch`, reads `.env.local` | Compose `db` service | http://localhost:5173 |
+| Dev in containers | `docker compose up dev` | `dev` container | `api-dev` container | `db` container | http://localhost:5173 |
+| Production | `docker compose up web --build` | nginx serving the built app | `api` container, migrates and seeds on start | `db` container, named volume | http://localhost:8080 |
 
 ```mermaid
 flowchart LR
-  subgraph browser ["Browser"]
-    ChatPane["Chat pane"]
-    SandboxPane["Sandbox pane"]
-  end
-
-  subgraph devLocal ["Local dev (npm run dev)"]
-    DevServer["Vite :5173"]
-    DevApi["API (tsx watch) :3001"]
-    DevServer -- "/api proxy" --> DevApi
-  end
-
-  subgraph prodDocker ["Production Docker"]
-    Nginx["nginx (web) :8080"]
-    Api["api :3001"]
-    Nginx -- "/api/ (unbuffered)" --> Api
-  end
-
-  Db[("Postgres (db)")]
-  OpenAI["OpenAI API"]
-
-  browser --> DevServer
-  browser --> Nginx
-  DevApi --> Db
-  Api --> Db
-  DevApi --> OpenAI
-  Api --> OpenAI
+  User["Browser"] -- ":8080" --> Web["web<br/>nginx + built app"]
+  Web -- "/api, unbuffered" --> Api["api<br/>Node, bundled server"]
+  Api --> Db[("db<br/>Postgres 17")]
+  Api -- "HTTPS" --> OpenAI["OpenAI"]
 ```
 
-| Mode | Command | Web | API | Default URL |
-|---|---|---|---|---|
-| Dev (Node) | `npm run dev` | Vite, source files | `tsx watch`, loads `.env.local` | http://localhost:5173 |
-| Dev (Compose) | `docker compose up dev` | `dev` container, repo bind-mounted | `api-dev` container, repo bind-mounted | http://localhost:5173 |
-| Preview | `npm run preview` | Vite, prebuilt `dist/` | none (start one with `npm run dev:api`) | http://localhost:4173 |
-| Production | `docker compose up web --build` | nginx → `dist/` in image | `api` container (`Dockerfile.api`) | http://localhost:8080 |
+- **Images:** the web image builds the app and serves it with nginx. The API image bundles the server with esbuild and ships only production dependencies and the migrations.
+- **SSE through nginx:** buffering is off for `/api/` and reads time out after 300 seconds, so events reach the browser as they are written.
+- **Ports:** only `web` (8080) and `db` (5432) are published in production; the API is reached through nginx. If a host port is taken, remap it in an uncommitted `docker-compose.override.yml`.
 
-**API startup.** [server/index.ts](../server/index.ts) builds the real adapters (Postgres client and repository, OpenAI LLM when `OPENAI_API_KEY` is set) and registers `/api/health` and `/api/agent`. With `NODE_ENV=production` it first applies the Drizzle migrations in `server/adapters/db/migrations` (relative to the working directory) and exits with status 1 if they fail. In development migrations are manual (`npm run db:migrate`) and the API starts even without Postgres (`"db": false` in health). Without a key the API still starts: health reports `"agent": false`, and a chat turn returns a single SSE `error` event asking for `OPENAI_API_KEY`. SIGINT/SIGTERM close the server and the Postgres pool.
+## 7. Configuration
 
-**Configuration.** [server/config.ts](../server/config.ts) is the only server file that reads the environment, and it defines every variable and its default: `API_PORT` (3001), `API_HOST` (`127.0.0.1`; `0.0.0.0` in containers), `LOG_LEVEL` (`info`), `OPENAI_API_KEY` (no default; the agent is off without it), `AGENT_MODEL` (`gpt-4.1`), `DATABASE_URL` (`postgres://genui:genui@localhost:5432/genui`). [vite.config.ts](../vite.config.ts) reads `API_PROXY_TARGET` (default `http://localhost:3001`). [.env.example](../.env.example) holds only what you usually set: `OPENAI_API_KEY`, with `AGENT_MODEL` and `DATABASE_URL` commented out.
+| Variable | Default | Used by |
+|---|---|---|
+| `OPENAI_API_KEY` | none (the agent is off without it) | API |
+| `AGENT_MODEL` | `gpt-4.1` | API |
+| `DATABASE_URL` | `postgres://genui:genui@localhost:5432/genui` | API, migrations |
+| `API_PORT` / `API_HOST` | `3001` / `127.0.0.1` (`0.0.0.0` in containers) | API |
+| `LOG_LEVEL` | `info` | API |
+| `API_PROXY_TARGET` | `http://localhost:3001` | Vite dev server |
 
-**Agent.** [server/agent/loop.ts](../server/agent/loop.ts) runs a turn: it appends the user message to the conversation history ([server/agent/conversations.ts](../server/agent/conversations.ts)), calls the `AgentLlm` port, streams text as `text` events, and runs any tool calls through the `ToolRegistry`; the registry wired today is empty. Turns of one conversation run one at a time. If the server has forgotten a conversation the chat resumes, the agent sends a `notice` saying so.
+For local development, copy [.env.example](../.env.example) to `.env.local` and set `OPENAI_API_KEY`. The `.env.local` file is ignored by git and kept out of Docker builds.
 
-Entry HTML is [index.html](../index.html). Browser code starts at [src/main.ts](../src/main.ts); the API starts at [server/index.ts](../server/index.ts).
+## 8. Repository layout
 
-## 4. Repository layout
+One npm package, no monorepo.
 
 ```
 genui-prototype/
-├── .github/workflows/ci.yml   # checks on every PR and on pushes to main
-├── docs/                      # plans, goals, milestones, abandoned (+ this file)
-├── src/                       # browser app
-│   ├── main.ts                # shell UI, chat rendering, composer handlers
-│   ├── agentClient.ts         # POST /api/agent/chat and read the SSE stream
-│   ├── sse.ts                 # SSE parser (+ sse.test.ts)
-│   ├── style.css              # Tailwind import
-│   └── vite-env.d.ts
-├── server/                    # Fastify API
-│   ├── index.ts               # composition root: adapters, routes, migrations, listen
-│   ├── config.ts              # environment → config (only place secrets are read)
-│   ├── routes/                # health.ts, agent.ts (SSE chat)
-│   ├── agent/                 # loop, in-memory conversations, tool registry, OpenAI tool mapping
-│   ├── ports/                 # AgentLlm, ComponentRepository interfaces
-│   └── adapters/
-│       ├── openai/            # OpenAILlm (streaming Chat Completions)
-│       └── db/                # Drizzle client, schema, repository, migrate, migrations/
-├── shared/                    # types used by both sides: api.ts (wire), components.ts
-├── index.html
-├── vite.config.ts             # dev/preview host and ports, /api proxy, `shared` alias
-├── drizzle.config.ts          # drizzle-kit: schema, migrations folder, DATABASE_URL
-├── tsconfig.json              # references app + node + server configs
-├── tsconfig.app.json          # strict TS for src/
-├── tsconfig.node.json         # TS for vite.config.ts
-├── tsconfig.server.json       # TS for server/, shared/, drizzle.config.ts, tests
-├── .env.example               # OPENAI_API_KEY (+ commented AGENT_MODEL, DATABASE_URL); copy to .env.local
-├── Dockerfile                 # web: build stage + nginx
-├── Dockerfile.api             # api: esbuild bundle + production deps + migrations
-├── docker-compose.yml         # dev, api-dev, web, api, db
-├── nginx.conf                 # SPA fallback + /api/ proxy
-└── package.json
+├── src/            browser app: shell, chat rendering, agent client, SSE parser
+├── server/         Fastify API
+│   ├── routes/     health and chat endpoints
+│   ├── agent/      agent loop, conversations, tool registry, tools
+│   ├── catalog/    component catalog file and its validation
+│   ├── ports/      interfaces the app depends on
+│   └── adapters/   OpenAI and Postgres (Drizzle) implementations, migrations, seed
+├── shared/         types used by both the browser and the API
+├── docs/           this file
+├── .github/        CI workflow
+├── Dockerfile      web image (build + nginx)
+├── Dockerfile.api  API image (esbuild bundle + production dependencies)
+└── docker-compose.yml, nginx.conf, vite.config.ts, drizzle.config.ts, tsconfig*.json
 ```
 
-There is a single package (no monorepo). Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, and `pg`. Everything else (Vite, TypeScript, Tailwind, tsx, esbuild, drizzle-kit, concurrently) is a dev dependency.
+Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, `pg`, and `ajv` with `ajv-formats`. Everything else (Vite, TypeScript, Tailwind, tsx, esbuild, drizzle-kit) is a development dependency.
 
-## 5. Build and typecheck
+## 9. Build, test, and CI
 
-| Script | What it does |
+| Command | Does |
 |---|---|
-| `npm run dev` | `concurrently` runs `dev:api` and `dev:web` |
-| `npm run dev:web` | Vite dev server (`server.host: true` in [vite.config.ts](../vite.config.ts)) |
-| `npm run dev:api` | `tsx watch` on `server/index.ts`, loading `.env.local` if it exists |
-| `npm run build` | `tsc -b` then `vite build` → `dist/` |
-| `npm run build:api` | esbuild bundles `server/index.ts` → `server-dist/index.mjs` (dependencies left external) |
-| `npm run preview` | Serves `dist/` for a local smoke test |
-| `npm run typecheck` | `tsc -b --noEmit` — app, Vite config, and server projects |
-| `npm test` | Node's test runner via tsx over `server/**/*.test.ts` and `src/**/*.test.ts` |
-| `npm run db:generate` | drizzle-kit: generate a migration from `server/adapters/db/schema.ts` |
-| `npm run db:migrate` | drizzle-kit: apply migrations to `DATABASE_URL` |
-| `npm run db:studio` | drizzle-kit Studio |
+| `npm run dev` | Runs the web dev server and the API together |
+| `npm run build` / `npm run build:api` | Builds the browser app to `dist/` / bundles the API to `server-dist/` |
+| `npm run typecheck` | Type-checks the browser app, the Vite config, and the API |
+| `npm test` | Runs the test suite (Node's test runner) |
+| `npm run db:generate` / `npm run db:migrate` | Creates a migration from the schema / applies migrations to `DATABASE_URL` |
+| `npm run db:seed` | Brings the `components` table in line with the catalog file and prints the counts |
 
-Vite bundles ESM from `src/main.ts`. Both Vite and the server resolve `shared/*` to [shared/](../shared/). Tests use fakes for the LLM and need no API key; the repository tests run only when `DATABASE_URL` is set (they apply migrations first) and are skipped otherwise.
+- **Tests** use a fake model, so they need no OpenAI key. Database tests run only when `DATABASE_URL` is set; they share one database, so `npm test` runs test files one at a time.
+- **CI** ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs on every pull request and on pushes to `main`: it starts Postgres, then runs install, typecheck, tests (including the database tests), and both builds on Node 24. `main` accepts changes only through pull requests that pass it.
 
-**CI.** [.github/workflows/ci.yml](../.github/workflows/ci.yml) runs on every pull request and on pushes to `main`. Its `checks` job starts a Postgres 17 service, sets `DATABASE_URL` so the repository tests run, then runs `npm ci`, `typecheck`, `test`, `build`, and `build:api` on Node 24.
+## 10. Current limits and what's next
 
-## 6. Docker
+**Today**
 
-**Dockerfile** (web, two stages):
+- The agent's only tools look up components (`list_components`, `get_component`); it cannot render or change anything yet.
+- Conversations are lost when the API restarts.
+- The sandbox and session menu are placeholders.
+- The `components` table is not exposed over HTTP.
+- There is no authentication.
 
-1. **build** — `node:24-alpine`, `npm ci`, `npm run build`.
-2. **runtime** — `nginx:1.27-alpine`, copies `dist/` and [nginx.conf](../nginx.conf).
+**Planned**
 
-**Dockerfile.api** (API, two stages):
-
-1. **build** — `node:24-alpine`, `npm ci`, `npm run build:api`.
-2. **runtime** — `node:24-alpine`, `npm ci --omit=dev`, then `server-dist/` and `server/adapters/db/migrations/` at the same relative paths under `/app`. `NODE_ENV=production`, `API_HOST=0.0.0.0`, `API_PORT=3001`; runs `node server-dist/index.mjs` as the `node` user. No TypeScript sources or dev dependencies are in the image.
-
-[nginx.conf](../nginx.conf) proxies `/api/` to `http://api:3001` with buffering and caching off and a 300 s read timeout, so SSE events reach the browser as they are written. Everything else uses `try_files` so client-side routes fall back to `index.html`.
-
-**docker-compose.yml**:
-
-- **dev** — Node 24, repo mounted, runs `npm run dev:web -- --host 0.0.0.0 --port 5173` with `API_PROXY_TARGET=http://api-dev:3001`. Port **5173**. Starts once `api-dev` is healthy.
-- **api-dev** — Node 24, repo mounted, runs `npm ci && npm run dev:api` with `API_HOST=0.0.0.0` and `DATABASE_URL` pointing at `db`. `OPENAI_API_KEY` and `AGENT_MODEL` come from the shell environment. Port **3001**. Starts once `db` is healthy; it is healthy when `/api/health` answers.
-- **web** — builds `Dockerfile`, publishes container port 80 as **8080**. Starts after `api`.
-- **api** — builds `Dockerfile.api`, `DATABASE_URL` pointing at `db`, OpenAI variables from the shell environment. No published port (reached through nginx). Starts once `db` is healthy and migrates it on start.
-- **db** — `postgres:17-alpine`, user/password/database `genui`, data in the `pgdata` volume, `pg_isready` healthcheck. Publishes host port **5432**.
-
-`dev` and `api-dev` share a `dev_node_modules` volume mounted over `/app/node_modules`, so the containers' Linux dependencies never overwrite the host's `node_modules`. Only `api-dev` runs `npm ci`; `dev` waits for it to be healthy, so the two never race on the install.
-
-If host port 5432 (or 8080, 5173, 3001) is already taken, change the host side of that service's `ports` mapping (for example `"5433:5432"`), ideally in an uncommitted `docker-compose.override.yml` (write `ports: !override` there; Compose otherwise appends to the list). Containers reach Postgres as `db:5432` regardless; only host tools need `DATABASE_URL` pointed at the new port: `.env.local` for `npm run dev:api`, the shell environment for `npm run db:migrate` (drizzle-kit does not read `.env.local`).
-
-[.dockerignore](../.dockerignore) keeps `node_modules`, `dist`, `server-dist`, `.git`, Markdown, and `*.local` files (such as `.env.local`) out of the build context.
+- Rendering components in the sandbox, and tools that use them.

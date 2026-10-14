@@ -58,6 +58,7 @@ export const agentRouter: FastifyPluginAsync<AgentRouterOptions> = async (app, o
         emit,
         signal: controller.signal,
         tools: opts.tools,
+        log: req.log,
         resume: Boolean(resume),
       };
       await runAgent(message.trim(), conversationId, run, opts.llm);
