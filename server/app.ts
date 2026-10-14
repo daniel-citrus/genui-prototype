@@ -1,4 +1,5 @@
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
+import type { RedisHandle } from "./adapters/redis/client";
 import type { ToolRegistry } from "./agent/tools";
 import type { AgentLlm } from "./ports/AgentLlm";
 import { registerRateLimit, type ChatRateLimitOptions } from "./rateLimit";
@@ -14,6 +15,8 @@ export interface AppDeps {
   /** Number of proxy hops to trust for the client IP; default false. */
   trustProxy?: number | false;
   rateLimit: ChatRateLimitOptions;
+  /** Shared rate-limit store; closed with the app. Omit to count in memory. */
+  redis?: RedisHandle;
 }
 
 /**
@@ -61,9 +64,15 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     });
   });
 
-  await registerRateLimit(app, deps.rateLimit);
+  const redis = deps.redis;
+  if (redis) app.addHook("onClose", () => redis.close());
+  await registerRateLimit(app, { ...deps.rateLimit, redis: redis?.client });
 
-  app.register(healthRouter, { prefix: "/api/health", pingDb: deps.pingDb });
+  app.register(healthRouter, {
+    prefix: "/api/health",
+    pingDb: deps.pingDb,
+    pingRedis: redis?.ping,
+  });
   app.register(agentRouter, { prefix: "/api/agent", llm: deps.llm, tools: deps.tools });
 
   return app;
