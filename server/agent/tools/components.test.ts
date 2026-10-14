@@ -11,6 +11,7 @@ function recordingLogger(): ToolLogger & { errors: object[] } {
   const errors: object[] = [];
   return {
     errors,
+    info() {},
     debug() {},
     error(obj) {
       errors.push(obj);

@@ -14,6 +14,7 @@ function recordingLogger(): ToolLogger & { entries: LogEntry[] } {
   const entries: LogEntry[] = [];
   return {
     entries,
+    info() {},
     debug(obj, msg) {
       entries.push({ level: "debug", obj: obj as Record<string, unknown>, msg });
     },

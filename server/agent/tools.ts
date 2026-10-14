@@ -12,6 +12,7 @@ export interface ToolSpec {
 
 /** The subset of a pino/Fastify logger tools use. `req.log` satisfies it. */
 export interface ToolLogger {
+  info(obj: object, msg?: string): void;
   debug(obj: object, msg?: string): void;
   error(obj: object, msg?: string): void;
 }
