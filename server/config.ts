@@ -3,6 +3,8 @@
  * only file that reads secrets. Every value has a default except OPENAI_API_KEY.
  */
 
+import { DEFAULT_MAX_OUTPUT_TOKENS } from "./agent/guardrails";
+
 const env = process.env;
 
 function port(value: string | undefined, fallback: number): number {
@@ -16,6 +18,7 @@ export const config = {
   openai: {
     apiKey: (env.OPENAI_API_KEY ?? "").trim(),
     model: env.AGENT_MODEL || "gpt-4.1",
+    maxOutputTokens: port(env.AGENT_MAX_OUTPUT_TOKENS, DEFAULT_MAX_OUTPUT_TOKENS),
   },
   databaseUrl: env.DATABASE_URL || "postgres://genui:genui@localhost:5432/genui",
   logLevel: env.LOG_LEVEL || "info",
