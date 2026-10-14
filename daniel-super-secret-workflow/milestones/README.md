@@ -18,4 +18,5 @@ One markdown file per named chunk of work that already shipped.
 - [ui-tree-render-tool](ui-tree-render-tool.md)
 - [turn-limits](turn-limits.md)
 
+- [system-prompt-rewrite](system-prompt-rewrite.md)
 - [sandbox-renderer](sandbox-renderer.md)
