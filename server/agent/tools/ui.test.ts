@@ -13,7 +13,7 @@ function setup(components: ComponentRepository = new InMemoryComponentRepository
   const errors: object[] = [];
   const ctx: ToolContext = {
     signal: new AbortController().signal,
-    log: { debug() {}, error: (obj) => void errors.push(obj) },
+    log: { info() {}, debug() {}, error: (obj) => void errors.push(obj) },
     showUi: (tree) => void shown.push(tree),
   };
   return { registry: createToolRegistry(createAgentTools({ components })), ctx, shown, errors };

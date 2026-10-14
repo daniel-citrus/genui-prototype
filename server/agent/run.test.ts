@@ -13,7 +13,7 @@ function makeRun(): { run: AgentRun; events: AgentEvent[] } {
     emit: (event) => void events.push(event),
     signal: new AbortController().signal,
     tools: createToolRegistry(createAgentTools({ components: new InMemoryComponentRepository(catalog) })),
-    log: { debug() {}, error() {} },
+    log: { info() {}, debug() {}, error() {} },
   };
   return { run, events };
 }
