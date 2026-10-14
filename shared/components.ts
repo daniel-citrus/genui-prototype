@@ -1,30 +1,29 @@
-/** A generated UI component as stored by the API and shown in the sandbox. */
+/** The predefined UI components the agent can use, as stored in the catalog. */
 
-/** The component's renderable description; its shape is owned by the renderer. */
-export type ComponentSpec = Record<string, unknown>;
+export type ComponentCategory = "layout" | "text" | "input" | "display";
+export type ComponentChildren = "none" | "any";
 
 /** JSON Schema for the props a component accepts. */
 export interface PropsSchema {
   type: "object";
   properties: Record<string, unknown>;
   required?: string[];
+  additionalProperties: false;
 }
 
-export interface Component {
+/** One catalog entry, as written in the catalog file. */
+export interface CatalogComponent {
+  name: string;
+  description: string;
+  category: ComponentCategory;
+  children: ComponentChildren;
+  propsSchema: PropsSchema;
+  exampleProps: Record<string, unknown>;
+}
+
+/** A catalog entry as stored. */
+export interface Component extends CatalogComponent {
   id: string;
-  name: string;
-  spec: ComponentSpec;
-  propsSchema: PropsSchema;
-  /** ISO timestamp. */
-  createdAt: string;
-  /** ISO timestamp. */
-  updatedAt: string;
+  createdAt: string; // ISO timestamp
+  updatedAt: string; // ISO timestamp
 }
-
-export type NewComponent = {
-  name: string;
-  spec: ComponentSpec;
-  propsSchema: PropsSchema;
-};
-
-export type ComponentPatch = Partial<NewComponent>;

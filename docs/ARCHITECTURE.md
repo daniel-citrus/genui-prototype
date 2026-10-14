@@ -88,7 +88,7 @@ flowchart LR
 |---|---|
 | **Routes** ([server/routes/](../server/routes/)) | `GET /api/health` returns `{ ok, db, agent }`: whether Postgres answers and whether an OpenAI key is set. `POST /api/agent/chat` runs one agent turn and streams it back as SSE |
 | **Agent** ([server/agent/](../server/agent/)) | The tool-use loop (§4), the in-memory conversation store, and the tool registry |
-| **Ports** ([server/ports/](../server/ports/)) | `AgentLlm`: run one model turn with streaming. `ComponentRepository`: read and write components |
+| **Ports** ([server/ports/](../server/ports/)) | `AgentLlm`: run one model turn with streaming. `ComponentRepository`: read the component catalog |
 | **Adapters** ([server/adapters/](../server/adapters/)) | `openai/`: streaming Chat Completions. `db/`: Drizzle client, schema, migrations, and the repository |
 | **Config** ([server/config.ts](../server/config.ts)) | The only place the API reads environment variables (§7) |
 
@@ -135,7 +135,7 @@ sequenceDiagram
 | Conversation history | API memory | Until the API restarts. At most 500 conversations; the least recently used is dropped first |
 | UI components | Postgres, `components` table | Durable. Schema changes only through committed Drizzle migrations |
 
-**`components` table:** `id`, `name` (unique), `spec` (JSON), `props_schema` (JSON Schema), and timestamps. The API has a repository for it, but no route or agent tool uses it yet. A planned next step turns it into a catalog of predefined components (§10).
+**`components` table:** a catalog of predefined UI components. Columns: `id`, `name` (unique), `description`, `category` (check: `layout`, `text`, `input`, or `display`), `children` (check: `none` or `any`), `props_schema` (JSON Schema), `example_props` (JSON), and timestamps. Rendering lives in browser code keyed by `name`, so no render spec is stored. The API's `ComponentRepository` is read-only (`list`, `get`, `getByName`); rows will be written only by a seed script. No route or agent tool uses it yet (§10).
 
 ## 6. Environments
 
