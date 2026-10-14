@@ -23,7 +23,7 @@ Related: [README](../README.md)
 flowchart LR
   subgraph Browser
     Chat["Chat pane"]
-    Sandbox["Sandbox pane<br/>(placeholder)"]
+    Sandbox["Sandbox pane<br/>(draws ui events)"]
     Client["Agent client<br/>fetch + SSE reader"]
     Chat --> Client
   end
@@ -70,7 +70,7 @@ flowchart LR
 │ [ session ▾ ]  (empty)       │                              │
 ├──────────────────────────────┤                              │
 │  agent chat thread           │  sandbox panel               │
-│  (user + streamed agent      │  (placeholder)               │
+│  (user + streamed agent      │  (latest rendered design)    │
 │   bubbles, notices, errors)  │                              │
 ├──────────────────────────────┤                              │
 │ [ Message the agent…     ]   │                              │
@@ -80,8 +80,9 @@ flowchart LR
 
 - **Chat pane:** each message opens an agent bubble that fills in as text streams back. Tool calls, notices, and errors render as small lines in the thread. While a reply streams, **Send** becomes **Stop**, which aborts the request; the API sees the connection close and stops the turn.
 - **Conversation identity:** one conversation per page load (a random id). Reloading starts a new one.
-- **Sandbox pane and session menu:** placeholders for now.
-- **Stack:** plain TypeScript and DOM APIs, no UI framework; styling with Tailwind. Code is in [src/](../src/): the shell and chat rendering, the agent client, and an SSE parser.
+- **Sandbox pane:** shows "Designs you ask for appear here." until a `ui` event arrives, then draws that tree; a newer `ui` event replaces it and nothing is saved. The renderer is in [src/sandbox/](../src/sandbox/): `components.ts` has one function per catalog component (a map typed by `RENDERED_COMPONENTS`, so a missing one fails typecheck), and `render.ts` walks the tree. Tree text goes in only through `textContent` or named attributes, never as HTML; image URLs are re-checked for http(s); a component the browser has no function for draws as a dashed "Unknown component" box. The drawn UI is live but inert: inputs, checkboxes and selects work, buttons do nothing, and nothing is sent anywhere. `src/sandbox/componentNames.test.ts` fails if the catalog and `RENDERED_COMPONENTS` differ.
+- **Session menu:** a placeholder for now.
+- **Stack:** plain TypeScript and DOM APIs, no UI framework; styling with Tailwind. Code is in [src/](../src/): the shell and chat rendering, the agent client, an SSE parser, and the sandbox renderer.
 
 ## 3. API
 
@@ -130,7 +131,7 @@ sequenceDiagram
 - The system prompt lives in [server/agent/systemPrompt.ts](../server/agent/systemPrompt.ts). The OpenAI adapter adds it on each call, so it is never stored in history. It tells the agent what it can and cannot do and gives it a procedure: list components once, read only the ones it uses, build one tree, call `render_ui` and fix reported problems, then reply briefly. It names the tools but not the catalog's contents, and a test fails if the prompt and the registered tools drift apart.
 - The registry checks each call's arguments against the tool's schema before running it. An unknown tool, invalid arguments, or a tool that throws (Postgres down, for example) comes back as an `ok: false` result the model can read; failures are logged.
 - SSE event types: `text`, `tool_call`, `tool_result`, `ui`, `notice`, `done`, `error` (defined in [shared/api.ts](../shared/api.ts)).
-- **UI trees.** The agent describes a UI as a tree of catalog components, `{ component, props?, children? }` ([shared/ui.ts](../shared/ui.ts)). `render_ui` runs `validateUiTree` ([server/ui/validateTree.ts](../server/ui/validateTree.ts)) over the whole tree and reports every problem at once (at most 20): malformed nodes, components not in the catalog, props that break the component's `propsSchema`, children on components that take none, and more than 8 levels or 100 nodes. If any are found, nothing is shown and the model gets the errors to fix. If none, the tool hands the tree to the browser through `ToolContext.showUi`, which the run emits as a `ui` event just before the tool result. Tools have no other way to emit events. Per-component props validators are compiled once per `updatedAt` and cached.
+- **UI trees.** The agent describes a UI as a tree of catalog components, `{ component, props?, children? }` ([shared/ui.ts](../shared/ui.ts)). `render_ui` runs `validateUiTree` ([server/ui/validateTree.ts](../server/ui/validateTree.ts)) over the whole tree and reports every problem at once (at most 20): malformed nodes, components not in the catalog, props that break the component's `propsSchema`, children on components that take none, and more than 8 levels or 100 nodes. If any are found, nothing is shown and the model gets the errors to fix. If none, the tool hands the tree to the browser through `ToolContext.showUi`, which the run emits as a `ui` event just before the tool result; the browser draws it in the sandbox (§2). Tools have no other way to emit events. Per-component props validators are compiled once per `updatedAt` and cached.
 - If the API has forgotten a conversation the browser is continuing (after a restart, for example), the agent sends a `notice` saying so and answers the message on its own.
 
 ## 5. Data
@@ -223,12 +224,12 @@ Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, `pg`, an
 **Today**
 
 - Each turn is capped at 10 model calls, 20 tool calls and 150,000 tokens; there are no limits yet on message size or request rate.
-- The agent can look up components and render UI trees (`render_ui`), but the browser does not draw `ui` events until the sandbox renderer lands; the sandbox is still a placeholder.
+- The agent can look up components and render UI trees (`render_ui`), and the sandbox draws the latest one, but the drawn UI is inert: nothing typed or clicked in it reaches the agent.
 - Conversations are lost when the API restarts.
-- The sandbox and session menu are placeholders.
+- The session menu is a placeholder.
 - The `components` table is not exposed over HTTP.
 - There is no authentication.
 
 **Planned**
 
-- Rendering components in the sandbox, and tools that use them.
+- Tools that use the rendered components.
