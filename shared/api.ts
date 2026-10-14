@@ -3,6 +3,8 @@
  * API's agent route are the two ends of this.
  */
 
+import type { UiNode } from "./ui";
+
 export interface ToolCall {
   id: string;
   name: string;
@@ -37,6 +39,7 @@ export type AgentEvent =
   | { type: "text"; text: string }
   | { type: "tool_call"; call: ToolCall }
   | { type: "tool_result"; call: ToolCall; result: ToolResult }
+  | { type: "ui"; tree: UiNode }
   | { type: "notice"; message: string }
   | { type: "done" }
   | { type: "error"; message: string };

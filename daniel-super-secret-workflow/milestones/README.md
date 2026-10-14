@@ -15,4 +15,5 @@ One markdown file per named chunk of work that already shipped.
 
 - [component-tools](component-tools.md)
 
+- [ui-tree-render-tool](ui-tree-render-tool.md)
 - [turn-limits](turn-limits.md)

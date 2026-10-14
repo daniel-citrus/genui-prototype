@@ -26,7 +26,7 @@ function recordingLogger(): ToolLogger & { entries: LogEntry[] } {
 
 function makeCtx(signal = new AbortController().signal) {
   const log = recordingLogger();
-  const ctx: ToolContext = { signal, log };
+  const ctx: ToolContext = { signal, log, showUi() {} };
   return { ctx, log };
 }
 
