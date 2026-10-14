@@ -1,11 +1,13 @@
 import type { AgentEvent, ToolCall } from "shared/api";
-import type { ToolRegistry } from "./tools";
+import type { ToolLogger, ToolRegistry } from "./tools";
 
 /** Everything a turn needs, wired up by the `/api/agent/chat` route. */
 export interface AgentRun {
   emit(event: AgentEvent): void;
   signal: AbortSignal;
   tools: ToolRegistry;
+  /** The request's logger, handed to tools. */
+  log: ToolLogger;
   /** The chat already shows earlier messages of this conversation. */
   resume?: boolean;
 }
@@ -37,7 +39,10 @@ export async function handleToolCall(
     };
   }
 
-  const result = await run.tools.run(call.name, call.args);
+  const result = await run.tools.run(call.name, call.args, {
+    signal: run.signal,
+    log: run.log,
+  });
   run.emit({ type: "tool_result", call, result });
   return {
     content: JSON.stringify({ summary: result.summary, data: result.data }),
