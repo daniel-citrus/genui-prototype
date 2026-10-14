@@ -3,6 +3,7 @@ import { createDb } from "./adapters/db/client";
 import { DrizzleComponentRepository } from "./adapters/db/DrizzleComponentRepository";
 import { runMigrations } from "./adapters/db/migrate";
 import { seedComponents } from "./adapters/db/seed";
+import { createRedis } from "./adapters/redis/client";
 import { createOpenAILlm } from "./adapters/openai/OpenAILlm";
 import { SYSTEM_PROMPT } from "./agent/systemPrompt";
 import { catalog } from "./catalog/components";
@@ -42,6 +43,16 @@ const llm = agentAvailable
 // Without Postgres the API still starts; each tool call then fails on its own.
 const tools = createToolRegistry(createAgentTools({ components }));
 
+// Redis only backs the rate limit; the API starts and serves while it is down.
+// Its logger forwards to the app's, which exists once buildApp returns.
+let appLog: { warn(msg: string): void; info(msg: string): void } | undefined;
+const redis = config.redisUrl
+  ? createRedis(config.redisUrl, {
+      warn: (msg) => appLog?.warn(msg),
+      info: (msg) => appLog?.info(msg),
+    })
+  : undefined;
+
 const app = await buildApp({
   logLevel: config.logLevel,
   llm,
@@ -49,7 +60,9 @@ const app = await buildApp({
   pingDb: database.ping,
   trustProxy: config.trustProxy,
   rateLimit: { max: config.rateLimitPerMinute },
+  redis,
 });
+appLog = app.log;
 app.decorate("components", components);
 app.addHook("onClose", async () => {
   await database.close();

@@ -27,6 +27,7 @@ export const config = {
     maxOutputTokens: port(env.AGENT_MAX_OUTPUT_TOKENS, DEFAULT_MAX_OUTPUT_TOKENS),
   },
   databaseUrl: env.DATABASE_URL || "postgres://genui:genui@localhost:5432/genui",
+  redisUrl: env.REDIS_URL || undefined,
   rateLimitPerMinute: port(env.AGENT_RATE_LIMIT_PER_MINUTE, 20),
   trustProxy: parseTrustProxy(env.TRUST_PROXY),
   logLevel: env.LOG_LEVEL || "info",
