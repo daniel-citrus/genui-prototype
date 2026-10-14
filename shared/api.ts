@@ -19,6 +19,9 @@ export interface ToolResult {
   data?: unknown;
 }
 
+/** Longest chat message, in UTF-16 code units (the unit of a textarea's `maxlength`). */
+export const MAX_MESSAGE_CHARS = 4000;
+
 /** `POST /api/agent/chat` request body. */
 export interface AgentChatRequest {
   /** Client-generated; the server keeps that conversation's history. */

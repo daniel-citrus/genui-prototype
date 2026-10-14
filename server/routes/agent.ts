@@ -1,9 +1,12 @@
 import type { FastifyPluginAsync } from "fastify";
-import type { AgentChatRequest, AgentEvent } from "shared/api";
+import { MAX_MESSAGE_CHARS, type AgentChatRequest, type AgentEvent } from "shared/api";
 import type { AgentLlm } from "../ports/AgentLlm";
 import type { ToolRegistry } from "../agent/tools";
 import { runAgent } from "../agent/loop";
 import type { AgentRun } from "../agent/run";
+
+/** Chat bodies are a short message plus ids; 4,000 four-byte characters is about 16 KB of JSON. */
+const CHAT_BODY_LIMIT_BYTES = 32 * 1024;
 
 export interface AgentRouterOptions {
   /** The model behind the agent. Without it, `/chat` reports it isn't configured. */
@@ -13,7 +16,7 @@ export interface AgentRouterOptions {
 
 export const agentRouter: FastifyPluginAsync<AgentRouterOptions> = async (app, opts) => {
   /** Stream a turn. SSE: one JSON `AgentEvent` per `data:` line. */
-  app.post<{ Body: AgentChatRequest }>("/chat", { config: { rateLimit: {} } }, async (req, reply) => {
+  app.post<{ Body: AgentChatRequest }>("/chat", { bodyLimit: CHAT_BODY_LIMIT_BYTES, config: { rateLimit: {} } }, async (req, reply) => {
     const { conversationId, message, resume } = req.body ?? {};
     if (
       typeof conversationId !== "string" ||
@@ -24,6 +27,13 @@ export const agentRouter: FastifyPluginAsync<AgentRouterOptions> = async (app, o
       return reply
         .status(400)
         .send({ error: { message: "conversationId and message are required" } });
+    }
+
+    const text = message.trim();
+    if (text.length > MAX_MESSAGE_CHARS) {
+      return reply.status(400).send({
+        error: { message: `Message is too long (max ${MAX_MESSAGE_CHARS} characters).` },
+      });
     }
 
     reply.hijack();
@@ -61,7 +71,7 @@ export const agentRouter: FastifyPluginAsync<AgentRouterOptions> = async (app, o
         log: req.log,
         resume: Boolean(resume),
       };
-      await runAgent(message.trim(), conversationId, run, opts.llm);
+      await runAgent(text, conversationId, run, opts.llm);
       emit({ type: "done" });
     } catch (err) {
       if (!controller.signal.aborted) {
