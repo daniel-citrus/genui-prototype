@@ -5,7 +5,9 @@ import type { AgentLlm, HistoryMessage, LlmTurn } from "../ports/AgentLlm";
 import { getHistory, resetConversation } from "./conversations";
 import { FORGOTTEN_NOTICE, MAX_STEPS, runAgent } from "./loop";
 import type { AgentRun } from "./run";
-import type { ToolRegistry, ToolSpec } from "./tools";
+import type { ToolContext, ToolLogger, ToolRegistry, ToolSpec } from "./tools";
+
+const noopLogger: ToolLogger = { debug() {}, error() {} };
 
 const specs: ToolSpec[] = [
   {
@@ -33,13 +35,19 @@ function scriptedLlm(turns: LlmTurn[]): ScriptedLlm {
   };
 }
 
-function stubTools(): ToolRegistry & { ran: Array<{ name: string; args: Record<string, unknown> }> } {
+function stubTools(): ToolRegistry & {
+  ran: Array<{ name: string; args: Record<string, unknown> }>;
+  contexts: ToolContext[];
+} {
   const ran: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const contexts: ToolContext[] = [];
   return {
     ran,
+    contexts,
     specs,
-    async run(name, args): Promise<ToolResult> {
+    async run(name, args, ctx): Promise<ToolResult> {
       ran.push({ name, args });
+      contexts.push(ctx);
       return { ok: true, summary: `ran ${name}`, data: args };
     },
   };
@@ -56,6 +64,7 @@ function makeRun(
     },
     signal: opts.signal ?? new AbortController().signal,
     tools,
+    log: noopLogger,
     resume: opts.resume,
   };
   return { run, events };
@@ -101,6 +110,7 @@ describe("runAgent", () => {
     );
     assert.deepEqual(llm.calls[0].tools, specs);
     assert.deepEqual(tools.ran, [{ name: "list_components", args: { limit: 3 } }]);
+    assert.deepEqual(tools.contexts, [{ signal: run.signal, log: run.log }]);
 
     const call = { id: "call_1", name: "list_components", args: { limit: 3 } };
     assert.deepEqual(events, [
