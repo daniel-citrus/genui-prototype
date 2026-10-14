@@ -4,4 +4,4 @@ One markdown file per implementation plan for work that is not the system as it 
 
 **Active:**
 
-- [System prompt and agent guardrails](./agent-guardrails.md): a UI tree format and `validate_ui` tool, a rewritten system prompt, and limits on each turn and request.
+- [System prompt, guardrails, and sandbox rendering](./agent-guardrails.md): a UI tree format and a checking `render_ui` tool, a rewritten system prompt, limits on each turn, and a sandbox that draws each design.
