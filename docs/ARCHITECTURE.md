@@ -89,10 +89,11 @@ flowchart LR
 | **Routes** ([server/routes/](../server/routes/)) | `GET /api/health` returns `{ ok, db, agent }`: whether Postgres answers and whether an OpenAI key is set. `POST /api/agent/chat` runs one agent turn and streams it back as SSE |
 | **Agent** ([server/agent/](../server/agent/)) | The tool-use loop (§4), the in-memory conversation store, and the tool registry |
 | **Ports** ([server/ports/](../server/ports/)) | `AgentLlm`: run one model turn with streaming. `ComponentRepository`: read the component catalog |
-| **Adapters** ([server/adapters/](../server/adapters/)) | `openai/`: streaming Chat Completions. `db/`: Drizzle client, schema, migrations, and the repository |
+| **Adapters** ([server/adapters/](../server/adapters/)) | `openai/`: streaming Chat Completions. `db/`: Drizzle client, schema, migrations, the repository, and the catalog seed |
+| **Catalog** ([server/catalog/](../server/catalog/)) | `components.ts`: the predefined UI components, the source of truth for the `components` table. `validate.ts`: the rules every entry follows (§5) |
 | **Config** ([server/config.ts](../server/config.ts)) | The only place the API reads environment variables (§7) |
 
-**Startup.** The API builds its adapters and registers the routes. In production it first applies database migrations and exits if they fail. In development migrations are run by hand and the API starts even when Postgres is down (health then reports `db: false`). Without an OpenAI key the API still starts; health reports `agent: false` and a chat turn answers with one `error` event naming the missing key.
+**Startup.** The API builds its adapters and registers the routes. In production it first applies database migrations, then seeds the component catalog (§5), and exits with status 1 if either fails. In development both are run by hand (`npm run db:migrate`, then `npm run db:seed`) and the API starts even when Postgres is down (health then reports `db: false`). Without an OpenAI key the API still starts; health reports `agent: false` and a chat turn answers with one `error` event naming the missing key.
 
 ## 4. A chat turn, end to end
 
@@ -133,9 +134,14 @@ sequenceDiagram
 | Data | Where | Lifetime |
 |---|---|---|
 | Conversation history | API memory | Until the API restarts. At most 500 conversations; the least recently used is dropped first |
-| UI components | Postgres, `components` table | Durable. Schema changes only through committed Drizzle migrations |
+| UI components | [server/catalog/components.ts](../server/catalog/components.ts), copied to Postgres `components` table by the seed | The file is the source of truth; the table can be dropped and reseeded at any time. Schema changes only through committed Drizzle migrations |
 
-**`components` table:** a catalog of predefined UI components. Columns: `id`, `name` (unique), `description`, `category` (check: `layout`, `text`, `input`, or `display`), `children` (check: `none` or `any`), `props_schema` (JSON Schema), `example_props` (JSON), and timestamps. Rendering lives in browser code keyed by `name`, so no render spec is stored. The API's `ComponentRepository` is read-only (`list`, `get`, `getByName`); rows will be written only by a seed script. No route or agent tool uses it yet (§10).
+**`components` table:** a catalog of predefined UI components. Columns: `id`, `name` (unique), `description`, `category` (check: `layout`, `text`, `input`, or `display`), `children` (check: `none` or `any`), `props_schema` (JSON Schema), `example_props` (JSON), and timestamps. Rendering lives in browser code keyed by `name`, so no render spec is stored. The API's `ComponentRepository` is read-only (`list`, `get`, `getByName`); only the seed writes rows. No route or agent tool uses it yet (§10).
+
+**Catalog and seed.** `server/catalog/components.ts` exports the twelve basic components (`Stack`, `Card`, `Divider`, `Heading`, `Text`, `Button`, `TextInput`, `Checkbox`, `Select`, `Image`, `Badge`, `Alert`). Text content is a prop, so only `Stack` and `Card` take children. `validateCatalog` (Ajv, the shared strict instance in `server/validation/jsonSchema.ts`) checks that every name matches `^[A-Z][A-Za-z0-9]*$` and is unique, the description is non-empty, `propsSchema` is valid JSON Schema with `type: "object"`, `additionalProperties: false`, and a `description` on every property, and every `default` and `exampleProps` is valid against it. `seedComponents(db, catalog)` (`server/adapters/db/seed.ts`) validates first and, on any problem, throws listing them all and writes nothing. Otherwise, in one transaction, it inserts missing entries, updates rows whose fields differ (setting `updated_at`), deletes rows whose name left the catalog, leaves the rest untouched, and returns `{ added, updated, removed, unchanged }`. Running it twice ends in the same state.
+
+- **Development:** `npm run db:seed` after `npm run db:migrate` prints `components: N added, N updated, N removed, N unchanged`.
+- **Production:** the API seeds right after migrating on start, logs the same counts, and exits with status 1 if the seed fails. The catalog is bundled into the API, so the image needs no extra files.
 
 ## 6. Environments
 
@@ -143,7 +149,7 @@ sequenceDiagram
 |---|---|---|---|---|---|
 | Dev | `npm run dev` | Vite dev server with hot reload | `tsx watch`, reads `.env.local` | Compose `db` service | http://localhost:5173 |
 | Dev in containers | `docker compose up dev` | `dev` container | `api-dev` container | `db` container | http://localhost:5173 |
-| Production | `docker compose up web --build` | nginx serving the built app | `api` container, migrates on start | `db` container, named volume | http://localhost:8080 |
+| Production | `docker compose up web --build` | nginx serving the built app | `api` container, migrates and seeds on start | `db` container, named volume | http://localhost:8080 |
 
 ```mermaid
 flowchart LR
@@ -180,8 +186,9 @@ genui-prototype/
 ├── server/         Fastify API
 │   ├── routes/     health and chat endpoints
 │   ├── agent/      agent loop, conversations, tool registry
+│   ├── catalog/    component catalog file and its validation
 │   ├── ports/      interfaces the app depends on
-│   └── adapters/   OpenAI and Postgres (Drizzle) implementations, migrations
+│   └── adapters/   OpenAI and Postgres (Drizzle) implementations, migrations, seed
 ├── shared/         types used by both the browser and the API
 ├── docs/           this file
 ├── .github/        CI workflow
@@ -190,7 +197,7 @@ genui-prototype/
 └── docker-compose.yml, nginx.conf, vite.config.ts, drizzle.config.ts, tsconfig*.json
 ```
 
-Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, and `pg`. Everything else (Vite, TypeScript, Tailwind, tsx, esbuild, drizzle-kit) is a development dependency.
+Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, `pg`, and `ajv` with `ajv-formats`. Everything else (Vite, TypeScript, Tailwind, tsx, esbuild, drizzle-kit) is a development dependency.
 
 ## 9. Build, test, and CI
 
@@ -201,8 +208,9 @@ Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, and `pg`
 | `npm run typecheck` | Type-checks the browser app, the Vite config, and the API |
 | `npm test` | Runs the test suite (Node's test runner) |
 | `npm run db:generate` / `npm run db:migrate` | Creates a migration from the schema / applies migrations to `DATABASE_URL` |
+| `npm run db:seed` | Brings the `components` table in line with the catalog file and prints the counts |
 
-- **Tests** use a fake model, so they need no OpenAI key. Database tests run only when `DATABASE_URL` is set.
+- **Tests** use a fake model, so they need no OpenAI key. Database tests run only when `DATABASE_URL` is set; they share one database, so `npm test` runs test files one at a time.
 - **CI** ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs on every pull request and on pushes to `main`: it starts Postgres, then runs install, typecheck, tests (including the database tests), and both builds on Node 24. `main` accepts changes only through pull requests that pass it.
 
 ## 10. Current limits and what's next
@@ -217,6 +225,5 @@ Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, and `pg`
 
 **Planned**
 
-- **Component catalog:** twelve basic components stored as a catalog the agent can read, seeded from a file in the repo.
 - **Tool registry:** the agent's first tools, `list_components` and `get_component`, reading that catalog.
 - **Later:** rendering components in the sandbox and tools that use them.

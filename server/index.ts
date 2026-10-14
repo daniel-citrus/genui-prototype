@@ -3,8 +3,10 @@ import { agentAvailable, config } from "./config";
 import { createDb } from "./adapters/db/client";
 import { DrizzleComponentRepository } from "./adapters/db/DrizzleComponentRepository";
 import { runMigrations } from "./adapters/db/migrate";
+import { seedComponents } from "./adapters/db/seed";
 import { createOpenAILlm } from "./adapters/openai/OpenAILlm";
 import { SYSTEM_PROMPT } from "./agent/loop";
+import { catalog } from "./catalog/components";
 import { emptyToolRegistry } from "./agent/tools";
 import type { ComponentRepository } from "./ports/ComponentRepository";
 import { agentRouter } from "./routes/agent";
@@ -77,15 +79,27 @@ const llm = agentAvailable
 app.register(healthRouter, { prefix: "/api/health", pingDb: database.ping });
 app.register(agentRouter, { prefix: "/api/agent", llm, tools: emptyToolRegistry });
 
-// In production the schema is brought up to date on start; in development
-// migrations stay manual (`npm run db:migrate`) and the API starts without Postgres.
+// In production the schema and the component catalog are brought up to date on
+// start; in development both stay manual (`npm run db:migrate`, `npm run db:seed`)
+// and the API starts without Postgres.
 if (process.env.NODE_ENV === "production") {
+  const failStartup = async (err: unknown, what: string) => {
+    app.log.error({ err }, `${what} failed (${dbHost(config.databaseUrl)})`);
+    await database.close().catch(() => {});
+    process.exit(1);
+  };
   try {
     await runMigrations(database.db);
   } catch (err) {
-    app.log.error({ err }, `database migration failed (${dbHost(config.databaseUrl)})`);
-    await database.close().catch(() => {});
-    process.exit(1);
+    await failStartup(err, "database migration");
+  }
+  try {
+    const c = await seedComponents(database.db, catalog);
+    app.log.info(
+      `components: ${c.added} added, ${c.updated} updated, ${c.removed} removed, ${c.unchanged} unchanged`,
+    );
+  } catch (err) {
+    await failStartup(err, "component seed");
   }
 }
 

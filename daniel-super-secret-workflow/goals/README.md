@@ -4,5 +4,4 @@ One markdown file per product outcome we want that is not yet just a description
 
 **Active:**
 
-- [catalog-seed](catalog-seed.md)
 - [component-tools](component-tools.md)

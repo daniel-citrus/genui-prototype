@@ -8,3 +8,5 @@ One markdown file per named chunk of work that already shipped.
 
 - [tool-registry-core](tool-registry-core.md)
 - [catalog-schema](catalog-schema.md)
+
+- [catalog-seed](catalog-seed.md)

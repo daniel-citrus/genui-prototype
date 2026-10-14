@@ -1,93 +1,86 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, describe, it } from "node:test";
-import { inArray } from "drizzle-orm";
+import type { CatalogComponent, Component } from "shared/components";
+import { catalog } from "../../catalog/components";
 import { createDb, type DbHandle } from "./client";
 import { DrizzleComponentRepository } from "./DrizzleComponentRepository";
 import { runMigrations } from "./migrate";
 import { components, type NewComponentRow } from "./schema";
+import { seedComponents } from "./seed";
 
 const databaseUrl = process.env.DATABASE_URL;
 
+/** The catalog fields of a stored component. */
+function catalogFields(c: Component): CatalogComponent {
+  return {
+    name: c.name,
+    description: c.description,
+    category: c.category,
+    children: c.children,
+    propsSchema: c.propsSchema,
+    exampleProps: c.exampleProps,
+  };
+}
+
+const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+// Seeds the real catalog. Database test files share one database; `npm test`
+// runs files one at a time (--test-concurrency=1).
 describe(
   "DrizzleComponentRepository",
   { skip: databaseUrl ? false : "DATABASE_URL is not set" },
   () => {
     let handle: DbHandle;
     let repo: DrizzleComponentRepository;
-    const suffix = randomUUID().replaceAll("-", "");
-    const fixture = (
-      name: string,
-      category: NewComponentRow["category"],
-    ): NewComponentRow => ({
-      name: `${name}${suffix}`,
-      description: `A test component (${name}).`,
-      category,
-      children: "none",
-      propsSchema: {
-        type: "object",
-        properties: { label: { type: "string" } },
-        required: ["label"],
-        additionalProperties: false,
-      },
-      exampleProps: { label: "Hello" },
-    });
-    const fixtures = [
-      fixture("TestWidgetB", "text"),
-      fixture("TestWidgetA", "text"),
-      fixture("TestWidgetC", "display"),
-    ];
-    const names = fixtures.map((f) => f.name);
 
     before(async () => {
       handle = createDb(databaseUrl!);
       await runMigrations(handle.db);
-      await handle.db.insert(components).values(fixtures);
+      await seedComponents(handle.db, catalog);
       repo = new DrizzleComponentRepository(handle.db);
     });
 
     after(async () => {
-      await handle.db.delete(components).where(inArray(components.name, names));
       await handle.close();
     });
 
-    it("lists components ordered by category, then name", async () => {
-      const ours = (await repo.list())
-        .filter((c) => names.includes(c.name))
-        .map((c) => c.name);
-      assert.deepEqual(ours, [
-        `TestWidgetC${suffix}`,
-        `TestWidgetA${suffix}`,
-        `TestWidgetB${suffix}`,
-      ]);
+    it("lists the catalog ordered by category, then name", async () => {
+      const expected = [...catalog].sort(
+        (a, b) => compare(a.category, b.category) || compare(a.name, b.name),
+      );
+      assert.deepEqual((await repo.list()).map(catalogFields), expected);
     });
 
-    it("gets a component by id and by name", async () => {
-      const component = await repo.getByName(`TestWidgetA${suffix}`);
-      assert.ok(component);
-      assert.equal(component.description, "A test component (TestWidgetA).");
-      assert.equal(component.category, "text");
-      assert.equal(component.children, "none");
-      assert.deepEqual(component.propsSchema, fixtures[1].propsSchema);
-      assert.deepEqual(component.exampleProps, { label: "Hello" });
-      assert.equal(new Date(component.createdAt).toISOString(), component.createdAt);
-      assert.equal(new Date(component.updatedAt).toISOString(), component.updatedAt);
-
-      assert.deepEqual(await repo.get(component.id), component);
+    it("gets every component by name and by id", async () => {
+      for (const entry of catalog) {
+        const component = await repo.getByName(entry.name);
+        assert.ok(component, entry.name);
+        assert.deepEqual(catalogFields(component), entry);
+        assert.equal(new Date(component.createdAt).toISOString(), component.createdAt);
+        assert.equal(new Date(component.updatedAt).toISOString(), component.updatedAt);
+        assert.deepEqual(await repo.get(component.id), component);
+      }
     });
 
     it("treats unknown and malformed ids and unknown names as missing", async () => {
       assert.equal(await repo.get(randomUUID()), undefined);
       assert.equal(await repo.get("not-a-uuid"), undefined);
-      assert.equal(await repo.getByName(`Missing${suffix}`), undefined);
-      assert.equal(await repo.getByName(`testwidgeta${suffix}`), undefined);
+      assert.equal(await repo.getByName("Missing"), undefined);
+      assert.equal(await repo.getByName("button"), undefined);
     });
 
     it("rejects categories and children outside the allowed values", async () => {
       const insertWith = (overrides: Record<string, string>) =>
-        handle.db
-          .insert(components)
-          .values({ ...fixture(`Bad${randomUUID()}`, "text"), ...overrides } as NewComponentRow);
+        handle.db.insert(components).values({
+          name: `Bad${randomUUID().replaceAll("-", "")}`,
+          description: "A test component.",
+          category: "text",
+          children: "none",
+          propsSchema: { type: "object", properties: {}, additionalProperties: false },
+          exampleProps: {},
+          ...overrides,
+        } as NewComponentRow);
       const isCheckViolation = (err: unknown) => {
         const e = err as { code?: unknown; cause?: { code?: unknown } };
         return e.code === "23514" || e.cause?.code === "23514";
