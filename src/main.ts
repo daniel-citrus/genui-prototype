@@ -85,10 +85,20 @@ function setStreaming(streaming: boolean) {
   if (submitButton) submitButton.textContent = streaming ? "Stop" : "Send";
 }
 
-function renderEvent(event: AgentEvent, bubble: HTMLElement) {
+/** The streaming turn's latest agent bubble, if it has one. */
+interface TurnView {
+  bubble: HTMLElement | null;
+}
+
+function renderEvent(event: AgentEvent, view: TurnView) {
   switch (event.type) {
     case "text":
-      bubble.textContent += event.text;
+      // Text after a tool line or notice opens a new bubble, so the thread
+      // reads in the order things happened.
+      if (!view.bubble || view.bubble !== thread?.lastElementChild) {
+        view.bubble = appendLine(assistantTurnClass, "", "article");
+      }
+      view.bubble.textContent += event.text;
       scrollToBottom();
       break;
     case "tool_call":
@@ -120,19 +130,18 @@ async function sendTurn(message: string) {
   setStreaming(true);
 
   appendLine(userTurnClass, message, "article");
-  const bubble = appendLine(assistantTurnClass, "", "article");
+  const view: TurnView = { bubble: null };
 
   try {
     await streamChat(
       { conversationId, message },
       (event) => {
         // Text after Stop belongs to an aborted turn.
-        if (!controller.signal.aborted) renderEvent(event, bubble);
+        if (!controller.signal.aborted) renderEvent(event, view);
       },
       controller.signal,
     );
   } finally {
-    if (!bubble.textContent) bubble.remove();
     if (activeTurn === controller) {
       activeTurn = null;
       setStreaming(false);
