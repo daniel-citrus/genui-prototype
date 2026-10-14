@@ -60,4 +60,39 @@ describe("buildApp", () => {
     assert.equal(res.json().error.message, "Internal server error");
     await app.close();
   });
+
+  it("answers 413 with a JSON error for a chat body over 32 KB", async () => {
+    const app = await build();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/agent/chat",
+      payload: { conversationId: "c", message: "a".repeat(33 * 1024) },
+    });
+    assert.equal(res.statusCode, 413);
+    assert.equal(typeof res.json().error.message, "string");
+    await app.close();
+  });
+
+  it("accepts 4,000 characters of 4-byte UTF-8 under the body limit", async () => {
+    const app = await build();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/agent/chat",
+      payload: { conversationId: "c", message: "\u{1F600}".repeat(2000) },
+    });
+    assert.equal(res.statusCode, 200);
+    await app.close();
+  });
+
+  it("answers 400 with a JSON error for an over-long message", async () => {
+    const app = await build();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/agent/chat",
+      payload: { conversationId: "c", message: "a".repeat(4001) },
+    });
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.json().error.message, "Message is too long (max 4000 characters).");
+    await app.close();
+  });
 });

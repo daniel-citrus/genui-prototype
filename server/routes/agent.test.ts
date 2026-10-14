@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import Fastify from "fastify";
-import type { AgentEvent } from "shared/api";
+import { MAX_MESSAGE_CHARS, type AgentEvent } from "shared/api";
 import { emptyToolRegistry } from "../agent/tools";
 import type { AgentLlm } from "../ports/AgentLlm";
 import { agentRouter } from "./agent";
@@ -112,5 +112,46 @@ describe("POST /api/agent/chat", () => {
     await assert.rejects(response.then((r) => r.text()));
     await aborted;
     await app.close();
+  });
+
+  describe("message length", () => {
+    const send = async (message: string) => {
+      let calls = 0;
+      const llm: AgentLlm = {
+        async complete() {
+          calls++;
+          return { content: "ok", toolCalls: [] };
+        },
+      };
+      const app = buildApp(llm);
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/agent/chat",
+        payload: { conversationId: "route-length", message },
+      });
+      await app.close();
+      return { res, calls };
+    };
+
+    it("accepts exactly 4,000 characters, ignoring surrounding whitespace", async () => {
+      for (const message of ["a".repeat(MAX_MESSAGE_CHARS), `  ${"a".repeat(MAX_MESSAGE_CHARS)}  `]) {
+        const { res, calls } = await send(message);
+        assert.equal(res.statusCode, 200);
+        assert.equal(calls, 1);
+      }
+    });
+
+    it("accepts 2,000 emoji (4,000 UTF-16 units)", async () => {
+      const { res, calls } = await send("\u{1F600}".repeat(2000));
+      assert.equal(res.statusCode, 200);
+      assert.equal(calls, 1);
+    });
+
+    it("rejects 4,001 characters with a 400 and never calls the llm", async () => {
+      const { res, calls } = await send("a".repeat(MAX_MESSAGE_CHARS + 1));
+      assert.equal(res.statusCode, 400);
+      assert.equal(res.json().error.message, "Message is too long (max 4000 characters).");
+      assert.equal(calls, 0);
+    });
   });
 });

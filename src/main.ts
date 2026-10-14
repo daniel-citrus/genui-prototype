@@ -1,5 +1,5 @@
 import "./style.css";
-import type { AgentEvent } from "shared/api";
+import { MAX_MESSAGE_CHARS, type AgentEvent } from "shared/api";
 import { streamChat } from "./agentClient";
 import { renderEmpty, renderUi } from "./sandbox/render";
 
@@ -38,6 +38,7 @@ app.innerHTML = `
         <textarea
           name="message"
           rows="3"
+          maxlength="${MAX_MESSAGE_CHARS}"
           placeholder="Message the agent…"
           aria-label="Message"
           class="mb-2 w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm outline-none placeholder:text-zinc-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
