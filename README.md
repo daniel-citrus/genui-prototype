@@ -24,10 +24,11 @@ Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
    docker compose up -d db
    ```
 
-4. Apply the migrations:
+4. Apply the migrations, then seed the component catalog:
 
    ```bash
    npm run db:migrate
+   npm run db:seed
    ```
 
 5. Start the API (port 3001) and the web app (port 5173) together:
@@ -40,17 +41,18 @@ Open http://localhost:5173. `curl -s localhost:5173/api/health` should show `{"o
 
 `npm run dev:web` and `npm run dev:api` start either half alone.
 
-**Port 5432 taken?** The `db` service publishes host port 5432. If another Postgres already holds it, map a different host port (e.g. `"5433:5432"`) in an uncommitted `docker-compose.override.yml` using `ports: !override`, set `DATABASE_URL=postgres://genui:genui@localhost:5433/genui` in `.env.local`, and run `DATABASE_URL=postgres://genui:genui@localhost:5433/genui npm run db:migrate` (drizzle-kit does not read `.env.local`).
+**Port 5432 taken?** The `db` service publishes host port 5432. If another Postgres already holds it, map a different host port (e.g. `"5433:5432"`) in an uncommitted `docker-compose.override.yml` using `ports: !override`, set `DATABASE_URL=postgres://genui:genui@localhost:5433/genui` in `.env.local`, and run `DATABASE_URL=postgres://genui:genui@localhost:5433/genui npm run db:migrate` (drizzle-kit does not read `.env.local`; `npm run db:seed` does).
 
 ### Other scripts
 
 ```bash
-npm test              # unit tests (repository tests run only when DATABASE_URL is set)
+npm test              # unit tests (database tests run only when DATABASE_URL is set)
 npm run typecheck     # app, Vite config, and server
 npm run build         # web bundle → dist/
 npm run build:api     # API bundle → server-dist/index.mjs
 npm run preview       # serve dist/ on :4173
 npm run db:generate   # new migration after editing server/adapters/db/schema.ts
+npm run db:seed       # sync the components table with server/catalog/components.ts
 npm run db:studio     # browse the database
 ```
 
@@ -68,7 +70,7 @@ export OPENAI_API_KEY=sk-...
 docker compose up dev
 ```
 
-This brings up `db`, `api-dev` (port 3001), and `dev` (port 5173). Open http://localhost:5173. The development API does not migrate on start: run `npm run db:migrate` against the Compose database once (or start the production flow once, which migrates it).
+This brings up `db`, `api-dev` (port 3001), and `dev` (port 5173). Open http://localhost:5173. The development API does not migrate or seed on start: run `npm run db:migrate && npm run db:seed` against the Compose database once from the host (or start the production flow once, which does both).
 
 **Production** (API image + nginx):
 
@@ -76,7 +78,7 @@ This brings up `db`, `api-dev` (port 3001), and `dev` (port 5173). Open http://l
 docker compose up web --build
 ```
 
-This brings up `db`, `api` (migrates the database on start), and `web`. Open http://localhost:8080; nginx serves the app and proxies `/api/` to the API without buffering, so replies stream.
+This brings up `db`, `api` (migrates the database and seeds the component catalog on start), and `web`. Open http://localhost:8080; nginx serves the app and proxies `/api/` to the API without buffering, so replies stream.
 
 Or build the images directly:
 

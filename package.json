@@ -13,9 +13,10 @@
     "build:api": "esbuild server/index.ts --bundle --platform=node --format=esm --packages=external --tsconfig=tsconfig.server.json --outfile=server-dist/index.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
-    "test": "tsx --tsconfig ./tsconfig.server.json --test \"server/**/*.test.ts\" \"src/**/*.test.ts\"",
+    "test": "tsx --tsconfig ./tsconfig.server.json --test --test-concurrency=1 \"server/**/*.test.ts\" \"src/**/*.test.ts\"",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:seed": "tsx --tsconfig ./tsconfig.server.json --env-file-if-exists=.env.local server/adapters/db/seedCli.ts",
     "db:studio": "drizzle-kit studio"
   },
   "devDependencies": {
