@@ -5,7 +5,7 @@ import { DrizzleComponentRepository } from "./adapters/db/DrizzleComponentReposi
 import { runMigrations } from "./adapters/db/migrate";
 import { seedComponents } from "./adapters/db/seed";
 import { createOpenAILlm } from "./adapters/openai/OpenAILlm";
-import { SYSTEM_PROMPT } from "./agent/loop";
+import { SYSTEM_PROMPT } from "./agent/systemPrompt";
 import { catalog } from "./catalog/components";
 import { createToolRegistry } from "./agent/registry";
 import { createAgentTools } from "./agent/tools/index";
@@ -73,6 +73,7 @@ const llm = agentAvailable
   ? createOpenAILlm({
       apiKey: config.openai.apiKey,
       model: config.openai.model,
+      maxOutputTokens: config.openai.maxOutputTokens,
       systemPrompt: SYSTEM_PROMPT,
     })
   : undefined;

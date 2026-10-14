@@ -11,6 +11,7 @@ function recordingLogger(): ToolLogger & { errors: object[] } {
   const errors: object[] = [];
   return {
     errors,
+    info() {},
     debug() {},
     error(obj) {
       errors.push(obj);
@@ -20,7 +21,7 @@ function recordingLogger(): ToolLogger & { errors: object[] } {
 
 function setup(components: ComponentRepository = new InMemoryComponentRepository(catalog)) {
   const log = recordingLogger();
-  const ctx: ToolContext = { signal: new AbortController().signal, log };
+  const ctx: ToolContext = { signal: new AbortController().signal, log, showUi() {} };
   const registry = createToolRegistry(createAgentTools({ components }));
   return { registry, ctx, log };
 }
@@ -33,11 +34,11 @@ const allNames = [...catalog]
   .map((c) => c.name);
 
 describe("component tools", () => {
-  it("registers list_components and get_component", () => {
+  it("registers list_components, get_component and render_ui", () => {
     const { registry } = setup();
     assert.deepEqual(
       registry.specs.map((s) => s.name),
-      ["list_components", "get_component"],
+      ["list_components", "get_component", "render_ui"],
     );
   });
 

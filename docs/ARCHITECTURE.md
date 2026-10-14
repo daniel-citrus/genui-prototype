@@ -23,7 +23,7 @@ Related: [README](../README.md)
 flowchart LR
   subgraph Browser
     Chat["Chat pane"]
-    Sandbox["Sandbox pane<br/>(placeholder)"]
+    Sandbox["Sandbox pane<br/>(draws ui events)"]
     Client["Agent client<br/>fetch + SSE reader"]
     Chat --> Client
   end
@@ -34,7 +34,7 @@ flowchart LR
     Routes["HTTP routes<br/>GET /api/health<br/>POST /api/agent/chat"]
     Loop["Agent loop"]
     Convos["Conversations<br/>(in memory)"]
-    Tools["Tool registry<br/>list_components, get_component"]
+    Tools["Tool registry<br/>list_components, get_component, render_ui"]
     LlmPort["AgentLlm port"]
     RepoPort["ComponentRepository port"]
     OpenAIAdapter["OpenAI adapter"]
@@ -70,7 +70,7 @@ flowchart LR
 │ [ session ▾ ]  (empty)       │                              │
 ├──────────────────────────────┤                              │
 │  agent chat thread           │  sandbox panel               │
-│  (user + streamed agent      │  (placeholder)               │
+│  (user + streamed agent      │  (latest rendered design)    │
 │   bubbles, notices, errors)  │                              │
 ├──────────────────────────────┤                              │
 │ [ Message the agent…     ]   │                              │
@@ -80,15 +80,16 @@ flowchart LR
 
 - **Chat pane:** each message opens an agent bubble that fills in as text streams back. Tool calls, notices, and errors render as small lines in the thread. While a reply streams, **Send** becomes **Stop**, which aborts the request; the API sees the connection close and stops the turn.
 - **Conversation identity:** one conversation per page load (a random id). Reloading starts a new one.
-- **Sandbox pane and session menu:** placeholders for now.
-- **Stack:** plain TypeScript and DOM APIs, no UI framework; styling with Tailwind. Code is in [src/](../src/): the shell and chat rendering, the agent client, and an SSE parser.
+- **Sandbox pane:** shows "Designs you ask for appear here." until a `ui` event arrives, then draws that tree; a newer `ui` event replaces it and nothing is saved. The renderer is in [src/sandbox/](../src/sandbox/): `components.ts` has one function per catalog component (a map typed by `RENDERED_COMPONENTS`, so a missing one fails typecheck), and `render.ts` walks the tree. Tree text goes in only through `textContent` or named attributes, never as HTML; image URLs are re-checked for http(s); a component the browser has no function for draws as a dashed "Unknown component" box. The drawn UI is live but inert: inputs, checkboxes and selects work, buttons do nothing, and nothing is sent anywhere. `src/sandbox/componentNames.test.ts` fails if the catalog and `RENDERED_COMPONENTS` differ.
+- **Session menu:** a placeholder for now.
+- **Stack:** plain TypeScript and DOM APIs, no UI framework; styling with Tailwind. Code is in [src/](../src/): the shell and chat rendering, the agent client, an SSE parser, and the sandbox renderer.
 
 ## 3. API
 
 | Part | Role |
 |---|---|
 | **Routes** ([server/routes/](../server/routes/)) | `GET /api/health` returns `{ ok, db, agent }`: whether Postgres answers and whether an OpenAI key is set. `POST /api/agent/chat` runs one agent turn and streams it back as SSE |
-| **Agent** ([server/agent/](../server/agent/)) | The tool-use loop (§4), the in-memory conversation store, the tool registry, and the agent's tools (`tools/`): `list_components` lists the catalog by name, category, description and children; `get_component` returns one component's props schema and example props |
+| **Agent** ([server/agent/](../server/agent/)) | The tool-use loop (§4), the in-memory conversation store, the tool registry, and the agent's tools (`tools/`): `list_components` lists the catalog by name, category, description and children; `get_component` returns one component's props schema and example props; `render_ui` checks a UI tree against the catalog and, if valid, sends it to the browser as a `ui` event (§4) |
 | **Ports** ([server/ports/](../server/ports/)) | `AgentLlm`: run one model turn with streaming. `ComponentRepository`: read the component catalog. `fakes/`: in-memory versions for tests |
 | **Adapters** ([server/adapters/](../server/adapters/)) | `openai/`: streaming Chat Completions. `db/`: Drizzle client, schema, migrations, the repository, and the catalog seed |
 | **Catalog** ([server/catalog/](../server/catalog/)) | `components.ts`: the predefined UI components, the source of truth for the `components` table. `validate.ts`: the rules every entry follows (§5) |
@@ -125,10 +126,12 @@ sequenceDiagram
 ```
 
 - The loop sends the conversation history and the available tools to the model, streams its text to the browser as it arrives, runs any tools the model asks for, and calls the model again with the results. A reply with no tool calls ends the turn.
-- After 10 model calls without a final reply, the turn ends with an `error` event.
-- The system prompt is added by the OpenAI adapter on each call, so it is never stored in history.
+- Each turn is capped by the constants in [server/agent/guardrails.ts](../server/agent/guardrails.ts): 10 model calls, 20 tool calls, and 150,000 tokens (prompt plus completion, summed over the turn's calls). The last call, and any call after the tool-call or token cap is reached, is sent with tool use switched off (`tool_choice: "none"`), so the model answers with what it has. A tool call past the cap, or a repeat of an earlier call with the same arguments, is not run; the model is told so. If the model still asks for tools once they are off, the turn ends with an `error` event.
+- A reply cut off by the output-token limit (`AGENT_MAX_OUTPUT_TOKENS`) is followed by a `notice` event. Every turn ends with one info log line: conversation id, model calls, tool calls, prompt and completion tokens, and why it ended.
+- The system prompt lives in [server/agent/systemPrompt.ts](../server/agent/systemPrompt.ts). The OpenAI adapter adds it on each call, so it is never stored in history. It tells the agent what it can and cannot do and gives it a procedure: list components once, read only the ones it uses, build one tree, call `render_ui` and fix reported problems, then reply briefly. It names the tools but not the catalog's contents, and a test fails if the prompt and the registered tools drift apart.
 - The registry checks each call's arguments against the tool's schema before running it. An unknown tool, invalid arguments, or a tool that throws (Postgres down, for example) comes back as an `ok: false` result the model can read; failures are logged.
-- SSE event types: `text`, `tool_call`, `tool_result`, `notice`, `done`, `error` (defined in [shared/api.ts](../shared/api.ts)).
+- SSE event types: `text`, `tool_call`, `tool_result`, `ui`, `notice`, `done`, `error` (defined in [shared/api.ts](../shared/api.ts)).
+- **UI trees.** The agent describes a UI as a tree of catalog components, `{ component, props?, children? }` ([shared/ui.ts](../shared/ui.ts)). `render_ui` runs `validateUiTree` ([server/ui/validateTree.ts](../server/ui/validateTree.ts)) over the whole tree and reports every problem at once (at most 20): malformed nodes, components not in the catalog, props that break the component's `propsSchema`, children on components that take none, and more than 8 levels or 100 nodes. If any are found, nothing is shown and the model gets the errors to fix. If none, the tool hands the tree to the browser through `ToolContext.showUi`, which the run emits as a `ui` event just before the tool result; the browser draws it in the sandbox (§2). Tools have no other way to emit events. Per-component props validators are compiled once per `updatedAt` and cached.
 - If the API has forgotten a conversation the browser is continuing (after a restart, for example), the agent sends a `notice` saying so and answers the message on its own.
 
 ## 5. Data
@@ -171,6 +174,7 @@ flowchart LR
 |---|---|---|
 | `OPENAI_API_KEY` | none (the agent is off without it) | API |
 | `AGENT_MODEL` | `gpt-4.1` | API |
+| `AGENT_MAX_OUTPUT_TOKENS` | `2048` (output tokens allowed per model call) | API |
 | `DATABASE_URL` | `postgres://genui:genui@localhost:5432/genui` | API, migrations |
 | `API_PORT` / `API_HOST` | `3001` / `127.0.0.1` (`0.0.0.0` in containers) | API |
 | `LOG_LEVEL` | `info` | API |
@@ -219,12 +223,13 @@ Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, `pg`, an
 
 **Today**
 
-- The agent's only tools look up components (`list_components`, `get_component`); it cannot render or change anything yet.
+- Each turn is capped at 10 model calls, 20 tool calls and 150,000 tokens; there are no limits yet on message size or request rate.
+- The agent can look up components and render UI trees (`render_ui`), and the sandbox draws the latest one, but the drawn UI is inert: nothing typed or clicked in it reaches the agent.
 - Conversations are lost when the API restarts.
-- The sandbox and session menu are placeholders.
+- The session menu is a placeholder.
 - The `components` table is not exposed over HTTP.
 - There is no authentication.
 
 **Planned**
 
-- Rendering components in the sandbox, and tools that use them.
+- Tools that use the rendered components.

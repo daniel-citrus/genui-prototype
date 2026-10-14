@@ -42,6 +42,7 @@ export async function handleToolCall(
   const result = await run.tools.run(call.name, call.args, {
     signal: run.signal,
     log: run.log,
+    showUi: (tree) => run.emit({ type: "ui", tree }),
   });
   run.emit({ type: "tool_result", call, result });
   return {

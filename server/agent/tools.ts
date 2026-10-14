@@ -1,4 +1,5 @@
 import type { ToolResult } from "shared/api";
+import type { UiNode } from "shared/ui";
 import { createToolRegistry } from "./registry";
 
 /** A vendor-neutral tool definition; LLM adapters convert it to their format. */
@@ -11,6 +12,7 @@ export interface ToolSpec {
 
 /** The subset of a pino/Fastify logger tools use. `req.log` satisfies it. */
 export interface ToolLogger {
+  info(obj: object, msg?: string): void;
   debug(obj: object, msg?: string): void;
   error(obj: object, msg?: string): void;
 }
@@ -21,6 +23,8 @@ export interface ToolContext {
   signal: AbortSignal;
   /** The request's logger. */
   log: ToolLogger;
+  /** Show a checked UI tree in the browser's sandbox (a `ui` event). */
+  showUi(tree: UiNode): void;
 }
 
 /** A tool the agent can call: its spec plus the handler that runs it. */

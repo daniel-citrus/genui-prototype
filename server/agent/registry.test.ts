@@ -14,6 +14,7 @@ function recordingLogger(): ToolLogger & { entries: LogEntry[] } {
   const entries: LogEntry[] = [];
   return {
     entries,
+    info() {},
     debug(obj, msg) {
       entries.push({ level: "debug", obj: obj as Record<string, unknown>, msg });
     },
@@ -25,7 +26,7 @@ function recordingLogger(): ToolLogger & { entries: LogEntry[] } {
 
 function makeCtx(signal = new AbortController().signal) {
   const log = recordingLogger();
-  const ctx: ToolContext = { signal, log };
+  const ctx: ToolContext = { signal, log, showUi() {} };
   return { ctx, log };
 }
 

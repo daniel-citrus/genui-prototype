@@ -20,6 +20,16 @@ function deltaChunk(delta: Delta): ChatCompletionChunk {
   };
 }
 
+function finishChunk(reason: "stop" | "length"): ChatCompletionChunk {
+  return {
+    id: "chunk",
+    object: "chat.completion.chunk",
+    created: 0,
+    model: "test-model",
+    choices: [{ index: 0, delta: {}, finish_reason: reason }],
+  };
+}
+
 function usageChunk(prompt: number, completion: number): ChatCompletionChunk {
   return {
     id: "chunk",
@@ -62,11 +72,12 @@ const spec: ToolSpec = {
   input_schema: { type: "object", properties: {} },
 };
 
-function makeLlm(client: ChatClient) {
+function makeLlm(client: ChatClient, maxOutputTokens?: number) {
   return createOpenAILlm({
     apiKey: "unused",
     model: "test-model",
     systemPrompt: "You are a test.",
+    maxOutputTokens,
     client,
   });
 }
@@ -201,6 +212,73 @@ describe("createOpenAILlm", () => {
       onText: () => {},
     });
     assert.equal(calls[0].options.signal, controller.signal);
+  });
+
+  it("keeps tools but forbids calling them when allowTools is false", async () => {
+    const off = fakeClient([]);
+    await makeLlm(off.client).complete({
+      messages: [{ role: "user", content: "hi" }],
+      tools: [spec],
+      allowTools: false,
+      signal: new AbortController().signal,
+      onText: () => {},
+    });
+    assert.equal(off.calls[0].body.tool_choice, "none");
+    assert.equal(off.calls[0].body.tools?.length, 1);
+
+    const on = fakeClient([]);
+    await makeLlm(on.client).complete({
+      messages: [{ role: "user", content: "hi" }],
+      tools: [spec],
+      signal: new AbortController().signal,
+      onText: () => {},
+    });
+    assert.equal("tool_choice" in on.calls[0].body, false);
+
+    // With no tools there is nothing to forbid.
+    const none = fakeClient([]);
+    await makeLlm(none.client).complete({
+      messages: [{ role: "user", content: "hi" }],
+      tools: [],
+      allowTools: false,
+      signal: new AbortController().signal,
+      onText: () => {},
+    });
+    assert.equal("tool_choice" in none.calls[0].body, false);
+  });
+
+  it("sends the configured output limit as max_completion_tokens", async () => {
+    const { client, calls } = fakeClient([]);
+    await makeLlm(client, 512).complete({
+      messages: [{ role: "user", content: "hi" }],
+      tools: [],
+      signal: new AbortController().signal,
+      onText: () => {},
+    });
+    assert.equal(calls[0].body.max_completion_tokens, 512);
+
+    const dflt = fakeClient([]);
+    await makeLlm(dflt.client).complete({
+      messages: [{ role: "user", content: "hi" }],
+      tools: [],
+      signal: new AbortController().signal,
+      onText: () => {},
+    });
+    assert.equal(dflt.calls[0].body.max_completion_tokens, 2048);
+  });
+
+  it("marks a turn truncated only when finish_reason is length", async () => {
+    const run = async (reason: "stop" | "length") => {
+      const { client } = fakeClient([deltaChunk({ content: "hi" }), finishChunk(reason)]);
+      return makeLlm(client).complete({
+        messages: [{ role: "user", content: "hi" }],
+        tools: [],
+        signal: new AbortController().signal,
+        onText: () => {},
+      });
+    };
+    assert.equal((await run("length")).truncated, true);
+    assert.notEqual((await run("stop")).truncated, true);
   });
 
   it("does not build an SDK client until first use", () => {
