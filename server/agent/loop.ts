@@ -20,6 +20,8 @@ export const SYSTEM_PROMPT = `You are an assistant that helps people design and 
 Guidelines:
 - Keep replies brief: a sentence or two, then the result.
 - Use the provided tools when they fit the request.
+- Use only the predefined components. Call list_components to see them, and get_component before relying on a component's props.
+- If no component fits the request, say so instead of inventing one.
 - If you cannot do something, say so plainly instead of guessing.`;
 
 /**

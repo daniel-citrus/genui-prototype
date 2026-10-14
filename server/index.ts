@@ -7,7 +7,8 @@ import { seedComponents } from "./adapters/db/seed";
 import { createOpenAILlm } from "./adapters/openai/OpenAILlm";
 import { SYSTEM_PROMPT } from "./agent/loop";
 import { catalog } from "./catalog/components";
-import { emptyToolRegistry } from "./agent/tools";
+import { createToolRegistry } from "./agent/registry";
+import { createAgentTools } from "./agent/tools/index";
 import type { ComponentRepository } from "./ports/ComponentRepository";
 import { agentRouter } from "./routes/agent";
 import { healthRouter } from "./routes/health";
@@ -76,8 +77,11 @@ const llm = agentAvailable
     })
   : undefined;
 
+// Without Postgres the API still starts; each tool call then fails on its own.
+const tools = createToolRegistry(createAgentTools({ components }));
+
 app.register(healthRouter, { prefix: "/api/health", pingDb: database.ping });
-app.register(agentRouter, { prefix: "/api/agent", llm, tools: emptyToolRegistry });
+app.register(agentRouter, { prefix: "/api/agent", llm, tools });
 
 // In production the schema and the component catalog are brought up to date on
 // start; in development both stay manual (`npm run db:migrate`, `npm run db:seed`)
