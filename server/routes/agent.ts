@@ -16,7 +16,7 @@ export interface AgentRouterOptions {
 
 export const agentRouter: FastifyPluginAsync<AgentRouterOptions> = async (app, opts) => {
   /** Stream a turn. SSE: one JSON `AgentEvent` per `data:` line. */
-  app.post<{ Body: AgentChatRequest }>("/chat", { bodyLimit: CHAT_BODY_LIMIT_BYTES }, async (req, reply) => {
+  app.post<{ Body: AgentChatRequest }>("/chat", { bodyLimit: CHAT_BODY_LIMIT_BYTES, config: { rateLimit: {} } }, async (req, reply) => {
     const { conversationId, message, resume } = req.body ?? {};
     if (
       typeof conversationId !== "string" ||

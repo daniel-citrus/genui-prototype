@@ -47,6 +47,8 @@ const app = await buildApp({
   llm,
   tools,
   pingDb: database.ping,
+  trustProxy: config.trustProxy,
+  rateLimit: { max: config.rateLimitPerMinute },
 });
 app.decorate("components", components);
 app.addHook("onClose", async () => {
