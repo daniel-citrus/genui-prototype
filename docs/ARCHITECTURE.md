@@ -34,7 +34,7 @@ flowchart LR
     Routes["HTTP routes<br/>GET /api/health<br/>POST /api/agent/chat"]
     Loop["Agent loop"]
     Convos["Conversations<br/>(in memory)"]
-    Tools["Tool registry<br/>(empty today)"]
+    Tools["Tool registry<br/>list_components, get_component"]
     LlmPort["AgentLlm port"]
     RepoPort["ComponentRepository port"]
     OpenAIAdapter["OpenAI adapter"]
@@ -43,6 +43,7 @@ flowchart LR
     Loop --> Convos
     Loop --> Tools
     Loop --> LlmPort
+    Tools --> RepoPort
     LlmPort --> OpenAIAdapter
     RepoPort --> DbAdapter
   end
@@ -87,13 +88,13 @@ flowchart LR
 | Part | Role |
 |---|---|
 | **Routes** ([server/routes/](../server/routes/)) | `GET /api/health` returns `{ ok, db, agent }`: whether Postgres answers and whether an OpenAI key is set. `POST /api/agent/chat` runs one agent turn and streams it back as SSE |
-| **Agent** ([server/agent/](../server/agent/)) | The tool-use loop (§4), the in-memory conversation store, and the tool registry |
-| **Ports** ([server/ports/](../server/ports/)) | `AgentLlm`: run one model turn with streaming. `ComponentRepository`: read the component catalog |
+| **Agent** ([server/agent/](../server/agent/)) | The tool-use loop (§4), the in-memory conversation store, the tool registry, and the agent's tools (`tools/`): `list_components` lists the catalog by name, category, description and children; `get_component` returns one component's props schema and example props |
+| **Ports** ([server/ports/](../server/ports/)) | `AgentLlm`: run one model turn with streaming. `ComponentRepository`: read the component catalog. `fakes/`: in-memory versions for tests |
 | **Adapters** ([server/adapters/](../server/adapters/)) | `openai/`: streaming Chat Completions. `db/`: Drizzle client, schema, migrations, the repository, and the catalog seed |
 | **Catalog** ([server/catalog/](../server/catalog/)) | `components.ts`: the predefined UI components, the source of truth for the `components` table. `validate.ts`: the rules every entry follows (§5) |
 | **Config** ([server/config.ts](../server/config.ts)) | The only place the API reads environment variables (§7) |
 
-**Startup.** The API builds its adapters and registers the routes. In production it first applies database migrations, then seeds the component catalog (§5), and exits with status 1 if either fails. In development both are run by hand (`npm run db:migrate`, then `npm run db:seed`) and the API starts even when Postgres is down (health then reports `db: false`). Without an OpenAI key the API still starts; health reports `agent: false` and a chat turn answers with one `error` event naming the missing key.
+**Startup.** The API builds its adapters and registers the routes. In production it first applies database migrations, then seeds the component catalog (§5), and exits with status 1 if either fails. In development both are run by hand (`npm run db:migrate`, then `npm run db:seed`) and the API starts even when Postgres is down (health then reports `db: false`, and component tool calls fail until it is up). Without an OpenAI key the API still starts; health reports `agent: false` and a chat turn answers with one `error` event naming the missing key.
 
 ## 4. A chat turn, end to end
 
@@ -126,6 +127,7 @@ sequenceDiagram
 - The loop sends the conversation history and the available tools to the model, streams its text to the browser as it arrives, runs any tools the model asks for, and calls the model again with the results. A reply with no tool calls ends the turn.
 - After 10 model calls without a final reply, the turn ends with an `error` event.
 - The system prompt is added by the OpenAI adapter on each call, so it is never stored in history.
+- The registry checks each call's arguments against the tool's schema before running it. An unknown tool, invalid arguments, or a tool that throws (Postgres down, for example) comes back as an `ok: false` result the model can read; failures are logged.
 - SSE event types: `text`, `tool_call`, `tool_result`, `notice`, `done`, `error` (defined in [shared/api.ts](../shared/api.ts)).
 - If the API has forgotten a conversation the browser is continuing (after a restart, for example), the agent sends a `notice` saying so and answers the message on its own.
 
@@ -136,7 +138,7 @@ sequenceDiagram
 | Conversation history | API memory | Until the API restarts. At most 500 conversations; the least recently used is dropped first |
 | UI components | [server/catalog/components.ts](../server/catalog/components.ts), copied to Postgres `components` table by the seed | The file is the source of truth; the table can be dropped and reseeded at any time. Schema changes only through committed Drizzle migrations |
 
-**`components` table:** a catalog of predefined UI components. Columns: `id`, `name` (unique), `description`, `category` (check: `layout`, `text`, `input`, or `display`), `children` (check: `none` or `any`), `props_schema` (JSON Schema), `example_props` (JSON), and timestamps. Rendering lives in browser code keyed by `name`, so no render spec is stored. The API's `ComponentRepository` is read-only (`list`, `get`, `getByName`); only the seed writes rows. No route or agent tool uses it yet (§10).
+**`components` table:** a catalog of predefined UI components. Columns: `id`, `name` (unique), `description`, `category` (check: `layout`, `text`, `input`, or `display`), `children` (check: `none` or `any`), `props_schema` (JSON Schema), `example_props` (JSON), and timestamps. Rendering lives in browser code keyed by `name`, so no render spec is stored. The API's `ComponentRepository` is read-only (`list`, `get`, `getByName`); only the seed writes rows. The agent reads it through the `list_components` and `get_component` tools; no HTTP route exposes it (§10).
 
 **Catalog and seed.** `server/catalog/components.ts` exports the twelve basic components (`Stack`, `Card`, `Divider`, `Heading`, `Text`, `Button`, `TextInput`, `Checkbox`, `Select`, `Image`, `Badge`, `Alert`). Text content is a prop, so only `Stack` and `Card` take children. `validateCatalog` (Ajv, the shared strict instance in `server/validation/jsonSchema.ts`) checks that every name matches `^[A-Z][A-Za-z0-9]*$` and is unique, the description is non-empty, `propsSchema` is valid JSON Schema with `type: "object"`, `additionalProperties: false`, and a `description` on every property, and every `default` and `exampleProps` is valid against it. `seedComponents(db, catalog)` (`server/adapters/db/seed.ts`) validates first and, on any problem, throws listing them all and writes nothing. Otherwise, in one transaction, it inserts missing entries, updates rows whose fields differ (setting `updated_at`), deletes rows whose name left the catalog, leaves the rest untouched, and returns `{ added, updated, removed, unchanged }`. Running it twice ends in the same state.
 
@@ -185,7 +187,7 @@ genui-prototype/
 ├── src/            browser app: shell, chat rendering, agent client, SSE parser
 ├── server/         Fastify API
 │   ├── routes/     health and chat endpoints
-│   ├── agent/      agent loop, conversations, tool registry
+│   ├── agent/      agent loop, conversations, tool registry, tools
 │   ├── catalog/    component catalog file and its validation
 │   ├── ports/      interfaces the app depends on
 │   └── adapters/   OpenAI and Postgres (Drizzle) implementations, migrations, seed
@@ -217,13 +219,12 @@ Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, `pg`, an
 
 **Today**
 
-- The agent has no tools, so it can only reply with text.
+- The agent's only tools look up components (`list_components`, `get_component`); it cannot render or change anything yet.
 - Conversations are lost when the API restarts.
 - The sandbox and session menu are placeholders.
-- The `components` table is not exposed to the agent or over HTTP.
+- The `components` table is not exposed over HTTP.
 - There is no authentication.
 
 **Planned**
 
-- **Tool registry:** the agent's first tools, `list_components` and `get_component`, reading that catalog.
-- **Later:** rendering components in the sandbox and tools that use them.
+- Rendering components in the sandbox, and tools that use them.

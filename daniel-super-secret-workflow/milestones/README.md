@@ -10,3 +10,5 @@ One markdown file per named chunk of work that already shipped.
 - [catalog-schema](catalog-schema.md)
 
 - [catalog-seed](catalog-seed.md)
+
+- [component-tools](component-tools.md)
