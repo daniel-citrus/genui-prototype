@@ -180,7 +180,7 @@ flowchart LR
 
 - **Images:** the web image builds the app and serves it with nginx. The API image bundles the server with esbuild and ships only production dependencies and the migrations.
 - **SSE through nginx:** buffering is off for `/api/` and reads time out after 300 seconds, so events reach the browser as they are written.
-- **Ports:** `web` (8080), `db` (5432) and `redis` (6379) are published; the API is reached through nginx and uses `redis` in production; the API is reached through nginx. If a host port is taken, remap it in an uncommitted `docker-compose.override.yml`.
+- **Ports:** `web` (8080), `db` (5432) and `redis` (6379) are published; the API is reached through nginx and uses `redis` in production. If a host port is taken, remap it in an uncommitted `docker-compose.override.yml`.
 
 ## 7. Configuration
 
