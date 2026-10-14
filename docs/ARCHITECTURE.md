@@ -31,6 +31,7 @@ flowchart LR
   Edge["Web server<br/>Vite :5173 in dev<br/>nginx :8080 in production"]
 
   subgraph API ["API (Fastify, Node 24, :3001)"]
+    Limits["Request limits<br/>size cap, per-IP rate limit"]
     Routes["HTTP routes<br/>GET /api/health<br/>POST /api/agent/chat"]
     Loop["Agent loop"]
     Convos["Conversations<br/>(in memory)"]
@@ -39,6 +40,7 @@ flowchart LR
     RepoPort["ComponentRepository port"]
     OpenAIAdapter["OpenAI adapter"]
     DbAdapter["Drizzle adapter"]
+    Limits --> Routes
     Routes --> Loop
     Loop --> Convos
     Loop --> Tools
@@ -50,17 +52,19 @@ flowchart LR
 
   OpenAI["OpenAI<br/>Chat Completions"]
   DB[("Postgres<br/>components table")]
+  Redis[("Redis<br/>optional, rate-limit counters")]
 
   Client -- "POST /api/agent/chat" --> Edge
   Edge -- "proxies /api" --> Routes
   Edge -. "SSE events" .-> Client
   OpenAIAdapter -- "streaming HTTPS" --> OpenAI
   DbAdapter --> DB
+  Limits -. "optional" .-> Redis
   Routes -. "health check" .-> DB
 ```
 
 - **The browser only talks to its own origin.** The web server serves the app and proxies `/api` to the API, so there is no CORS setup.
-- **The API follows ports and adapters.** The agent loop and future features depend on small interfaces (`AgentLlm`, `ComponentRepository`). The OpenAI and Drizzle adapters implement them, and [server/index.ts](../server/index.ts) is the one place that wires real adapters in. Tests swap in fakes.
+- **The API follows ports and adapters.** The agent loop and future features depend on small interfaces (`AgentLlm`, `ComponentRepository`). The OpenAI and Drizzle adapters implement them, and [server/index.ts](../server/index.ts) is the one place that wires real adapters in (it passes them to `buildApp` in [server/app.ts](../server/app.ts), which builds the Fastify app and is what tests use). Tests swap in fakes.
 - **Types shared by both sides** (request bodies, SSE event shapes, component types) live in [shared/](../shared/), so the browser and the API can't disagree about the wire format.
 
 ## 2. Browser app
@@ -88,12 +92,21 @@ flowchart LR
 
 | Part | Role |
 |---|---|
-| **Routes** ([server/routes/](../server/routes/)) | `GET /api/health` returns `{ ok, db, agent }`: whether Postgres answers and whether an OpenAI key is set. `POST /api/agent/chat` runs one agent turn and streams it back as SSE |
+| **Routes** ([server/routes/](../server/routes/)) | `GET /api/health` returns `{ ok, db, agent, redis }`: whether Postgres answers, whether an OpenAI key is set, and whether Redis answers (`null` when `REDIS_URL` is not set). `POST /api/agent/chat` runs one agent turn and streams it back as SSE |
 | **Agent** ([server/agent/](../server/agent/)) | The tool-use loop (§4), the in-memory conversation store, the tool registry, and the agent's tools (`tools/`): `list_components` lists the catalog by name, category, description and children; `get_component` returns one component's props schema and example props; `render_ui` checks a UI tree against the catalog and, if valid, sends it to the browser as a `ui` event (§4) |
 | **Ports** ([server/ports/](../server/ports/)) | `AgentLlm`: run one model turn with streaming. `ComponentRepository`: read the component catalog. `fakes/`: in-memory versions for tests |
 | **Adapters** ([server/adapters/](../server/adapters/)) | `openai/`: streaming Chat Completions. `db/`: Drizzle client, schema, migrations, the repository, and the catalog seed |
 | **Catalog** ([server/catalog/](../server/catalog/)) | `components.ts`: the predefined UI components, the source of truth for the `components` table. `validate.ts`: the rules every entry follows (§5) |
+| **App** ([server/app.ts](../server/app.ts)) | `buildApp` creates the Fastify app: trust proxy, the request limits below, and the routes. `server/index.ts` wires the adapters and listens |
 | **Config** ([server/config.ts](../server/config.ts)) | The only place the API reads environment variables (§7) |
+
+**Request limits.** All apply to `POST /api/agent/chat` only.
+
+- **Message length:** `MAX_MESSAGE_CHARS` (4000, in [shared/api.ts](../shared/api.ts)) is both the chat textarea's `maxlength` and the route's check; a longer message gets a 400 ("Message is too long (max 4000 characters)."). Malformed JSON also gets a 400.
+- **Body size:** a 32 KB `bodyLimit`; a larger body gets a 413.
+- **Rate limit:** `@fastify/rate-limit` allows `AGENT_RATE_LIMIT_PER_MINUTE` requests per client IP per minute (fixed window; IPv6 addresses are grouped by /64). Past it the route answers 429 with a `Retry-After` header and "Too many messages. Try again in N seconds." It runs before the body is read.
+- **Store:** counters are in memory by default. With `REDIS_URL` set they live in Redis (`ioredis`, keys prefixed `genui-rate-limit:`), so several API instances share them. The limiter fails open: while Redis is not connected or is down, requests pass, with one warning logged per outage.
+- **Trust proxy:** the client IP comes from the socket unless `TRUST_PROXY` (number of proxy hops) is set, in which case Fastify reads `X-Forwarded-For`. nginx sets that header and the production `api` uses `TRUST_PROXY=1`, which is safe only because the API's port is not published. Where clients can reach the API directly, leave it off: they could spoof the header and dodge the limit.
 
 **Startup.** The API builds its adapters and registers the routes. In production it first applies database migrations, then seeds the component catalog (§5), and exits with status 1 if either fails. In development both are run by hand (`npm run db:migrate`, then `npm run db:seed`) and the API starts even when Postgres is down (health then reports `db: false`, and component tool calls fail until it is up). Without an OpenAI key the API still starts; health reports `agent: false` and a chat turn answers with one `error` event naming the missing key.
 
@@ -161,12 +174,13 @@ flowchart LR
   User["Browser"] -- ":8080" --> Web["web<br/>nginx + built app"]
   Web -- "/api, unbuffered" --> Api["api<br/>Node, bundled server"]
   Api --> Db[("db<br/>Postgres 17")]
+  Api -. "rate-limit counters (optional)" .-> Redis[("redis<br/>Redis 8, no persistence")]
   Api -- "HTTPS" --> OpenAI["OpenAI"]
 ```
 
 - **Images:** the web image builds the app and serves it with nginx. The API image bundles the server with esbuild and ships only production dependencies and the migrations.
 - **SSE through nginx:** buffering is off for `/api/` and reads time out after 300 seconds, so events reach the browser as they are written.
-- **Ports:** only `web` (8080) and `db` (5432) are published in production; the API is reached through nginx. If a host port is taken, remap it in an uncommitted `docker-compose.override.yml`.
+- **Ports:** `web` (8080), `db` (5432) and `redis` (6379) are published; the API is reached through nginx and uses `redis` in production; the API is reached through nginx. If a host port is taken, remap it in an uncommitted `docker-compose.override.yml`.
 
 ## 7. Configuration
 
@@ -176,6 +190,9 @@ flowchart LR
 | `AGENT_MODEL` | `gpt-4.1` | API |
 | `AGENT_MAX_OUTPUT_TOKENS` | `2048` (output tokens allowed per model call) | API |
 | `DATABASE_URL` | `postgres://genui:genui@localhost:5432/genui` | API, migrations |
+| `AGENT_RATE_LIMIT_PER_MINUTE` | `20` (chat requests per IP per minute) | API |
+| `TRUST_PROXY` | off (number of proxy hops to trust; `1` in the production `api`) | API |
+| `REDIS_URL` | none (rate-limit counters stay in memory) | API |
 | `API_PORT` / `API_HOST` | `3001` / `127.0.0.1` (`0.0.0.0` in containers) | API |
 | `LOG_LEVEL` | `info` | API |
 | `API_PROXY_TARGET` | `http://localhost:3001` | Vite dev server |
@@ -217,13 +234,14 @@ Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, `pg`, an
 | `npm run db:seed` | Brings the `components` table in line with the catalog file and prints the counts |
 
 - **Tests** use a fake model, so they need no OpenAI key. Database tests run only when `DATABASE_URL` is set; they share one database, so `npm test` runs test files one at a time.
-- **CI** ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs on every pull request and on pushes to `main`: it starts Postgres, then runs install, typecheck, tests (including the database tests), and both builds on Node 24. `main` accepts changes only through pull requests that pass it.
+- **CI** ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs on every pull request and on pushes to `main`: it starts Postgres and Redis (so the Redis store tests run), then runs install, typecheck, tests (including the database tests), and both builds on Node 24. `main` accepts changes only through pull requests that pass it.
 
 ## 10. Current limits and what's next
 
 **Today**
 
-- Each turn is capped at 10 model calls, 20 tool calls and 150,000 tokens; there are no limits yet on message size or request rate.
+- Each turn is capped at 10 model calls, 20 tool calls and 150,000 tokens.
+- Messages are capped at 4000 characters and request bodies at 32 KB, and the chat route allows 20 requests per IP per minute by default (§3). The rate limit is per IP, not per user, and it is in memory unless Redis is configured.
 - The agent can look up components and render UI trees (`render_ui`), and the sandbox draws the latest one, but the drawn UI is inert: nothing typed or clicked in it reaches the agent.
 - Conversations are lost when the API restarts.
 - The session menu is a placeholder.

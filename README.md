@@ -41,6 +41,8 @@ Open http://localhost:5173. `curl -s localhost:5173/api/health` should show `{"o
 
 `npm run dev:web` and `npm run dev:api` start either half alone.
 
+**Redis (optional).** The per-IP chat rate limit counts in memory by default, and the app runs fine without Redis. To keep the counts in Redis instead, run `docker compose up -d redis` and add `REDIS_URL=redis://localhost:6379` to `.env.local`; `curl -s localhost:5173/api/health` then shows `"redis":true`.
+
 **Port 5432 taken?** The `db` service publishes host port 5432. If another Postgres already holds it, map a different host port (e.g. `"5433:5432"`) in an uncommitted `docker-compose.override.yml` using `ports: !override`, set `DATABASE_URL=postgres://genui:genui@localhost:5433/genui` in `.env.local`, and run `DATABASE_URL=postgres://genui:genui@localhost:5433/genui npm run db:migrate` (drizzle-kit does not read `.env.local`; `npm run db:seed` does).
 
 ### Other scripts
