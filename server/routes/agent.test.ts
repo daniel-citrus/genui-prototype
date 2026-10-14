@@ -24,8 +24,10 @@ function parseSse(body: string): AgentEvent[] {
 
 describe("POST /api/agent/chat", () => {
   it("streams a scripted reply as SSE text events, then done", async () => {
+    const offered: unknown[] = [];
     const llm: AgentLlm = {
-      async complete({ onText }) {
+      async complete({ tools, onText }) {
+        offered.push(tools);
         onText("Hello ");
         onText("there.");
         return { content: "Hello there.", toolCalls: [] };
@@ -47,6 +49,8 @@ describe("POST /api/agent/chat", () => {
       { type: "text", text: "there." },
       { type: "done" },
     ]);
+    // The empty registry offers the model no tools.
+    assert.deepEqual(offered, [[]]);
   });
 
   it("streams one error naming OPENAI_API_KEY when no llm is configured", async () => {
