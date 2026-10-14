@@ -4,5 +4,4 @@ One markdown file per product outcome we want that is not yet just a description
 
 **Active:**
 
-- [system-prompt-rewrite](system-prompt-rewrite.md)
 - [sandbox-renderer](sandbox-renderer.md)
