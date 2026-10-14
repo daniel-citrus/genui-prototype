@@ -73,6 +73,7 @@ const llm = agentAvailable
   ? createOpenAILlm({
       apiKey: config.openai.apiKey,
       model: config.openai.model,
+      maxOutputTokens: config.openai.maxOutputTokens,
       systemPrompt: SYSTEM_PROMPT,
     })
   : undefined;

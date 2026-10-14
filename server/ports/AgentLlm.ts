@@ -25,6 +25,8 @@ export interface LlmTurn {
   /** `arguments` is the raw JSON string the model produced. */
   toolCalls: Array<{ id: string; name: string; arguments: string }>;
   usage?: LlmUsage;
+  /** The reply was cut off by the output-token limit. */
+  truncated?: boolean;
 }
 
 /** The language model behind the agent loop. */
@@ -36,6 +38,11 @@ export interface AgentLlm {
   complete(input: {
     messages: HistoryMessage[];
     tools: ToolSpec[];
+    /**
+     * When false the model may not call tools (default true). The tool list is
+     * still sent: earlier tool calls in `messages` refer to it.
+     */
+    allowTools?: boolean;
     signal: AbortSignal;
     onText(text: string): void;
   }): Promise<LlmTurn>;

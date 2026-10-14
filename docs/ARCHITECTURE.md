@@ -125,7 +125,8 @@ sequenceDiagram
 ```
 
 - The loop sends the conversation history and the available tools to the model, streams its text to the browser as it arrives, runs any tools the model asks for, and calls the model again with the results. A reply with no tool calls ends the turn.
-- After 10 model calls without a final reply, the turn ends with an `error` event.
+- Each turn is capped by the constants in [server/agent/guardrails.ts](../server/agent/guardrails.ts): 10 model calls, 20 tool calls, and 150,000 tokens (prompt plus completion, summed over the turn's calls). The last call, and any call after the tool-call or token cap is reached, is sent with tool use switched off (`tool_choice: "none"`), so the model answers with what it has. A tool call past the cap, or a repeat of an earlier call with the same arguments, is not run; the model is told so. If the model still asks for tools once they are off, the turn ends with an `error` event.
+- A reply cut off by the output-token limit (`AGENT_MAX_OUTPUT_TOKENS`) is followed by a `notice` event. Every turn ends with one info log line: conversation id, model calls, tool calls, prompt and completion tokens, and why it ended.
 - The system prompt is added by the OpenAI adapter on each call, so it is never stored in history.
 - The registry checks each call's arguments against the tool's schema before running it. An unknown tool, invalid arguments, or a tool that throws (Postgres down, for example) comes back as an `ok: false` result the model can read; failures are logged.
 - SSE event types: `text`, `tool_call`, `tool_result`, `notice`, `done`, `error` (defined in [shared/api.ts](../shared/api.ts)).
@@ -171,6 +172,7 @@ flowchart LR
 |---|---|---|
 | `OPENAI_API_KEY` | none (the agent is off without it) | API |
 | `AGENT_MODEL` | `gpt-4.1` | API |
+| `AGENT_MAX_OUTPUT_TOKENS` | `2048` (output tokens allowed per model call) | API |
 | `DATABASE_URL` | `postgres://genui:genui@localhost:5432/genui` | API, migrations |
 | `API_PORT` / `API_HOST` | `3001` / `127.0.0.1` (`0.0.0.0` in containers) | API |
 | `LOG_LEVEL` | `info` | API |
@@ -219,6 +221,7 @@ Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, `pg`, an
 
 **Today**
 
+- Each turn is capped at 10 model calls, 20 tool calls and 150,000 tokens; there are no limits yet on message size or request rate.
 - The agent's only tools look up components (`list_components`, `get_component`); it cannot render or change anything yet.
 - Conversations are lost when the API restarts.
 - The sandbox and session menu are placeholders.
