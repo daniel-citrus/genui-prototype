@@ -78,7 +78,7 @@ flowchart LR
 └──────────────────────────────┴──────────────────────────────┘
 ```
 
-- **Chat pane:** each message opens an agent bubble that fills in as text streams back. Tool calls, notices, and errors render as small lines in the thread. While a reply streams, **Send** becomes **Stop**, which aborts the request; the API sees the connection close and stops the turn.
+- **Chat pane:** the agent's text streams into a bubble, and tool calls, notices, and errors render as small lines in the thread, all in the order they arrive: text that follows a tool line starts a new bubble below it. While a reply streams, **Send** becomes **Stop**, which aborts the request; the API sees the connection close and stops the turn.
 - **Conversation identity:** one conversation per page load (a random id). Reloading starts a new one.
 - **Sandbox pane:** shows "Designs you ask for appear here." until a `ui` event arrives, then draws that tree; a newer `ui` event replaces it and nothing is saved. The renderer is in [src/sandbox/](../src/sandbox/): `components.ts` has one function per catalog component (a map typed by `RENDERED_COMPONENTS`, so a missing one fails typecheck), and `render.ts` walks the tree. Tree text goes in only through `textContent` or named attributes, never as HTML; image URLs are re-checked for http(s); a component the browser has no function for draws as a dashed "Unknown component" box. The drawn UI is live but inert: inputs, checkboxes and selects work, buttons do nothing, and nothing is sent anywhere. `src/sandbox/componentNames.test.ts` fails if the catalog and `RENDERED_COMPONENTS` differ.
 - **Session menu:** a placeholder for now.
