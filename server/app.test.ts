@@ -10,7 +10,7 @@ const llm: AgentLlm = {
   },
 };
 
-const build = () => buildApp({ llm, tools: emptyToolRegistry, pingDb: async () => true });
+const build = () => buildApp({ rateLimit: { max: 1000 }, llm, tools: emptyToolRegistry, pingDb: async () => true });
 
 describe("buildApp", () => {
   it("answers health with the db result", async () => {

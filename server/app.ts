@@ -1,6 +1,7 @@
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import type { ToolRegistry } from "./agent/tools";
 import type { AgentLlm } from "./ports/AgentLlm";
+import { registerRateLimit, type ChatRateLimitOptions } from "./rateLimit";
 import { agentRouter } from "./routes/agent";
 import { healthRouter } from "./routes/health";
 
@@ -10,12 +11,24 @@ export interface AppDeps {
   llm?: AgentLlm;
   tools: ToolRegistry;
   pingDb?: () => Promise<boolean>;
+  /** Number of proxy hops to trust for the client IP; default false. */
+  trustProxy?: number | false;
+  rateLimit: ChatRateLimitOptions;
+}
+
+/**
+ * Fastify fails closed on a numeric trustProxy, so trust the last `hops` hops
+ * with a function. Only safe when the API is reachable through the proxy alone.
+ */
+function trustHops(hops: number | false): boolean | ((addr: string, hop: number) => boolean) {
+  return hops === false ? false : (_addr, hop) => hop < hops;
 }
 
 /** Builds the API's Fastify app: parser, error handler and routes. Doesn't listen. */
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: deps.logLevel ? { level: deps.logLevel } : false,
+    trustProxy: trustHops(deps.trustProxy ?? false),
   });
 
   // Accept empty JSON bodies (some POSTs carry nothing).
@@ -47,6 +60,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       },
     });
   });
+
+  await registerRateLimit(app, deps.rateLimit);
 
   app.register(healthRouter, { prefix: "/api/health", pingDb: deps.pingDb });
   app.register(agentRouter, { prefix: "/api/agent", llm: deps.llm, tools: deps.tools });
