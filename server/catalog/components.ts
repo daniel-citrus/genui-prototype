@@ -213,7 +213,12 @@ export const catalog: CatalogComponent[] = [
     propsSchema: {
       type: "object",
       properties: {
-        src: { type: "string", format: "uri", description: "Absolute URL of the image." },
+        src: {
+          type: "string",
+          format: "uri",
+          pattern: "^https?://",
+          description: "Absolute http(s) URL of the image.",
+        },
         alt: { type: "string", description: "Text that describes the image for screen readers." },
         width: {
           enum: ["sm", "md", "lg", "full"],

@@ -114,7 +114,10 @@ describe("runAgent", () => {
     );
     assert.deepEqual(llm.calls[0].tools, specs);
     assert.deepEqual(tools.ran, [{ name: "list_components", args: { limit: 3 } }]);
-    assert.deepEqual(tools.contexts, [{ signal: run.signal, log: run.log }]);
+    assert.equal(tools.contexts.length, 1);
+    assert.equal(tools.contexts[0].signal, run.signal);
+    assert.equal(tools.contexts[0].log, run.log);
+    assert.equal(typeof tools.contexts[0].showUi, "function");
 
     const call = { id: "call_1", name: "list_components", args: { limit: 3 } };
     assert.deepEqual(events, [
@@ -166,7 +169,7 @@ describe("runAgent", () => {
     assert.equal(llm.calls.length, 3);
     assert.deepEqual(
       llm.calls[0].tools.map((t) => t.name),
-      ["list_components", "get_component"],
+      ["list_components", "get_component", "render_ui"],
     );
 
     const listCall = { id: "call_list", name: "list_components", args: {} };

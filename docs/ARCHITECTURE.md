@@ -34,7 +34,7 @@ flowchart LR
     Routes["HTTP routes<br/>GET /api/health<br/>POST /api/agent/chat"]
     Loop["Agent loop"]
     Convos["Conversations<br/>(in memory)"]
-    Tools["Tool registry<br/>list_components, get_component"]
+    Tools["Tool registry<br/>list_components, get_component, render_ui"]
     LlmPort["AgentLlm port"]
     RepoPort["ComponentRepository port"]
     OpenAIAdapter["OpenAI adapter"]
@@ -88,7 +88,7 @@ flowchart LR
 | Part | Role |
 |---|---|
 | **Routes** ([server/routes/](../server/routes/)) | `GET /api/health` returns `{ ok, db, agent }`: whether Postgres answers and whether an OpenAI key is set. `POST /api/agent/chat` runs one agent turn and streams it back as SSE |
-| **Agent** ([server/agent/](../server/agent/)) | The tool-use loop (§4), the in-memory conversation store, the tool registry, and the agent's tools (`tools/`): `list_components` lists the catalog by name, category, description and children; `get_component` returns one component's props schema and example props |
+| **Agent** ([server/agent/](../server/agent/)) | The tool-use loop (§4), the in-memory conversation store, the tool registry, and the agent's tools (`tools/`): `list_components` lists the catalog by name, category, description and children; `get_component` returns one component's props schema and example props; `render_ui` checks a UI tree against the catalog and, if valid, sends it to the browser as a `ui` event (§4) |
 | **Ports** ([server/ports/](../server/ports/)) | `AgentLlm`: run one model turn with streaming. `ComponentRepository`: read the component catalog. `fakes/`: in-memory versions for tests |
 | **Adapters** ([server/adapters/](../server/adapters/)) | `openai/`: streaming Chat Completions. `db/`: Drizzle client, schema, migrations, the repository, and the catalog seed |
 | **Catalog** ([server/catalog/](../server/catalog/)) | `components.ts`: the predefined UI components, the source of truth for the `components` table. `validate.ts`: the rules every entry follows (§5) |
@@ -128,7 +128,8 @@ sequenceDiagram
 - After 10 model calls without a final reply, the turn ends with an `error` event.
 - The system prompt is added by the OpenAI adapter on each call, so it is never stored in history.
 - The registry checks each call's arguments against the tool's schema before running it. An unknown tool, invalid arguments, or a tool that throws (Postgres down, for example) comes back as an `ok: false` result the model can read; failures are logged.
-- SSE event types: `text`, `tool_call`, `tool_result`, `notice`, `done`, `error` (defined in [shared/api.ts](../shared/api.ts)).
+- SSE event types: `text`, `tool_call`, `tool_result`, `ui`, `notice`, `done`, `error` (defined in [shared/api.ts](../shared/api.ts)).
+- **UI trees.** The agent describes a UI as a tree of catalog components, `{ component, props?, children? }` ([shared/ui.ts](../shared/ui.ts)). `render_ui` runs `validateUiTree` ([server/ui/validateTree.ts](../server/ui/validateTree.ts)) over the whole tree and reports every problem at once (at most 20): malformed nodes, components not in the catalog, props that break the component's `propsSchema`, children on components that take none, and more than 8 levels or 100 nodes. If any are found, nothing is shown and the model gets the errors to fix. If none, the tool hands the tree to the browser through `ToolContext.showUi`, which the run emits as a `ui` event just before the tool result. Tools have no other way to emit events. Per-component props validators are compiled once per `updatedAt` and cached.
 - If the API has forgotten a conversation the browser is continuing (after a restart, for example), the agent sends a `notice` saying so and answers the message on its own.
 
 ## 5. Data
@@ -219,7 +220,7 @@ Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, `pg`, an
 
 **Today**
 
-- The agent's only tools look up components (`list_components`, `get_component`); it cannot render or change anything yet.
+- The agent can look up components and render UI trees (`render_ui`), but the browser does not draw `ui` events until the sandbox renderer lands; the sandbox is still a placeholder.
 - Conversations are lost when the API restarts.
 - The sandbox and session menu are placeholders.
 - The `components` table is not exposed over HTTP.
