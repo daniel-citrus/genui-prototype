@@ -1,6 +1,7 @@
 import "./style.css";
 import type { AgentEvent } from "shared/api";
 import { streamChat } from "./agentClient";
+import { renderEmpty, renderUi } from "./sandbox/render";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("#app missing");
@@ -52,7 +53,7 @@ app.innerHTML = `
       </form>
     </section>
     <section class="flex min-h-0 min-w-0 flex-col bg-zinc-100/80 p-4" aria-label="Sandbox">
-      <div class="min-h-0 flex-1 rounded-xl border border-dashed border-zinc-300 bg-white shadow-inner"></div>
+      <div class="sandbox-canvas min-h-0 flex-1 overflow-y-auto rounded-xl border border-dashed border-zinc-300 bg-white p-4 shadow-inner"></div>
     </section>
   </div>
 `;
@@ -61,6 +62,8 @@ const form = app.querySelector<HTMLFormElement>(".composer");
 const textarea = app.querySelector<HTMLTextAreaElement>('textarea[name="message"]');
 const thread = app.querySelector<HTMLDivElement>(".thread");
 const submitButton = form?.querySelector<HTMLButtonElement>('button[type="submit"]');
+const sandbox = app.querySelector<HTMLDivElement>(".sandbox-canvas");
+if (sandbox) renderEmpty(sandbox);
 
 /** Set while a turn streams; aborting it closes the stream. */
 let activeTurn: AbortController | null = null;
@@ -96,6 +99,9 @@ function renderEvent(event: AgentEvent, bubble: HTMLElement) {
         event.result.ok ? toolLineClass : errorLineClass,
         `${event.result.ok ? "✓" : "✗"} ${event.call.name}: ${event.result.summary}`,
       );
+      break;
+    case "ui":
+      if (sandbox) renderUi(event.tree, sandbox);
       break;
     case "notice":
       appendLine(systemLineClass, event.message);
