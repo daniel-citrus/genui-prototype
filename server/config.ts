@@ -12,6 +12,12 @@ function port(value: string | undefined, fallback: number): number {
   return value && Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+/** TRUST_PROXY: a positive hop count, otherwise false. */
+export function parseTrustProxy(value: string | undefined): number | false {
+  const hops = port(value, 0);
+  return hops > 0 ? hops : false;
+}
+
 export const config = {
   apiPort: port(env.API_PORT, 3001),
   apiHost: env.API_HOST || "127.0.0.1",
@@ -21,6 +27,9 @@ export const config = {
     maxOutputTokens: port(env.AGENT_MAX_OUTPUT_TOKENS, DEFAULT_MAX_OUTPUT_TOKENS),
   },
   databaseUrl: env.DATABASE_URL || "postgres://genui:genui@localhost:5432/genui",
+  redisUrl: env.REDIS_URL || undefined,
+  rateLimitPerMinute: port(env.AGENT_RATE_LIMIT_PER_MINUTE, 20),
+  trustProxy: parseTrustProxy(env.TRUST_PROXY),
   logLevel: env.LOG_LEVEL || "info",
 };
 

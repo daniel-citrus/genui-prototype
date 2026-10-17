@@ -1,17 +1,16 @@
-import Fastify, { type FastifyError } from "fastify";
 import { agentAvailable, config } from "./config";
 import { createDb } from "./adapters/db/client";
 import { DrizzleComponentRepository } from "./adapters/db/DrizzleComponentRepository";
 import { runMigrations } from "./adapters/db/migrate";
 import { seedComponents } from "./adapters/db/seed";
+import { createRedis } from "./adapters/redis/client";
 import { createOpenAILlm } from "./adapters/openai/OpenAILlm";
 import { SYSTEM_PROMPT } from "./agent/systemPrompt";
 import { catalog } from "./catalog/components";
 import { createToolRegistry } from "./agent/registry";
 import { createAgentTools } from "./agent/tools/index";
 import type { ComponentRepository } from "./ports/ComponentRepository";
-import { agentRouter } from "./routes/agent";
-import { healthRouter } from "./routes/health";
+import { buildApp } from "./app";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -28,46 +27,9 @@ function dbHost(url: string): string {
   }
 }
 
-const app = Fastify({
-  logger: { level: config.logLevel },
-});
-
-// Accept empty JSON bodies (some POSTs carry nothing).
-app.addContentTypeParser(
-  "application/json",
-  { parseAs: "string" },
-  (_req, body, done) => {
-    if (!body || (typeof body === "string" && body.trim() === "")) {
-      done(null, undefined);
-      return;
-    }
-    try {
-      done(null, JSON.parse(body as string));
-    } catch (err) {
-      done(err as Error, undefined);
-    }
-  },
-);
-
-app.setErrorHandler((err: FastifyError, req, reply) => {
-  // Fastify validation / parse errors carry a statusCode.
-  const status = typeof err.statusCode === "number" ? err.statusCode : 500;
-  if (status >= 500) req.log.error({ err }, "unhandled error");
-  return reply.status(status).send({
-    error: {
-      code: "repository",
-      message: status >= 500 ? "Internal server error" : err.message,
-    },
-  });
-});
-
 // The only place real adapters are built.
 const database = createDb(config.databaseUrl);
 const components = new DrizzleComponentRepository(database.db);
-app.decorate("components", components);
-app.addHook("onClose", async () => {
-  await database.close();
-});
 
 const llm = agentAvailable
   ? createOpenAILlm({
@@ -81,8 +43,30 @@ const llm = agentAvailable
 // Without Postgres the API still starts; each tool call then fails on its own.
 const tools = createToolRegistry(createAgentTools({ components }));
 
-app.register(healthRouter, { prefix: "/api/health", pingDb: database.ping });
-app.register(agentRouter, { prefix: "/api/agent", llm, tools });
+// Redis only backs the rate limit; the API starts and serves while it is down.
+// Its logger forwards to the app's, which exists once buildApp returns.
+let appLog: { warn(msg: string): void; info(msg: string): void } | undefined;
+const redis = config.redisUrl
+  ? createRedis(config.redisUrl, {
+      warn: (msg) => appLog?.warn(msg),
+      info: (msg) => appLog?.info(msg),
+    })
+  : undefined;
+
+const app = await buildApp({
+  logLevel: config.logLevel,
+  llm,
+  tools,
+  pingDb: database.ping,
+  trustProxy: config.trustProxy,
+  rateLimit: { max: config.rateLimitPerMinute },
+  redis,
+});
+appLog = app.log;
+app.decorate("components", components);
+app.addHook("onClose", async () => {
+  await database.close();
+});
 
 // In production the schema and the component catalog are brought up to date on
 // start; in development both stay manual (`npm run db:migrate`, `npm run db:seed`)
