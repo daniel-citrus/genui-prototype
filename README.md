@@ -31,6 +31,8 @@ Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
    npm run db:seed
    ```
 
+   Run `npm run db:seed` again whenever you pull changes to `server/catalog/components.ts`. The development API does not reseed on start, and until the seed runs `render_ui` checks designs against the old catalog (for example, it rejects the Button `action` and input `name` props that let a design's buttons run actions).
+
 5. Start the API (port 3001) and the web app (port 5173) together:
 
    ```bash
@@ -41,7 +43,7 @@ Open http://localhost:5173. `curl -s localhost:5173/api/health` should show `{"o
 
 `npm run dev:web` and `npm run dev:api` start either half alone.
 
-**Redis (optional).** The per-IP chat rate limit counts in memory by default, and the app runs fine without Redis. To keep the counts in Redis instead, run `docker compose up -d redis` and add `REDIS_URL=redis://localhost:6379` to `.env.local`; `curl -s localhost:5173/api/health` then shows `"redis":true`.
+**Redis (optional).** The per-IP rate limits on chat and on action clicks count in memory by default, and the app runs fine without Redis. To keep the counts in Redis instead, run `docker compose up -d redis` and add `REDIS_URL=redis://localhost:6379` to `.env.local`; `curl -s localhost:5173/api/health` then shows `"redis":true`.
 
 **Port 5432 taken?** The `db` service publishes host port 5432. If another Postgres already holds it, map a different host port (e.g. `"5433:5432"`) in an uncommitted `docker-compose.override.yml` using `ports: !override`, set `DATABASE_URL=postgres://genui:genui@localhost:5433/genui` in `.env.local`, and run `DATABASE_URL=postgres://genui:genui@localhost:5433/genui npm run db:migrate` (drizzle-kit does not read `.env.local`; `npm run db:seed` does).
 
@@ -54,7 +56,7 @@ npm run build         # web bundle → dist/
 npm run build:api     # API bundle → server-dist/index.mjs
 npm run preview       # serve dist/ on :4173
 npm run db:generate   # new migration after editing server/adapters/db/schema.ts
-npm run db:seed       # sync the components table with server/catalog/components.ts
+npm run db:seed       # sync the components table with server/catalog/components.ts (rerun after pulling catalog changes)
 npm run db:studio     # browse the database
 ```
 
@@ -72,7 +74,7 @@ export OPENAI_API_KEY=sk-...
 docker compose up dev
 ```
 
-This brings up `db`, `api-dev` (port 3001), and `dev` (port 5173). Open http://localhost:5173. The development API does not migrate or seed on start: run `npm run db:migrate && npm run db:seed` against the Compose database once from the host (or start the production flow once, which does both).
+This brings up `db`, `api-dev` (port 3001), and `dev` (port 5173). Open http://localhost:5173. The development API does not migrate or seed on start: run `npm run db:migrate && npm run db:seed` against the Compose database from the host once, and again after pulling migration or catalog changes (or start the production flow, which does both).
 
 **Production** (API image + nginx):
 

@@ -4,7 +4,7 @@ import type { AgentEvent, ToolResult } from "shared/api";
 import type { AgentLlm, HistoryMessage, LlmTurn } from "../ports/AgentLlm";
 import { catalog } from "../catalog/components";
 import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
-import { getHistory, resetConversation } from "./conversations";
+import { getDesign, getHistory, resetConversation } from "./conversations";
 import { MAX_TOOL_CALLS_PER_TURN, MAX_TURN_TOKENS } from "./guardrails";
 import { FORGOTTEN_NOTICE, MAX_STEPS, runAgent, TRUNCATED_NOTICE } from "./loop";
 import { createToolRegistry } from "./registry";
@@ -60,13 +60,14 @@ function stubTools(): ToolRegistry & {
 
 function makeRun(
   tools: ToolRegistry,
-  opts: { signal?: AbortSignal; resume?: boolean; log?: ToolLogger } = {},
+  opts: { conversationId?: string; signal?: AbortSignal; resume?: boolean; log?: ToolLogger } = {},
 ): { run: AgentRun; events: AgentEvent[] } {
   const events: AgentEvent[] = [];
   const run: AgentRun = {
     emit: (event) => {
       events.push(event);
     },
+    conversationId: opts.conversationId ?? "loop-test",
     signal: opts.signal ?? new AbortController().signal,
     tools,
     log: opts.log ?? noopLogger,
@@ -145,6 +146,30 @@ describe("runAgent", () => {
     assert.equal(assistant.tool_calls?.[0].id, "call_1");
   });
 
+  it("remembers a rendered design under its ui event id", async () => {
+    const conversationId = "render-remembered";
+    const tools = createToolRegistry(
+      createAgentTools({ components: new InMemoryComponentRepository(catalog) }),
+    );
+    const { run, events } = makeRun(tools, { conversationId });
+    const tree = { component: "Card", props: { title: "Hi" } };
+    const llm = scriptedLlm([
+      {
+        content: null,
+        toolCalls: [{ id: "call_ui", name: "render_ui", arguments: JSON.stringify({ tree }) }],
+      },
+      { content: "Done.", toolCalls: [] },
+    ]);
+
+    await runAgent("draw a card", conversationId, run, llm);
+    const ui = events.find((e) => e.type === "ui");
+    const remembered = ui?.type === "ui" ? getDesign(conversationId, ui.id) : undefined;
+    resetConversation(conversationId);
+
+    assert.ok(ui?.type === "ui");
+    assert.deepEqual(remembered, tree);
+  });
+
   it("looks up components with the real tools, then replies", async () => {
     const conversationId = "component-tools";
     const tools = createToolRegistry(
@@ -170,7 +195,7 @@ describe("runAgent", () => {
     assert.equal(llm.calls.length, 3);
     assert.deepEqual(
       llm.calls[0].tools.map((t) => t.name),
-      ["list_components", "get_component", "render_ui"],
+      ["list_components", "get_component", "list_actions", "render_ui"],
     );
 
     const listCall = { id: "call_list", name: "list_components", args: {} };

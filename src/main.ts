@@ -1,6 +1,8 @@
 import "./style.css";
-import { MAX_MESSAGE_CHARS, type AgentEvent } from "shared/api";
+import { MAX_MESSAGE_CHARS, type ActionResult, type AgentEvent } from "shared/api";
+import { runAction } from "./actionsClient";
 import { streamChat } from "./agentClient";
+import { actionValues, type FieldReading } from "./sandbox/actionValues";
 import { renderEmpty, renderUi } from "./sandbox/render";
 
 const app = document.querySelector<HTMLDivElement>("#app");
@@ -13,6 +15,11 @@ const assistantTurnClass =
 const systemLineClass = "self-start px-1 text-xs text-zinc-500";
 const errorLineClass = "self-start rounded-md bg-red-50 px-2 py-1 text-xs text-red-700";
 const toolLineClass = "self-start px-1 font-mono text-xs text-zinc-500";
+const statusBaseClass = "sandbox-status shrink-0 text-sm";
+const statusToneClass = {
+  ok: "mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-900",
+  failed: "mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-900",
+};
 
 /** One conversation per page load; the server keeps its history. */
 const conversationId = crypto.randomUUID();
@@ -54,6 +61,7 @@ app.innerHTML = `
       </form>
     </section>
     <section class="flex min-h-0 min-w-0 flex-col bg-zinc-100/80 p-4" aria-label="Sandbox">
+      <div class="${statusBaseClass}" role="status"></div>
       <div class="sandbox-canvas min-h-0 flex-1 overflow-y-auto rounded-xl border border-dashed border-zinc-300 bg-white p-4 shadow-inner"></div>
     </section>
   </div>
@@ -64,10 +72,14 @@ const textarea = app.querySelector<HTMLTextAreaElement>('textarea[name="message"
 const thread = app.querySelector<HTMLDivElement>(".thread");
 const submitButton = form?.querySelector<HTMLButtonElement>('button[type="submit"]');
 const sandbox = app.querySelector<HTMLDivElement>(".sandbox-canvas");
+const sandboxStatus = app.querySelector<HTMLDivElement>(".sandbox-status");
 if (sandbox) renderEmpty(sandbox);
 
 /** Set while a turn streams; aborting it closes the stream. */
 let activeTurn: AbortController | null = null;
+/** The `id` of the `ui` event that drew the shown design; actions name it. */
+let shownUiId: string | null = null;
+let actionInFlight = false;
 
 function appendLine(className: string, text: string, tag = "p"): HTMLElement {
   const el = document.createElement(tag);
@@ -84,6 +96,27 @@ function scrollToBottom() {
 
 function setStreaming(streaming: boolean) {
   if (submitButton) submitButton.textContent = streaming ? "Stop" : "Send";
+  syncActionButtons();
+}
+
+/**
+ * Action buttons wait out a streaming turn or an action in flight. Buttons the
+ * design disables have no `data-action`, so they stay disabled.
+ */
+function syncActionButtons() {
+  const busy = actionInFlight || activeTurn !== null;
+  for (const button of sandbox?.querySelectorAll<HTMLButtonElement>("button[data-action]") ?? []) {
+    button.disabled = busy;
+  }
+}
+
+/** Shows an action's result above the design; `null` clears it. */
+function showStatus(result: ActionResult | null) {
+  if (!sandboxStatus) return;
+  sandboxStatus.className = result
+    ? `${statusBaseClass} ${result.ok ? statusToneClass.ok : statusToneClass.failed}`
+    : statusBaseClass;
+  sandboxStatus.textContent = result?.message ?? "";
 }
 
 /** The streaming turn's latest agent bubble, if it has one. */
@@ -113,6 +146,9 @@ function renderEvent(event: AgentEvent, view: TurnView) {
       break;
     case "ui":
       if (sandbox) renderUi(event.tree, sandbox);
+      shownUiId = event.id;
+      showStatus(null);
+      syncActionButtons();
       break;
     case "notice":
       appendLine(systemLineClass, event.message);
@@ -149,6 +185,48 @@ async function sendTurn(message: string) {
     }
   }
 }
+
+/** Reads every named field of the shown design. */
+function readFields(controls: Array<HTMLInputElement | HTMLSelectElement>): FieldReading[] {
+  return controls
+    .filter((control) => control.name)
+    .map((control) => {
+      if (control instanceof HTMLSelectElement) {
+        return { name: control.name, kind: "select", value: control.value, checked: false };
+      }
+      const kind = control.type === "checkbox" ? "checkbox" : control.type === "password" ? "password" : "text";
+      return { name: control.name, kind, value: control.value, checked: control.checked };
+    });
+}
+
+async function sendAction(action: string) {
+  if (!sandbox || !shownUiId) return;
+  const controls = [...sandbox.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select")];
+  const invalid = controls.find((control) => !control.checkValidity());
+  if (invalid) {
+    invalid.reportValidity();
+    return;
+  }
+
+  const uiId = shownUiId;
+  actionInFlight = true;
+  syncActionButtons();
+  try {
+    const result = await runAction({ conversationId, uiId, action, values: actionValues(readFields(controls)) });
+    // A design drawn meanwhile has already cleared the status area for itself.
+    if (shownUiId === uiId) showStatus(result);
+    appendLine(result.ok ? toolLineClass : errorLineClass, `⚡ ${action}: ${result.message}`);
+  } finally {
+    actionInFlight = false;
+    syncActionButtons();
+  }
+}
+
+sandbox?.addEventListener("click", (e) => {
+  const button = (e.target as Element).closest<HTMLButtonElement>("button[data-action]");
+  if (!button?.dataset.action || button.disabled) return;
+  void sendAction(button.dataset.action);
+});
 
 form?.addEventListener("submit", (e) => {
   e.preventDefault();

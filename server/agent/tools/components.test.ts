@@ -34,11 +34,11 @@ const allNames = [...catalog]
   .map((c) => c.name);
 
 describe("component tools", () => {
-  it("registers list_components, get_component and render_ui", () => {
+  it("registers list_components, get_component, list_actions and render_ui", () => {
     const { registry } = setup();
     assert.deepEqual(
       registry.specs.map((s) => s.name),
-      ["list_components", "get_component", "render_ui"],
+      ["list_components", "get_component", "list_actions", "render_ui"],
     );
   });
 

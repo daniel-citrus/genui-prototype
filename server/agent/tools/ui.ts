@@ -1,10 +1,14 @@
 import type { UiNode } from "shared/ui";
+import type { ActionSpec } from "../../actions/types";
 import type { ComponentRepository } from "../../ports/ComponentRepository";
 import { validateUiTree } from "../../ui/validateTree";
 import type { ToolDefinition } from "../tools";
 
-/** Checks a UI tree against the catalog and, if it is valid, shows it in the sandbox. */
-export function renderUiTool(components: ComponentRepository): ToolDefinition {
+/**
+ * Checks a UI tree against the catalog and the registered actions and, if it
+ * is valid, shows it in the sandbox.
+ */
+export function renderUiTool(components: ComponentRepository, actions: ActionSpec[]): ToolDefinition {
   return {
     name: "render_ui",
     description:
@@ -22,7 +26,7 @@ export function renderUiTool(components: ComponentRepository): ToolDefinition {
     },
     async run(args, ctx) {
       const tree = args.tree;
-      const check = validateUiTree(tree, await components.list());
+      const check = validateUiTree(tree, await components.list(), actions);
       if (!check.ok) {
         const n = check.errors.length;
         return {

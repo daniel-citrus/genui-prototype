@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import type { AgentEvent } from "shared/api";
 import { catalog } from "../catalog/components";
 import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
+import { getDesign, resetConversation } from "./conversations";
 import { createToolRegistry } from "./registry";
 import { handleToolCall, type AgentRun } from "./run";
 import { createAgentTools } from "./tools/index";
@@ -11,6 +12,7 @@ function makeRun(): { run: AgentRun; events: AgentEvent[] } {
   const events: AgentEvent[] = [];
   const run: AgentRun = {
     emit: (event) => void events.push(event),
+    conversationId: "run-test",
     signal: new AbortController().signal,
     tools: createToolRegistry(createAgentTools({ components: new InMemoryComponentRepository(catalog) })),
     log: { info() {}, debug() {}, error() {} },
@@ -30,8 +32,25 @@ describe("handleToolCall with render_ui", () => {
       events.map((e) => e.type),
       ["tool_call", "ui", "tool_result"],
     );
-    assert.deepEqual(events[1], { type: "ui", tree });
+    const ui = events[1];
+    assert.ok(ui?.type === "ui");
+    assert.match(ui.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    assert.deepEqual(ui, { type: "ui", id: ui.id, tree });
+    assert.deepEqual(getDesign(run.conversationId, ui.id), tree);
+    resetConversation(run.conversationId);
     assert.equal(outcome.isError, false);
+  });
+
+  it("gives each design its own id", async () => {
+    const { run, events } = makeRun();
+    const args = { tree: { component: "Divider" } };
+
+    await handleToolCall(run, { id: "call_1", name: "render_ui", args });
+    await handleToolCall(run, { id: "call_2", name: "render_ui", args });
+
+    const ids = events.flatMap((e) => (e.type === "ui" ? [e.id] : []));
+    assert.equal(ids.length, 2);
+    assert.notEqual(ids[0], ids[1]);
   });
 
   it("emits no ui event for an invalid tree", async () => {

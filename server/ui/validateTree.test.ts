@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Component } from "shared/components";
+import type { ActionSpec } from "../actions/types";
 import { catalog } from "../catalog/components";
 import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
 import { validateUiTree, validatorCompileCount } from "./validateTree";
@@ -8,8 +9,8 @@ import { validateUiTree, validatorCompileCount } from "./validateTree";
 const repo = new InMemoryComponentRepository(catalog);
 const stored = () => repo.list();
 
-async function check(tree: unknown) {
-  return validateUiTree(tree, await stored());
+async function check(tree: unknown, actions?: ActionSpec[]) {
+  return validateUiTree(tree, await stored(), actions);
 }
 
 const button = { component: "Button", props: { label: "Go" } };
@@ -149,6 +150,144 @@ describe("validateUiTree", () => {
       const result = await image(src);
       assert.equal(result.ok, false, src);
       assert.match(result.errors[0], /^tree\.props\.src /);
+    }
+  });
+});
+
+const signUp: ActionSpec = {
+  name: "sign_up",
+  description: "Sign someone up.",
+  input_schema: {
+    type: "object",
+    properties: {
+      email: { type: "string", description: "Their email." },
+      plan: { type: "string", description: "The plan." },
+      updates: { type: "boolean", description: "Whether to send updates." },
+    },
+    required: ["email"],
+    additionalProperties: false,
+  },
+};
+const actions = [signUp];
+
+const form = (...children: unknown[]) => ({ component: "Stack", children });
+const email = { component: "TextInput", props: { label: "Email", name: "email" } };
+const submit = { component: "Button", props: { label: "Sign up", action: "sign_up" } };
+
+describe("validateUiTree bindings", () => {
+  it("accepts action and name props wired to a registered action", async () => {
+    const tree = form(
+      email,
+      { component: "Select", props: { label: "Plan", options: ["Free", "Pro"], name: "plan" } },
+      { component: "Checkbox", props: { label: "Updates", name: "updates" } },
+      { component: "TextInput", props: { label: "Note", name: "note" } },
+      submit,
+    );
+    assert.deepEqual((await check(tree, actions)).errors, []);
+    assert.deepEqual((await check(tree)).errors, []);
+  });
+
+  it("refuses action and name values that break their patterns", async () => {
+    const result = await check(
+      form(
+        { component: "Button", props: { label: "Go", action: "Sign-Up" } },
+        { component: "Button", props: { label: "Go", action: "a".repeat(65) } },
+        { component: "TextInput", props: { label: "Email", name: "1email" } },
+        { component: "Checkbox", props: { label: "Ok", name: "has space" } },
+        { component: "Select", props: { label: "Plan", options: ["A"], name: "b".repeat(65) } },
+      ),
+    );
+    assert.equal(result.errors.length, 5);
+    assert.match(result.errors[0], /^tree\.children\.0\.props\.action must match pattern/);
+    assert.match(result.errors[1], /^tree\.children\.1\.props\.action must NOT have more than 64 characters/);
+    assert.match(result.errors[2], /^tree\.children\.2\.props\.name must match pattern/);
+    assert.match(result.errors[3], /^tree\.children\.3\.props\.name must match pattern/);
+    assert.match(result.errors[4], /^tree\.children\.4\.props\.name must NOT have more than 64 characters/);
+  });
+
+  it("refuses two inputs with the same name, naming both paths, with or without actions", async () => {
+    const tree = form(email, {
+      component: "Card",
+      children: [{ component: "Checkbox", props: { label: "Again", name: "email" } }],
+    });
+    const expected = 'tree.children.1.children.0.props.name "email" is already used by tree.children.0';
+    assert.deepEqual((await check(tree)).errors, [expected]);
+    assert.ok((await check(tree, actions)).errors.includes(expected));
+  });
+
+  it("refuses an unregistered action and suggests list_actions", async () => {
+    const result = await check(
+      form(email, { component: "Button", props: { label: "Go", action: "sign_in" } }),
+      actions,
+    );
+    assert.deepEqual(result.errors, [
+      'tree.children.1.props.action "sign_in" is not a registered action (call list_actions to see them)',
+    ]);
+  });
+
+  it("refuses an action whose required property no input fills", async () => {
+    const result = await check(form(submit), actions);
+    assert.deepEqual(result.errors, [
+      'tree.children.0 action "sign_up" needs an input named "email", and none has that name',
+    ]);
+  });
+
+  it("skips the required check for a disabled Button but still checks its action", async () => {
+    const disabled = (action: string) => ({
+      component: "Button",
+      props: { label: "Soon", action, disabled: true },
+    });
+    assert.deepEqual((await check(form(disabled("sign_up")), actions)).errors, []);
+    assert.equal((await check(form(disabled("nope")), actions)).ok, false);
+    // One enabled Button for the action is enough to need its inputs.
+    const both = await check(form(disabled("sign_up"), submit), actions);
+    assert.deepEqual(both.errors, [
+      'tree.children.1 action "sign_up" needs an input named "email", and none has that name',
+    ]);
+  });
+
+  it("refuses an input of the wrong kind for the property it fills", async () => {
+    const result = await check(
+      form(
+        { component: "Checkbox", props: { label: "Email", name: "email" } },
+        { component: "TextInput", props: { label: "Updates", name: "updates" } },
+        submit,
+      ),
+      actions,
+    );
+    assert.deepEqual(result.errors, [
+      'tree.children.0 Checkbox named "email" fills a string of action "sign_up": use a TextInput or Select',
+      'tree.children.1 TextInput named "updates" fills a boolean of action "sign_up": use a Checkbox',
+    ]);
+  });
+
+  it("refuses a password TextInput bound to an action property", async () => {
+    const result = await check(
+      form({ component: "TextInput", props: { label: "Email", name: "email", type: "password" } }, submit),
+      actions,
+    );
+    assert.deepEqual(result.errors, [
+      'tree.children.0 TextInput named "email" is a password field, which can\'t send its value to action "sign_up"',
+    ]);
+  });
+
+  it("counts binding errors toward the 20-entry cap", async () => {
+    const result = await check(
+      form(...Array.from({ length: 25 }, () => ({ component: "Button", props: { label: "x", action: "nope" } }))),
+      actions,
+    );
+    assert.equal(result.errors.length, 20);
+    assert.equal(result.errors[19], "…and 6 more");
+  });
+
+  it("gives the same result as before for a tree without bindings, with or without actions", async () => {
+    const trees = [
+      form(button, { component: "TextInput", props: { label: "Email", type: "password" } }),
+      form({ component: "Button" }, { component: "Nope" }),
+    ];
+    for (const tree of trees) {
+      assert.deepEqual(await check(tree, actions), await check(tree));
+      assert.deepEqual(await check(tree, []), await check(tree));
     }
   });
 });
