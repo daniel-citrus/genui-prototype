@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { AgentEvent, ToolCall } from "shared/api";
+import { rememberDesign } from "./conversations";
 import type { ToolLogger, ToolRegistry } from "./tools";
 
 /** Everything a turn needs, wired up by the `/api/agent/chat` route. */
 export interface AgentRun {
   emit(event: AgentEvent): void;
+  /** The conversation this turn belongs to; its designs are remembered there. */
+  conversationId: string;
   signal: AbortSignal;
   tools: ToolRegistry;
   /** The request's logger, handed to tools. */
@@ -43,7 +46,11 @@ export async function handleToolCall(
   const result = await run.tools.run(call.name, call.args, {
     signal: run.signal,
     log: run.log,
-    showUi: (tree) => run.emit({ type: "ui", id: randomUUID(), tree }),
+    showUi: (tree) => {
+      const id = randomUUID();
+      rememberDesign(run.conversationId, id, tree);
+      run.emit({ type: "ui", id, tree });
+    },
   });
   run.emit({ type: "tool_result", call, result });
   return {
