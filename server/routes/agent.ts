@@ -66,6 +66,7 @@ export const agentRouter: FastifyPluginAsync<AgentRouterOptions> = async (app, o
       }
       const run: AgentRun = {
         emit,
+        conversationId,
         signal: controller.signal,
         tools: opts.tools,
         log: req.log,
