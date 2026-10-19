@@ -195,7 +195,7 @@ describe("runAgent", () => {
     assert.equal(llm.calls.length, 3);
     assert.deepEqual(
       llm.calls[0].tools.map((t) => t.name),
-      ["list_components", "get_component", "render_ui"],
+      ["list_components", "get_component", "list_actions", "render_ui"],
     );
 
     const listCall = { id: "call_list", name: "list_components", args: {} };

@@ -5,6 +5,8 @@ import { runMigrations } from "./adapters/db/migrate";
 import { seedComponents } from "./adapters/db/seed";
 import { createRedis } from "./adapters/redis/client";
 import { createOpenAILlm } from "./adapters/openai/OpenAILlm";
+import { createActions } from "./actions/index";
+import { createActionRegistry } from "./actions/registry";
 import { SYSTEM_PROMPT } from "./agent/systemPrompt";
 import { catalog } from "./catalog/components";
 import { createToolRegistry } from "./agent/registry";
@@ -40,8 +42,11 @@ const llm = agentAvailable
     })
   : undefined;
 
+// What a Button in a rendered design may run.
+const actions = createActionRegistry(createActions());
+
 // Without Postgres the API still starts; each tool call then fails on its own.
-const tools = createToolRegistry(createAgentTools({ components }));
+const tools = createToolRegistry(createAgentTools({ components, actions: actions.specs }));
 
 // Redis only backs the rate limit; the API starts and serves while it is down.
 // Its logger forwards to the app's, which exists once buildApp returns.

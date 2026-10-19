@@ -131,6 +131,13 @@ export const catalog: CatalogComponent[] = [
           default: false,
           description: "Shows the button but blocks clicks.",
         },
+        action: {
+          type: "string",
+          pattern: "^[a-z][a-z0-9_]*$",
+          maxLength: 64,
+          description:
+            "Backend action run when the button is clicked. Use only a name from list_actions; leave it out if none fits.",
+        },
       },
       required: ["label"],
       additionalProperties: false,
@@ -158,6 +165,13 @@ export const catalog: CatalogComponent[] = [
           default: false,
           description: "Whether the field must be filled in.",
         },
+        name: {
+          type: "string",
+          pattern: "^[A-Za-z][A-Za-z0-9_]*$",
+          maxLength: 64,
+          description:
+            "Key this value is sent under when a Button runs an action: the action property it fills. Unique in the design.",
+        },
       },
       required: ["label"],
       additionalProperties: false,
@@ -175,6 +189,13 @@ export const catalog: CatalogComponent[] = [
       properties: {
         label: { type: "string", description: "Text next to the box." },
         checked: { type: "boolean", default: false, description: "Whether the box starts checked." },
+        name: {
+          type: "string",
+          pattern: "^[A-Za-z][A-Za-z0-9_]*$",
+          maxLength: 64,
+          description:
+            "Key this value is sent under when a Button runs an action: the action property it fills. Unique in the design.",
+        },
       },
       required: ["label"],
       additionalProperties: false,
@@ -198,6 +219,13 @@ export const catalog: CatalogComponent[] = [
           description: "The choices, in display order.",
         },
         placeholder: { type: "string", description: "Hint shown before a choice is made." },
+        name: {
+          type: "string",
+          pattern: "^[A-Za-z][A-Za-z0-9_]*$",
+          maxLength: 64,
+          description:
+            "Key this value is sent under when a Button runs an action: the action property it fills. Unique in the design.",
+        },
       },
       required: ["label", "options"],
       additionalProperties: false,

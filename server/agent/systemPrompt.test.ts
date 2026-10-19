@@ -22,4 +22,11 @@ describe("SYSTEM_PROMPT", () => {
       assert.ok(toolNames.includes(word), `prompt mentions unknown tool ${word}`);
     }
   });
+
+  it("tells the agent how to attach actions", () => {
+    assert.ok(toolNames.includes("list_actions"));
+    assert.match(SYSTEM_PROMPT, /call list_actions/);
+    assert.match(SYSTEM_PROMPT, /won't do anything yet/);
+    assert.doesNotMatch(SYSTEM_PROMPT, /nothing the person types/);
+  });
 });

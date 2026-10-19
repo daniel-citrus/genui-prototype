@@ -26,6 +26,28 @@ describe("validateCatalog", () => {
     assert.deepEqual(validateCatalog(catalog), []);
   });
 
+  it("gives Button an optional action prop and inputs an optional name prop", () => {
+    const prop = (component: string, key: string) => {
+      const entry = catalog.find((c) => c.name === component);
+      const schema = entry?.propsSchema as unknown as {
+        properties: Record<string, Record<string, unknown>>;
+        required: string[];
+      };
+      assert.ok(!schema.required.includes(key), `${component}.${key} is required`);
+      const { description, ...rest } = schema.properties[key] ?? {};
+      assert.equal(typeof description, "string");
+      return { description: description as string, rest };
+    };
+    const action = prop("Button", "action");
+    assert.deepEqual(action.rest, { type: "string", pattern: "^[a-z][a-z0-9_]*$", maxLength: 64 });
+    assert.match(action.description, /list_actions/);
+    for (const component of ["TextInput", "Checkbox", "Select"]) {
+      const name = prop(component, "name");
+      assert.deepEqual(name.rest, { type: "string", pattern: "^[A-Za-z][A-Za-z0-9_]*$", maxLength: 64 });
+      assert.match(name.description, /[Uu]nique/);
+    }
+  });
+
   it("reports a broken schema", () => {
     const problems = validateCatalog(
       withEdit("Button", (c) => {
