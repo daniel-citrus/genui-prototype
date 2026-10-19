@@ -62,6 +62,7 @@ const app = await buildApp({
   logLevel: config.logLevel,
   llm,
   tools,
+  actions,
   pingDb: database.ping,
   trustProxy: config.trustProxy,
   rateLimit: { max: config.rateLimitPerMinute },

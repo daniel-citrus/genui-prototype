@@ -1,8 +1,11 @@
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
+import { createActionRegistry } from "./actions/registry";
+import type { ActionRegistry } from "./actions/types";
 import type { RedisHandle } from "./adapters/redis/client";
 import type { ToolRegistry } from "./agent/tools";
 import type { AgentLlm } from "./ports/AgentLlm";
 import { registerRateLimit, type ChatRateLimitOptions } from "./rateLimit";
+import { actionsRouter } from "./routes/actions";
 import { agentRouter } from "./routes/agent";
 import { healthRouter } from "./routes/health";
 
@@ -11,12 +14,16 @@ export interface AppDeps {
   logLevel?: string;
   llm?: AgentLlm;
   tools: ToolRegistry;
+  /** What a Button click may run; omit for none. */
+  actions?: ActionRegistry;
   pingDb?: () => Promise<boolean>;
   /** Number of proxy hops to trust for the client IP; default false. */
   trustProxy?: number | false;
   rateLimit: ChatRateLimitOptions;
   /** Shared rate-limit store; closed with the app. Omit to count in memory. */
   redis?: RedisHandle;
+  /** Where log lines go when `logLevel` is set; default stdout. Tests capture them here. */
+  logStream?: { write(line: string): void };
 }
 
 /**
@@ -30,7 +37,7 @@ function trustHops(hops: number | false): boolean | ((addr: string, hop: number)
 /** Builds the API's Fastify app: parser, error handler and routes. Doesn't listen. */
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: deps.logLevel ? { level: deps.logLevel } : false,
+    logger: deps.logLevel ? { level: deps.logLevel, stream: deps.logStream } : false,
     trustProxy: trustHops(deps.trustProxy ?? false),
   });
 
@@ -74,6 +81,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     pingRedis: redis?.ping,
   });
   app.register(agentRouter, { prefix: "/api/agent", llm: deps.llm, tools: deps.tools });
+  app.register(actionsRouter, {
+    prefix: "/api/actions",
+    actions: deps.actions ?? createActionRegistry([]),
+  });
 
   return app;
 }
