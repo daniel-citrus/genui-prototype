@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { AgentEvent, ToolCall } from "shared/api";
 import type { ToolLogger, ToolRegistry } from "./tools";
 
@@ -42,7 +43,7 @@ export async function handleToolCall(
   const result = await run.tools.run(call.name, call.args, {
     signal: run.signal,
     log: run.log,
-    showUi: (tree) => run.emit({ type: "ui", tree }),
+    showUi: (tree) => run.emit({ type: "ui", id: randomUUID(), tree }),
   });
   run.emit({ type: "tool_result", call, result });
   return {
