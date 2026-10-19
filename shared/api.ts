@@ -42,7 +42,27 @@ export type AgentEvent =
   | { type: "text"; text: string }
   | { type: "tool_call"; call: ToolCall }
   | { type: "tool_result"; call: ToolCall; result: ToolResult }
-  | { type: "ui"; tree: UiNode }
+  /** `id` is random per design; an action request names the design by it. */
+  | { type: "ui"; id: string; tree: UiNode }
   | { type: "notice"; message: string }
   | { type: "done" }
   | { type: "error"; message: string };
+
+/** Longest text value an action input may send. */
+export const MAX_FIELD_CHARS = 1000;
+
+/** `POST /api/actions/run` request body: a click on a Button with an action. */
+export interface ActionRunRequest {
+  conversationId: string;
+  /** The `id` of the `ui` event that drew the design. */
+  uiId: string;
+  action: string;
+  /** Named input values; password fields never included. */
+  values: Record<string, string | boolean>;
+}
+
+/** What an action reports back; `message` is shown to the person. */
+export interface ActionResult {
+  ok: boolean;
+  message: string;
+}
