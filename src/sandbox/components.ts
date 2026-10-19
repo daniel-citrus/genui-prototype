@@ -1,3 +1,4 @@
+import { MAX_FIELD_CHARS } from "shared/api";
 import type { RenderedComponentName } from "./componentNames";
 
 /**
@@ -40,6 +41,12 @@ let nextId = 0;
 function uniqueId(prefix: string): string {
   nextId += 1;
   return `sandbox-${prefix}-${nextId}`;
+}
+
+/** The `name` prop names the value an action receives from this field. */
+function setName(control: HTMLInputElement | HTMLSelectElement, props: Props): void {
+  const name = str(props, "name");
+  if (name) control.name = name;
 }
 
 function field(label: string, control: HTMLElement, labelFor: string): HTMLElement {
@@ -121,6 +128,8 @@ const buttonVariant = {
 };
 const buttonSize = { sm: "px-3 py-1.5 text-xs", md: "px-4 py-2 text-sm", lg: "px-5 py-2.5 text-base" };
 
+const actionName = /^[a-z][a-z0-9_]*$/;
+
 const Button: Renderer = (props) => {
   const node = el(
     "button",
@@ -129,6 +138,9 @@ const Button: Renderer = (props) => {
   );
   node.type = "button";
   node.disabled = bool(props, "disabled", false);
+  // Only an enabled Button with a well-formed action name can send one.
+  const action = str(props, "action");
+  if (action && actionName.test(action) && !node.disabled) node.dataset.action = action;
   return node;
 };
 
@@ -143,6 +155,8 @@ const TextInput: Renderer = (props) => {
   const placeholder = str(props, "placeholder");
   if (placeholder) input.placeholder = placeholder;
   input.required = bool(props, "required", false);
+  input.maxLength = MAX_FIELD_CHARS;
+  setName(input, props);
   return field(str(props, "label") ?? "", input, id);
 };
 
@@ -153,6 +167,7 @@ const Checkbox: Renderer = (props) => {
   input.type = "checkbox";
   input.id = id;
   input.checked = bool(props, "checked", false);
+  setName(input, props);
   const label = el("label", "text-sm text-zinc-700", str(props, "label") ?? "");
   label.htmlFor = id;
   wrapper.append(input, label);
@@ -163,6 +178,7 @@ const Select: Renderer = (props) => {
   const id = uniqueId("select");
   const select = el("select", inputClass);
   select.id = id;
+  setName(select, props);
   const placeholder = str(props, "placeholder");
   if (placeholder) {
     const option = new Option(placeholder, "");
