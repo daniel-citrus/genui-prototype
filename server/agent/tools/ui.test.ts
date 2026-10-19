@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { UiNode } from "shared/ui";
+import type { ActionSpec } from "../../actions/types";
 import { catalog } from "../../catalog/components";
 import type { ComponentRepository } from "../../ports/ComponentRepository";
 import { InMemoryComponentRepository } from "../../ports/fakes/InMemoryComponentRepository";
@@ -8,7 +9,10 @@ import { createToolRegistry } from "../registry";
 import type { ToolContext } from "../tools";
 import { createAgentTools } from "./index";
 
-function setup(components: ComponentRepository = new InMemoryComponentRepository(catalog)) {
+function setup(
+  components: ComponentRepository = new InMemoryComponentRepository(catalog),
+  actions?: ActionSpec[],
+) {
   const shown: UiNode[] = [];
   const errors: object[] = [];
   const ctx: ToolContext = {
@@ -16,7 +20,7 @@ function setup(components: ComponentRepository = new InMemoryComponentRepository
     log: { info() {}, debug() {}, error: (obj) => void errors.push(obj) },
     showUi: (tree) => void shown.push(tree),
   };
-  return { registry: createToolRegistry(createAgentTools({ components })), ctx, shown, errors };
+  return { registry: createToolRegistry(createAgentTools({ components, actions })), ctx, shown, errors };
 }
 
 describe("render_ui", () => {
@@ -60,6 +64,31 @@ describe("render_ui", () => {
     const { registry, ctx } = setup();
     const result = await registry.run("render_ui", { tree: { component: "Nope" } }, ctx);
     assert.equal(result.summary, "UI has 1 problem");
+  });
+
+  it("refuses a Button bound to an unregistered action and shows nothing", async () => {
+    const actions: ActionSpec[] = [
+      {
+        name: "demo_echo",
+        description: "Echo.",
+        input_schema: { type: "object", properties: {}, additionalProperties: false },
+      },
+    ];
+    const { registry, ctx, shown } = setup(undefined, actions);
+    const go = (action: string) => ({ tree: { component: "Button", props: { label: "Go", action } } });
+
+    const result = await registry.run("render_ui", go("send_mail"), ctx);
+    assert.deepEqual(result, {
+      ok: false,
+      summary: "UI has 1 problem",
+      data: {
+        errors: ['tree.props.action "send_mail" is not a registered action (call list_actions to see them)'],
+      },
+    });
+    assert.equal(shown.length, 0);
+
+    assert.equal((await registry.run("render_ui", go("demo_echo"), ctx)).ok, true);
+    assert.equal(shown.length, 1);
   });
 
   it("refuses a missing or non-object tree before the tool runs", async () => {

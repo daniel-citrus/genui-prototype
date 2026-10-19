@@ -1,6 +1,8 @@
 import type { ErrorObject, ValidateFunction } from "ajv";
 import type { Component } from "shared/components";
+import type { ActionSpec } from "../actions/types";
 import { compileSchema, formatSchemaErrors } from "../validation/jsonSchema";
+import { collectBindings, isObject, type NamedInput } from "./bindings";
 
 /** Root is level 1. */
 export const MAX_DEPTH = 8;
@@ -44,10 +46,6 @@ function propsValidator(component: Component): ValidateFunction {
   return validate;
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 /** "message" for one Ajv error; enums list their values. */
 function propMessage(error: ErrorObject): string {
   if (error.keyword === "enum") {
@@ -71,12 +69,88 @@ function propsProblems(component: Component, props: Record<string, unknown>, pat
   });
 }
 
+/** Why `input` can't fill `action`'s `type` property, or undefined if it can. */
+function bindingMismatch(input: NamedInput, action: string, type: unknown): string | undefined {
+  const at = `${input.path} ${input.component} named "${input.name}"`;
+  if (input.component === "TextInput" && input.type === "password") {
+    return `${at} is a password field, which can't send its value to action "${action}"`;
+  }
+  if (type === "boolean" && input.component !== "Checkbox") {
+    return `${at} fills a boolean of action "${action}": use a Checkbox`;
+  }
+  if (type === "string" && input.component === "Checkbox") {
+    return `${at} fills a string of action "${action}": use a TextInput or Select`;
+  }
+  return undefined;
+}
+
+/**
+ * Problems with a tree's `name` and `action` props: duplicate names always;
+ * with `actions`, also unregistered actions, required action properties no
+ * input fills (for Buttons that aren't disabled), and inputs of the wrong kind
+ * for the action property they fill.
+ */
+function bindingProblems(tree: unknown, actions: ActionSpec[] | undefined): string[] {
+  const { inputs, buttons } = collectBindings(tree);
+  const problems: string[] = [];
+
+  const byName = new Map<string, NamedInput>();
+  for (const input of inputs) {
+    const first = byName.get(input.name);
+    if (first) problems.push(`${input.path}.props.name "${input.name}" is already used by ${first.path}`);
+    else byName.set(input.name, input);
+  }
+  if (!actions) return problems;
+
+  const specs = new Map(actions.map((a) => [a.name, a]));
+  const used = new Set<ActionSpec>();
+  // Each action's first Button that isn't disabled.
+  const enabledAt = new Map<ActionSpec, string>();
+  for (const button of buttons) {
+    const spec = specs.get(button.action);
+    if (!spec) {
+      problems.push(
+        `${button.path}.props.action "${button.action}" is not a registered action (call list_actions to see them)`,
+      );
+      continue;
+    }
+    used.add(spec);
+    if (!button.disabled && !enabledAt.has(spec)) enabledAt.set(spec, button.path);
+  }
+
+  for (const spec of used) {
+    const schema = spec.input_schema as {
+      properties?: Record<string, { type?: unknown }>;
+      required?: string[];
+    };
+    const path = enabledAt.get(spec);
+    if (path) {
+      for (const key of schema.required ?? []) {
+        if (!byName.has(key)) {
+          problems.push(`${path} action "${spec.name}" needs an input named "${key}", and none has that name`);
+        }
+      }
+    }
+    for (const input of inputs) {
+      const property = schema.properties?.[input.name];
+      const mismatch = property && bindingMismatch(input, spec.name, property.type);
+      if (mismatch) problems.push(mismatch);
+    }
+  }
+  return problems;
+}
+
 /**
  * Checks a UI tree against the catalog: shape, component names, props, which
- * components take children, and size limits. Walks the whole tree and reports
- * every problem (at most MAX_ERRORS entries).
+ * components take children, size limits, and bindings (see `bindingProblems`;
+ * action checks only when `actions` is given). Walks the whole tree and
+ * reports every problem (at most MAX_ERRORS entries).
  */
-export function validateUiTree(tree: unknown, catalog: Component[]): UiTreeCheck {
+export function validateUiTree(
+  tree: unknown,
+  catalog: Component[],
+  actions?: ActionSpec[],
+): UiTreeCheck {
   const byName = new Map(catalog.map((c) => [c.name, c]));
   const errors: string[] = [];
   const stats: UiTreeStats = { nodes: 0, depth: 0, components: {} };
@@ -128,6 +202,7 @@ export function validateUiTree(tree: unknown, catalog: Component[]): UiTreeCheck
   };
 
   visit(tree, "tree", 1);
+  errors.push(...bindingProblems(tree, actions));
 
   const limits: string[] = [];
   if (stats.depth > MAX_DEPTH) limits.push(`tree is ${stats.depth} levels deep (max ${MAX_DEPTH})`);
