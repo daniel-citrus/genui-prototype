@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { UiNode } from "shared/ui";
 import {
   MAX_CONVERSATIONS,
+  MAX_DESIGNS_PER_CONVERSATION,
+  getDesign,
   getHistory,
   hasConversation,
   oneTurnAtATime,
+  rememberDesign,
   resetConversation,
 } from "./conversations";
 
@@ -75,5 +79,58 @@ describe("getHistory", () => {
     assert.equal(hasConversation(`lru-${MAX_CONVERSATIONS - 1}`), true);
 
     for (const id of [...ids, "lru-new"]) resetConversation(id);
+  });
+});
+
+describe("rememberDesign and getDesign", () => {
+  const design = (n: number): UiNode => ({ component: "Card", props: { title: `design ${n}` } });
+
+  it("keeps the last five designs and evicts the oldest", () => {
+    assert.equal(MAX_DESIGNS_PER_CONVERSATION, 5);
+    for (let n = 1; n <= 5; n++) rememberDesign("designs", `ui-${n}`, design(n));
+    for (let n = 1; n <= 5; n++) assert.deepEqual(getDesign("designs", `ui-${n}`), design(n));
+
+    rememberDesign("designs", "ui-6", design(6));
+    assert.equal(getDesign("designs", "ui-1"), undefined);
+    for (let n = 2; n <= 6; n++) assert.deepEqual(getDesign("designs", `ui-${n}`), design(n));
+
+    resetConversation("designs");
+  });
+
+  it("returns undefined for unknown ids and unknown conversations, without creating them", () => {
+    rememberDesign("known", "ui-1", design(1));
+    assert.equal(getDesign("known", "ui-other"), undefined);
+    assert.equal(getDesign("unknown", "ui-1"), undefined);
+    assert.equal(hasConversation("unknown"), false);
+    resetConversation("known");
+  });
+
+  it("creates the conversation it remembers a design for, sharing its history", () => {
+    rememberDesign("fresh", "ui-1", design(1));
+    assert.equal(hasConversation("fresh"), true);
+    assert.deepEqual(getHistory("fresh"), []);
+    assert.deepEqual(getDesign("fresh", "ui-1"), design(1));
+    resetConversation("fresh");
+  });
+
+  it("drops a conversation's designs on reset", () => {
+    rememberDesign("reset-me", "ui-1", design(1));
+    resetConversation("reset-me");
+    assert.equal(getDesign("reset-me", "ui-1"), undefined);
+  });
+
+  it("drops a conversation's designs when LRU forgets it, and getDesign doesn't count as a use", () => {
+    rememberDesign("evict-0", "ui-1", design(1));
+    const others = Array.from({ length: MAX_CONVERSATIONS - 1 }, (_, i) => `evict-${i + 1}`);
+    for (const id of others) getHistory(id);
+
+    // A read leaves evict-0 least recently used, so the next new one evicts it.
+    assert.deepEqual(getDesign("evict-0", "ui-1"), design(1));
+    getHistory("evict-new");
+
+    assert.equal(hasConversation("evict-0"), false);
+    assert.equal(getDesign("evict-0", "ui-1"), undefined);
+
+    for (const id of [...others, "evict-new"]) resetConversation(id);
   });
 });
