@@ -1,5 +1,5 @@
 import "./style.css";
-import { MAX_MESSAGE_CHARS, type ActionResult, type AgentEvent } from "shared/api";
+import { MAX_MESSAGE_CHARS, type ActionResult, type ActionRunRequest, type AgentEvent } from "shared/api";
 import { runAction } from "./actionsClient";
 import { streamChat } from "./agentClient";
 import { actionValues, type FieldReading } from "./sandbox/actionValues";
@@ -19,6 +19,11 @@ const statusBaseClass = "sandbox-status shrink-0 text-sm";
 const statusToneClass = {
   ok: "mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-900",
   failed: "mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-900",
+  confirm: "mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900",
+};
+const confirmButtonClass = {
+  yes: "rounded-md bg-amber-600 px-3 py-1 text-sm font-medium text-white shadow-sm hover:bg-amber-700",
+  cancel: "rounded-md border border-zinc-300 bg-white px-3 py-1 text-sm font-medium text-zinc-700 hover:bg-zinc-50",
 };
 
 /** One conversation per page load; the server keeps its history. */
@@ -80,6 +85,8 @@ let activeTurn: AbortController | null = null;
 /** The `id` of the `ui` event that drew the shown design; actions name it. */
 let shownUiId: string | null = null;
 let actionInFlight = false;
+/** Set while the status area asks an action's confirm question. */
+let confirmShown = false;
 
 function appendLine(className: string, text: string, tag = "p"): HTMLElement {
   const el = document.createElement(tag);
@@ -100,23 +107,61 @@ function setStreaming(streaming: boolean) {
 }
 
 /**
- * Action buttons wait out a streaming turn or an action in flight. Buttons the
- * design disables have no `data-action`, so they stay disabled.
+ * Action buttons wait out a streaming turn, an action in flight or a confirm
+ * question. Buttons the design disables have no `data-action`, so they stay
+ * disabled.
  */
 function syncActionButtons() {
-  const busy = actionInFlight || activeTurn !== null;
+  const busy = actionInFlight || activeTurn !== null || confirmShown;
   for (const button of sandbox?.querySelectorAll<HTMLButtonElement>("button[data-action]") ?? []) {
     button.disabled = busy;
   }
 }
 
-/** Shows an action's result above the design; `null` clears it. */
+/** Shows an action's result above the design; `null` clears it. Either drops a confirm question. */
 function showStatus(result: ActionResult | null) {
+  confirmShown = false;
   if (!sandboxStatus) return;
   sandboxStatus.className = result
     ? `${statusBaseClass} ${result.ok ? statusToneClass.ok : statusToneClass.failed}`
     : statusBaseClass;
   sandboxStatus.textContent = result?.message ?? "";
+}
+
+function statusButton(label: string, className: string, onClick: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+/**
+ * Asks an action's confirm question above the design instead of a result. Yes
+ * resends `request`, with the values read for the first click, as confirmed;
+ * Cancel sends nothing.
+ */
+function askConfirm(request: ActionRunRequest, question: string) {
+  if (!sandboxStatus) return;
+  const text = document.createElement("p");
+  text.textContent = question;
+  const buttons = document.createElement("div");
+  buttons.className = "mt-2 flex gap-2";
+  buttons.append(
+    statusButton("Yes", confirmButtonClass.yes, () => {
+      showStatus(null);
+      void postAction({ ...request, confirmed: true });
+    }),
+    statusButton("Cancel", confirmButtonClass.cancel, () => {
+      showStatus(null);
+      syncActionButtons();
+      appendLine(toolLineClass, `⚡ ${request.action}: cancelled`);
+    }),
+  );
+  sandboxStatus.className = `${statusBaseClass} ${statusToneClass.confirm}`;
+  sandboxStatus.replaceChildren(text, buttons);
+  confirmShown = true;
 }
 
 /** The streaming turn's latest agent bubble, if it has one. */
@@ -164,6 +209,8 @@ function renderEvent(event: AgentEvent, view: TurnView) {
 async function sendTurn(message: string) {
   const controller = new AbortController();
   activeTurn = controller;
+  // A new turn drops an unanswered confirm question.
+  if (confirmShown) showStatus(null);
   setStreaming(true);
 
   appendLine(userTurnClass, message, "article");
@@ -208,14 +255,24 @@ async function sendAction(action: string) {
     return;
   }
 
-  const uiId = shownUiId;
+  await postAction({ conversationId, uiId: shownUiId, action, values: actionValues(readFields(controls)) });
+}
+
+/** Posts an action request and shows its result, or asks its confirm question. */
+async function postAction(request: ActionRunRequest) {
   actionInFlight = true;
   syncActionButtons();
   try {
-    const result = await runAction({ conversationId, uiId, action, values: actionValues(readFields(controls)) });
+    const result = await runAction(request);
     // A design drawn meanwhile has already cleared the status area for itself.
-    if (shownUiId === uiId) showStatus(result);
-    appendLine(result.ok ? toolLineClass : errorLineClass, `⚡ ${action}: ${result.message}`);
+    const sameDesign = shownUiId === request.uiId;
+    if (result.confirm !== undefined) {
+      // Nothing ran; a question for a design or turn the person has left is dropped.
+      if (sameDesign && !activeTurn) askConfirm(request, result.confirm);
+      return;
+    }
+    if (sameDesign) showStatus(result);
+    appendLine(result.ok ? toolLineClass : errorLineClass, `⚡ ${request.action}: ${result.message}`);
   } finally {
     actionInFlight = false;
     syncActionButtons();
