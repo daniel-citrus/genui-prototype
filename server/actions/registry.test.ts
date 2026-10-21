@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import type { ToolLogger } from "../agent/tools";
 import { createActions } from "./index";
 import { createActionRegistry, MAX_ACTION_MESSAGE_CHARS } from "./registry";
-import type { ActionContext, ActionDefinition } from "./types";
+import type { ActionContext, ActionDefinition, ChoiceSource } from "./types";
 
 function recordingLogger(): ToolLogger & { errors: Record<string, unknown>[] } {
   const errors: Record<string, unknown>[] = [];
@@ -44,6 +44,10 @@ function action(
     run,
     ...overrides,
   };
+}
+
+function source(name: string, values: string[] = []): ChoiceSource {
+  return { name, list: async () => values };
 }
 
 function withProperty(prop: Record<string, unknown>) {
@@ -115,8 +119,152 @@ describe("createActionRegistry construction", () => {
     );
   });
 
-  it("accepts the app's actions", () => {
-    assert.doesNotThrow(() => createActionRegistry(createActions()));
+  it("accepts the app's actions, with demo_echo's spec unchanged", () => {
+    const registry = createActionRegistry(createActions());
+    const echo = registry.specs.find((spec) => spec.name === "demo_echo");
+    assert.ok(echo);
+    assert.deepEqual(Object.keys(echo), ["name", "description", "input_schema"]);
+  });
+
+  it("lists area, operation, confirm and choice source names when an action has them", () => {
+    const sizes = source("sizes");
+    const registry = createActionRegistry([
+      action({
+        area: "notes",
+        operation: "delete",
+        choices: { note: sizes },
+        confirm: "Delete {note}?",
+      }),
+    ]);
+    assert.deepEqual(registry.specs, [
+      {
+        name: "send_note",
+        description: "Send a note.",
+        input_schema: closedSchema,
+        area: "notes",
+        operation: "delete",
+        choices: { note: "sizes" },
+        confirm: "Delete {note}?",
+      },
+    ]);
+  });
+
+  it("throws on a malformed area", () => {
+    for (const area of ["Notes", "1notes", "notes-x", "", "_notes", "a".repeat(33)]) {
+      assert.throws(() => createActionRegistry([action({ area })]), /"send_note": area must be/, area);
+    }
+    assert.doesNotThrow(() => createActionRegistry([action({ area: "a".repeat(32) })]));
+  });
+
+  it("throws on an unknown operation", () => {
+    for (const operation of ["remove", "", "Delete"]) {
+      assert.throws(
+        () => createActionRegistry([action({ operation: operation as ActionDefinition["operation"] })]),
+        /"send_note": operation must be one of create, edit, archive, delete, attach, detach, other/,
+        operation,
+      );
+    }
+  });
+
+  it("throws on a choice for an undeclared or boolean input", () => {
+    for (const key of ["missing", "urgent", "constructor"]) {
+      assert.throws(
+        () => createActionRegistry([action({ choices: { [key]: source("notes") } })]),
+        new RegExp(`"send_note": choices input "${key}" must be a declared string property`),
+        key,
+      );
+    }
+  });
+
+  it("throws on a malformed source name", () => {
+    for (const name of ["Sizes", "item-sizes", "", "1sizes"]) {
+      assert.throws(
+        () => createActionRegistry([action({ choices: { note: source(name) } })]),
+        /"send_note": choice source ".*" must be snake_case/,
+        name,
+      );
+    }
+  });
+
+  it("throws on two source objects sharing a name, but accepts one shared object", () => {
+    const twoInputs = {
+      type: "object",
+      properties: {
+        a: { type: "string", description: "A." },
+        b: { type: "string", description: "B." },
+      },
+      additionalProperties: false,
+    };
+    assert.throws(
+      () =>
+        createActionRegistry([
+          action({ input_schema: twoInputs, choices: { a: source("sizes"), b: source("sizes") } }),
+        ]),
+      /"send_note": another choice source is already named "sizes"/,
+    );
+    assert.throws(
+      () =>
+        createActionRegistry([
+          action({ name: "first", choices: { note: source("sizes") } }),
+          action({ name: "second", choices: { note: source("sizes") } }),
+        ]),
+      /"second": another choice source is already named "sizes"/,
+    );
+    const shared = source("sizes");
+    assert.doesNotThrow(() =>
+      createActionRegistry([
+        action({ name: "first", input_schema: twoInputs, choices: { a: shared, b: shared } }),
+        action({ name: "second", choices: { note: shared } }),
+      ]),
+    );
+  });
+
+  it("throws on an empty or over-long confirm", () => {
+    for (const confirm of ["", "x".repeat(201)]) {
+      assert.throws(
+        () => createActionRegistry([action({ confirm })]),
+        /"send_note": confirm must be a non-empty string of at most 200 characters/,
+        JSON.stringify(confirm),
+      );
+    }
+    assert.doesNotThrow(() => createActionRegistry([action({ confirm: "x".repeat(200) })]));
+  });
+
+  it("throws on a confirm placeholder that names no declared property", () => {
+    for (const confirm of ["Delete {missing}?", "Delete {note} and {}?", "Delete {constructor}?"]) {
+      assert.throws(
+        () => createActionRegistry([action({ confirm })]),
+        /"send_note": confirm placeholder "\{.*\}" is not a declared property/,
+        confirm,
+      );
+    }
+    assert.doesNotThrow(() => createActionRegistry([action({ confirm: "Send {note} ({urgent})?" })]));
+  });
+});
+
+describe("createActionRegistry listChoices", () => {
+  it("returns a source's values, passing the signal through", async () => {
+    let received: AbortSignal | undefined;
+    const sizes: ChoiceSource = {
+      name: "sizes",
+      async list(signal) {
+        received = signal;
+        return ["S", "M"];
+      },
+    };
+    const registry = createActionRegistry([action({ choices: { note: sizes } })]);
+    const { signal } = new AbortController();
+
+    assert.deepEqual(await registry.listChoices("sizes", signal), ["S", "M"]);
+    assert.equal(received, signal);
+  });
+
+  it("rejects an unknown source name", async () => {
+    const registry = createActionRegistry([action({ choices: { note: source("sizes") } })]);
+    await assert.rejects(
+      registry.listChoices("colours", new AbortController().signal),
+      /Unknown choice source: colours/,
+    );
   });
 });
 

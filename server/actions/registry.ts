@@ -1,9 +1,18 @@
 import type { ActionResult } from "shared/api";
 import { compileSchema, formatSchemaErrors, schemaProblem } from "../validation/jsonSchema";
-import type { ActionContext, ActionDefinition, ActionRegistry } from "./types";
+import { CONFIRM_PLACEHOLDER } from "./confirm";
+import {
+  ACTION_OPERATIONS,
+  type ActionContext,
+  type ActionDefinition,
+  type ActionRegistry,
+  type ChoiceSource,
+} from "./types";
 
 const NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
 const PROPERTY_TYPES = new Set(["string", "boolean"]);
+const MAX_AREA_CHARS = 32;
+const MAX_CONFIRM_CHARS = 200;
 
 /** How long a handler may run before its result is "took too long". */
 export const ACTION_TIMEOUT_MS = 10_000;
@@ -13,8 +22,11 @@ export const MAX_ACTION_MESSAGE_CHARS = 500;
 
 /**
  * Build a registry from action definitions. Throws on a duplicate or malformed
- * name, or an `input_schema` that is not a valid, closed object schema whose
- * properties are all strings or booleans with a `description`.
+ * name, an `input_schema` that is not a valid, closed object schema whose
+ * properties are all strings or booleans with a `description`, a malformed
+ * `area` or `operation`, a `choices` input that is not a declared string, a
+ * malformed source name or two sources sharing one, or a `confirm` that is
+ * empty, too long, or names an undeclared property.
  *
  * Values are checked against the schema before a handler runs, so handlers get
  * only schema-checked string and boolean values. They still come from a
@@ -32,6 +44,7 @@ export function createActionRegistry(
     string,
     { def: ActionDefinition; validate: ReturnType<typeof compileSchema> }
   >();
+  const sources = new Map<string, ChoiceSource>();
 
   for (const def of definitions) {
     if (!NAME_PATTERN.test(def.name)) {
@@ -55,14 +68,56 @@ export function createActionRegistry(
         throw new Error(`Action "${def.name}": property "${key}" needs a description`);
       }
     }
+    if (
+      def.area !== undefined &&
+      (typeof def.area !== "string" || !NAME_PATTERN.test(def.area) || def.area.length > MAX_AREA_CHARS)
+    ) {
+      throw new Error(
+        `Action "${def.name}": area must be snake_case (${NAME_PATTERN}) and at most ${MAX_AREA_CHARS} characters`,
+      );
+    }
+    if (def.operation !== undefined && !ACTION_OPERATIONS.includes(def.operation)) {
+      throw new Error(`Action "${def.name}": operation must be one of ${ACTION_OPERATIONS.join(", ")}`);
+    }
+    for (const [key, source] of Object.entries(def.choices ?? {})) {
+      if (!Object.hasOwn(properties, key) || properties[key]?.type !== "string") {
+        throw new Error(`Action "${def.name}": choices input "${key}" must be a declared string property`);
+      }
+      if (!NAME_PATTERN.test(source.name)) {
+        throw new Error(`Action "${def.name}": choice source "${source.name}" must be snake_case (${NAME_PATTERN})`);
+      }
+      const known = sources.get(source.name);
+      if (known && known !== source) {
+        throw new Error(`Action "${def.name}": another choice source is already named "${source.name}"`);
+      }
+      sources.set(source.name, source);
+    }
+    if (def.confirm !== undefined) {
+      if (typeof def.confirm !== "string" || def.confirm === "" || def.confirm.length > MAX_CONFIRM_CHARS) {
+        throw new Error(
+          `Action "${def.name}": confirm must be a non-empty string of at most ${MAX_CONFIRM_CHARS} characters`,
+        );
+      }
+      for (const [, name] of def.confirm.matchAll(CONFIRM_PLACEHOLDER)) {
+        if (!Object.hasOwn(properties, name)) {
+          throw new Error(`Action "${def.name}": confirm placeholder "{${name}}" is not a declared property`);
+        }
+      }
+    }
     byName.set(def.name, { def, validate: compileSchema(schema) });
   }
 
   return {
-    specs: definitions.map(({ name, description, input_schema }) => ({
+    specs: definitions.map(({ name, description, input_schema, area, operation, choices, confirm }) => ({
       name,
       description,
       input_schema,
+      ...(area !== undefined && { area }),
+      ...(operation !== undefined && { operation }),
+      ...(choices !== undefined && {
+        choices: Object.fromEntries(Object.entries(choices).map(([key, source]) => [key, source.name])),
+      }),
+      ...(confirm !== undefined && { confirm }),
     })),
 
     async run(
@@ -104,6 +159,12 @@ export function createActionRegistry(
       } finally {
         clearTimeout(timer);
       }
+    },
+
+    async listChoices(source: string, signal: AbortSignal): Promise<string[]> {
+      const found = sources.get(source);
+      if (!found) throw new Error(`Unknown choice source: ${source}`);
+      return found.list(signal);
     },
   };
 }
