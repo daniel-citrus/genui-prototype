@@ -51,7 +51,9 @@ const menu = createInMemoryPosMenu();
 const actions = createActionRegistry([...createActions(), ...createMenuActions(menu)]);
 
 // Without Postgres the API still starts; each tool call then fails on its own.
-const tools = createToolRegistry(createAgentTools({ components, actions: actions.specs }));
+const tools = createToolRegistry(
+  createAgentTools({ components, actions: actions.specs, listChoices: actions.listChoices }),
+);
 
 // Redis only backs the rate limit; the API starts and serves while it is down.
 // Its logger forwards to the app's, which exists once buildApp returns.

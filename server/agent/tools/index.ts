@@ -14,13 +14,16 @@ export function createAgentTools({
   components: ComponentRepository;
   /** What a Button may run; none by default. */
   actions?: ActionSpec[];
-  /** Dropdown values for the sources the actions name; without it list_actions lists none. */
+  /**
+   * Dropdown values for the sources the actions name; without it list_actions
+   * lists none and render_ui checks none.
+   */
   listChoices?: ActionRegistry["listChoices"];
 }): ToolDefinition[] {
   return [
     listComponentsTool(components),
     getComponentTool(components),
     listActionsTool(actions, listChoices),
-    renderUiTool(components, actions),
+    renderUiTool(components, actions, listChoices),
   ];
 }
