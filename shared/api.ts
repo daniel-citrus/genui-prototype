@@ -59,10 +59,14 @@ export interface ActionRunRequest {
   action: string;
   /** Named input values; password fields never included. */
   values: Record<string, string | boolean>;
+  /** The person said yes to the action's confirm question. */
+  confirmed?: boolean;
 }
 
 /** What an action reports back; `message` is shown to the person. */
 export interface ActionResult {
   ok: boolean;
   message: string;
+  /** The action did not run: ask this, then resend with confirmed: true. */
+  confirm?: string;
 }

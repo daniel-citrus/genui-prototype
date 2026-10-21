@@ -20,11 +20,14 @@ const design: UiNode = {
     { component: "Checkbox", props: { label: "Gift", name: "gift" } },
     { component: "Button", props: { label: "Save", action: "save_note" } },
     { component: "Button", props: { label: "Order", action: "order", disabled: true } },
+    { component: "Button", props: { label: "Remove", action: "remove_note" } },
   ],
 };
 
 /** Values each `save_note` run received. */
 let received: Record<string, string | boolean>[] = [];
+/** Values each `remove_note` run received. */
+let removed: Record<string, string | boolean>[] = [];
 
 const actions = createActionRegistry([
   {
@@ -50,6 +53,23 @@ const actions = createActionRegistry([
     input_schema: { type: "object", properties: {}, additionalProperties: false },
     async run() {
       return { ok: true, message: "Ordered." };
+    },
+  },
+  {
+    name: "remove_note",
+    description: "Removes a note.",
+    input_schema: {
+      type: "object",
+      properties: {
+        note: { type: "string", description: "The note." },
+        size: { type: "string", description: "Size." },
+      },
+      additionalProperties: false,
+    },
+    confirm: "Remove {note} in size {size}?",
+    async run(values) {
+      removed.push(values);
+      return { ok: true, message: "Removed." };
     },
   },
 ]);
@@ -86,6 +106,7 @@ describe("POST /api/actions/run", () => {
   afterEach(() => {
     resetConversation(CONVERSATION);
     received = [];
+    removed = [];
   });
 
   const remember = () => rememberDesign(CONVERSATION, UI_ID, design);
@@ -132,6 +153,9 @@ describe("POST /api/actions/run", () => {
       body({ values: { note: null } }),
       body({ values: { note: { text: "hi" } } }),
       body({ values: tooMany }),
+      body({ confirmed: "yes" }),
+      body({ confirmed: null }),
+      body({ confirmed: 1 }),
     ];
     for (const payload of malformed) {
       const res = await run(app, payload);
@@ -229,5 +253,97 @@ describe("POST /api/actions/run", () => {
     assert.ok(!("values" in entry));
     const all = logLines.join("");
     for (const secret of ["s3cr", "private-search"]) assert.ok(!all.includes(secret), secret);
+  });
+
+  describe("an action with a confirm question", () => {
+    const remove = (overrides: Record<string, unknown> = {}) =>
+      body({ action: "remove_note", values: { note: "hi", search: "shoes" }, ...overrides });
+
+    it("answers an unconfirmed request with the filled question and doesn't run it", async () => {
+      remember();
+      const app = await build();
+      for (const payload of [remove(), remove({ confirmed: false })]) {
+        const res = await run(app, payload);
+        assert.equal(res.statusCode, 200);
+        const question = "Remove hi in size (none)?";
+        assert.deepEqual(res.json(), { ok: false, message: question, confirm: question });
+      }
+      await app.close();
+      assert.deepEqual(removed, []);
+    });
+
+    it("runs it with confirmed: true, with only the values its schema declares", async () => {
+      remember();
+      const app = await build();
+      const res = await run(app, remove({ confirmed: true }));
+      await app.close();
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(res.json(), { ok: true, message: "Removed." });
+      assert.deepEqual(removed, [{ note: "hi" }]);
+    });
+
+    it("cuts a long question to the message limit", async () => {
+      remember();
+      const app = await build();
+      const res = await run(app, remove({ values: { note: "x".repeat(1000) } }));
+      await app.close();
+      const { message, confirm } = res.json();
+      assert.equal(message.length, 500);
+      assert.equal(confirm, message);
+      assert.ok(message.startsWith("Remove xxx"));
+    });
+
+    it("refuses a gone design or a failed check first, whether or not confirmed is set", async () => {
+      remember();
+      const app = await build();
+      for (const confirmed of [undefined, true]) {
+        const gone = await run(app, remove({ uiId: "design-2", confirmed }));
+        assert.equal(gone.statusCode, 409);
+        assert.deepEqual(gone.json(), { error: { message: DESIGN_GONE_MESSAGE } });
+        const badValues = await run(app, remove({ values: { pin: "1234" }, confirmed }));
+        assert.equal(badValues.statusCode, 400);
+      }
+      await app.close();
+      assert.deepEqual(removed, []);
+    });
+
+    it("ignores confirmed on an action without a question", async () => {
+      remember();
+      const app = await build();
+      for (const confirmed of [true, false]) {
+        const res = await run(app, body({ values: { note: "hi" }, confirmed }));
+        assert.deepEqual(res.json(), { ok: true, message: "Saved." });
+      }
+      await app.close();
+      assert.deepEqual(received, [{ note: "hi" }, { note: "hi" }]);
+    });
+
+    it("logs whether the question was asked or answered, without values or the question", async () => {
+      remember();
+      const logLines: string[] = [];
+      const app = await build({ logLines });
+      const values = { note: "s3cr", search: "private-search" };
+      await run(app, remove({ values }));
+      await run(app, remove({ values, confirmed: true }));
+      await run(app, body({ values: { note: "hi" }, confirmed: true }));
+      await app.close();
+
+      const entries = logLines
+        .flatMap((chunk) => chunk.split("\n"))
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .filter((entry) => entry.msg === "action request");
+      assert.deepEqual(
+        entries.map(({ action, ok, confirmation }) => ({ action, ok, confirmation })),
+        [
+          { action: "remove_note", ok: false, confirmation: "asked" },
+          { action: "remove_note", ok: true, confirmation: "given" },
+          { action: "save_note", ok: true, confirmation: undefined },
+        ],
+      );
+      assert.ok(!("confirmation" in entries[2]));
+      const all = logLines.join("");
+      for (const secret of ["s3cr", "private-search", "Remove "]) assert.ok(!all.includes(secret), secret);
+    });
   });
 });

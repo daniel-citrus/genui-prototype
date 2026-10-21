@@ -1,6 +1,8 @@
 import type { FastifyPluginAsync } from "fastify";
 import type { ActionResult, ActionRunRequest } from "shared/api";
-import type { ActionRegistry } from "../actions/types";
+import { fillConfirm } from "../actions/confirm";
+import { MAX_ACTION_MESSAGE_CHARS } from "../actions/registry";
+import type { ActionRegistry, ActionSpec } from "../actions/types";
 import { getDesign } from "../agent/conversations";
 import { isObject } from "../ui/bindings";
 import { checkActionRequest } from "../ui/checkAction";
@@ -24,7 +26,7 @@ const isNonEmptyString = (value: unknown): value is string =>
 /** A body field that isn't what `ActionRunRequest` says, or `undefined` if it fits. */
 function bodyProblem(body: unknown): string | undefined {
   if (!isObject(body)) return "Expected a JSON object body.";
-  const { conversationId, uiId, action, values } = body;
+  const { conversationId, uiId, action, values, confirmed } = body;
   if (!isNonEmptyString(conversationId) || !isNonEmptyString(uiId) || !isNonEmptyString(action)) {
     return "conversationId, uiId and action must be non-empty strings.";
   }
@@ -34,16 +36,15 @@ function bodyProblem(body: unknown): string | undefined {
   if (!entries.every((v) => typeof v === "string" || typeof v === "boolean")) {
     return "Each value must be a string or a boolean.";
   }
+  if (confirmed !== undefined && typeof confirmed !== "boolean") return "confirmed must be a boolean.";
   return undefined;
 }
 
 /** Only the values whose keys the action's schema declares; all of them if it isn't registered. */
 function schemaValues(
-  actions: ActionRegistry,
-  action: string,
+  spec: ActionSpec | undefined,
   values: Record<string, string | boolean>,
 ): Record<string, string | boolean> {
-  const spec = actions.specs.find((s) => s.name === action);
   if (!spec) return values;
   const properties = isObject(spec.input_schema.properties) ? spec.input_schema.properties : {};
   return Object.fromEntries(Object.entries(values).filter(([key]) => Object.hasOwn(properties, key)));
@@ -52,14 +53,16 @@ function schemaValues(
 export const actionsRouter: FastifyPluginAsync<ActionsRouterOptions> = async (app, opts) => {
   /**
    * Run the action a Button click names, if the remembered design allows it.
-   * Values may be personal data: they are never logged.
+   * An action with a `confirm` question runs only with `confirmed: true`;
+   * otherwise the answer is the question. Values may be personal data: they
+   * are never logged, and neither is the question that holds them.
    */
   app.post("/run", { bodyLimit: ACTIONS_BODY_LIMIT_BYTES, config: { rateLimit: {} } }, async (req, reply) => {
     const problem = bodyProblem(req.body);
     if (problem) return reply.status(400).send({ error: { message: problem } });
 
     const started = performance.now();
-    const { conversationId, uiId, action, values } = req.body as ActionRunRequest;
+    const { conversationId, uiId, action, values, confirmed } = req.body as ActionRunRequest;
 
     const controller = new AbortController();
     // The response closing before it was sent means the client went away.
@@ -68,23 +71,33 @@ export const actionsRouter: FastifyPluginAsync<ActionsRouterOptions> = async (ap
     });
 
     let outcome: ActionResult | Refusal;
+    // Set only for an action with a `confirm` question that got past the checks.
+    let confirmation: "asked" | "given" | undefined;
     const design = getDesign(conversationId, uiId);
     if (!design) {
       outcome = { status: 409, message: DESIGN_GONE_MESSAGE };
     } else {
       const check = checkActionRequest(design, action, values);
-      outcome = check.ok
-        ? await opts.actions.run(action, schemaValues(opts.actions, action, values), {
-            conversationId,
-            log: req.log,
-            signal: controller.signal,
-          })
-        : { status: 400, message: check.message };
+      const spec = opts.actions.specs.find((s) => s.name === action);
+      if (!check.ok) {
+        outcome = { status: 400, message: check.message };
+      } else if (spec?.confirm !== undefined && confirmed !== true) {
+        confirmation = "asked";
+        const question = fillConfirm(spec.confirm, schemaValues(spec, values)).slice(0, MAX_ACTION_MESSAGE_CHARS);
+        outcome = { ok: false, message: question, confirm: question };
+      } else {
+        if (spec?.confirm !== undefined) confirmation = "given";
+        outcome = await opts.actions.run(action, schemaValues(spec, values), {
+          conversationId,
+          log: req.log,
+          signal: controller.signal,
+        });
+      }
     }
 
     const ok = "status" in outcome ? false : outcome.ok;
     req.log.info(
-      { conversationId, action, ok, durationMs: Math.round(performance.now() - started) },
+      { conversationId, action, ok, confirmation, durationMs: Math.round(performance.now() - started) },
       "action request",
     );
     if ("status" in outcome) {
