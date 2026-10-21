@@ -8,6 +8,7 @@ import { InMemoryComponentRepository } from "../../ports/fakes/InMemoryComponent
 import { createToolRegistry } from "../registry";
 import type { ToolContext } from "../tools";
 import { createAgentTools } from "./index";
+import { renderUiTool } from "./ui";
 
 function setup(
   components: ComponentRepository = new InMemoryComponentRepository(catalog),
@@ -115,5 +116,130 @@ describe("render_ui", () => {
     assert.deepEqual(result, { ok: false, summary: "render_ui failed" });
     assert.equal(shown.length, 0);
     assert.equal(errors.length, 1);
+  });
+});
+
+describe("render_ui dropdown checks", () => {
+  const itemProperty = { type: "string", description: "An item." };
+  const menuActions: ActionSpec[] = [
+    {
+      name: "menu_update_item",
+      description: "Change an item.",
+      operation: "edit",
+      choices: { item: "menu_items", category: "menu_categories" },
+      input_schema: {
+        type: "object",
+        properties: { item: itemProperty, category: { type: "string", description: "Its new category." } },
+        required: ["item"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "menu_merge_items",
+      description: "Merge one item into another.",
+      choices: { item: "menu_items", into: "menu_items" },
+      input_schema: {
+        type: "object",
+        properties: { item: itemProperty, into: itemProperty },
+        required: ["item", "into"],
+        additionalProperties: false,
+      },
+    },
+  ];
+  const values: Record<string, string[]> = {
+    menu_items: ["Bạc xỉu", "Cà phê sữa đá"],
+    menu_categories: ["Coffee", "Tea"],
+  };
+
+  function setupChoices(failing: string[] = []) {
+    const { ctx, shown, errors } = setup();
+    const loads: string[] = [];
+    const listChoices = async (source: string, signal: AbortSignal) => {
+      assert.equal(signal, ctx.signal);
+      loads.push(source);
+      if (failing.includes(source)) throw new Error(`${source} is down`);
+      return values[source];
+    };
+    const components = new InMemoryComponentRepository(catalog);
+    const registry = createToolRegistry([renderUiTool(components, menuActions, listChoices)]);
+    return { registry, ctx, shown, errors, loads };
+  }
+
+  const select = (name: string, ...options: string[]) => ({
+    component: "Select",
+    props: { label: name, options, name },
+  });
+  const button = (action: string) => ({ component: "Button", props: { label: "Go", action } });
+  const tree = (...children: unknown[]) => ({ tree: { component: "Stack", children } });
+
+  it("loads each source once per call, even when several inputs and actions use it", async () => {
+    const { registry, ctx, shown, loads } = setupChoices();
+    const args = tree(
+      select("item", "Bạc xỉu"),
+      select("into", "Cà phê sữa đá"),
+      select("category", "Tea"),
+      button("menu_update_item"),
+      button("menu_merge_items"),
+    );
+
+    assert.equal((await registry.run("render_ui", args, ctx)).ok, true);
+    assert.deepEqual(loads.toSorted(), ["menu_categories", "menu_items"]);
+    assert.equal((await registry.run("render_ui", args, ctx)).ok, true);
+    assert.equal(loads.length, 4);
+    assert.equal(shown.length, 2);
+  });
+
+  it("refuses an option the source doesn't have and shows nothing", async () => {
+    const { registry, ctx, shown } = setupChoices();
+    const result = await registry.run(
+      "render_ui",
+      tree(select("item", "Latte"), select("category", "Tea"), button("menu_update_item")),
+      ctx,
+    );
+    assert.deepEqual(result, {
+      ok: false,
+      summary: "UI has 1 problem",
+      data: {
+        errors: [
+          'tree.children.0.props.options "Latte" is not one of the menu_items values (call list_actions to get them)',
+        ],
+      },
+    });
+    assert.equal(shown.length, 0);
+  });
+
+  it("skips a source that fails to load, logs it, and still checks the rest", async () => {
+    const { registry, ctx, errors } = setupChoices(["menu_categories"]);
+    const result = await registry.run(
+      "render_ui",
+      tree(select("item", "Latte"), select("category", "Juice"), button("menu_update_item")),
+      ctx,
+    );
+    assert.deepEqual(result.data, {
+      errors: [
+        'tree.children.0.props.options "Latte" is not one of the menu_items values (call list_actions to get them)',
+      ],
+    });
+    assert.equal(errors.length, 1);
+    assert.equal((errors[0] as { source?: string }).source, "menu_categories");
+  });
+
+  it("loads only sources of inputs in the tree whose action some Button names", async () => {
+    const { registry, ctx, loads } = setupChoices();
+    await registry.run("render_ui", tree(select("item", "Latte"), button("menu_update_item")), ctx);
+    await registry.run("render_ui", tree(select("item", "Latte"), select("category", "Juice")), ctx);
+    assert.deepEqual(loads, ["menu_items"]);
+  });
+
+  it("checks no dropdowns without listChoices", async () => {
+    const components = new InMemoryComponentRepository(catalog);
+    const registry = createToolRegistry([renderUiTool(components, menuActions)]);
+    const { ctx } = setup();
+    const result = await registry.run(
+      "render_ui",
+      tree(select("item", "Latte"), select("category", "Juice"), button("menu_update_item")),
+      ctx,
+    );
+    assert.equal(result.ok, true);
   });
 });
