@@ -9,8 +9,8 @@ import { validateUiTree, validatorCompileCount } from "./validateTree";
 const repo = new InMemoryComponentRepository(catalog);
 const stored = () => repo.list();
 
-async function check(tree: unknown, actions?: ActionSpec[]) {
-  return validateUiTree(tree, await stored(), actions);
+async function check(tree: unknown, actions?: ActionSpec[], choiceValues?: Record<string, string[]>) {
+  return validateUiTree(tree, await stored(), actions, choiceValues);
 }
 
 const button = { component: "Button", props: { label: "Go" } };
@@ -289,5 +289,132 @@ describe("validateUiTree bindings", () => {
       assert.deepEqual(await check(tree, actions), await check(tree));
       assert.deepEqual(await check(tree, []), await check(tree));
     }
+  });
+});
+
+const updateItem: ActionSpec = {
+  name: "menu_update_item",
+  description: "Change an item.",
+  operation: "edit",
+  choices: { item: "menu_items" },
+  input_schema: {
+    type: "object",
+    properties: {
+      item: { type: "string", description: "The item to change." },
+      name: { type: "string", description: "Its new name." },
+      description: { type: "string", description: "Its new description." },
+      category: { type: "string", description: "Its new category." },
+    },
+    required: ["item"],
+    additionalProperties: false,
+  },
+};
+const archiveItem: ActionSpec = {
+  name: "menu_archive_item",
+  description: "Archive an item.",
+  operation: "archive",
+  choices: { item: "menu_items" },
+  input_schema: {
+    type: "object",
+    properties: { item: { type: "string", description: "The item to archive." } },
+    required: ["item"],
+    additionalProperties: false,
+  },
+};
+const menuValues = { menu_items: ["Bạc xỉu", "Cà phê sữa đá"] };
+
+const itemSelect = (...options: string[]) => ({
+  component: "Select",
+  props: { label: "Item", options, name: "item" },
+});
+const nameInput = { component: "TextInput", props: { label: "Name", name: "name" } };
+const actionButton = (action: string, disabled = false) => ({
+  component: "Button",
+  props: { label: "Go", action, disabled },
+});
+
+describe("validateUiTree dropdown checks", () => {
+  const menuActions = [updateItem, archiveItem];
+  const editForm = (item: unknown) => form(item, nameInput, actionButton("menu_update_item"));
+
+  it("accepts a Select listing all or some of the source's values", async () => {
+    for (const select of [itemSelect("Bạc xỉu", "Cà phê sữa đá"), itemSelect("Cà phê sữa đá")]) {
+      assert.deepEqual((await check(editForm(select), menuActions, menuValues)).errors, []);
+    }
+  });
+
+  it("refuses a Select option that isn't exactly one of the source's values", async () => {
+    const result = await check(editForm(itemSelect("Bạc xỉu", "Latte", "Bac xiu")), menuActions, menuValues);
+    assert.deepEqual(result.errors, [
+      'tree.children.0.props.options "Latte" is not one of the menu_items values (call list_actions to get them)',
+      'tree.children.0.props.options "Bac xiu" is not one of the menu_items values (call list_actions to get them)',
+    ]);
+  });
+
+  it("refuses an input that isn't a Select, instead of the input-kind message", async () => {
+    for (const component of ["TextInput", "Checkbox"]) {
+      const result = await check(
+        editForm({ component, props: { label: "Item", name: "item" } }),
+        menuActions,
+        menuValues,
+      );
+      assert.deepEqual(result.errors, [
+        'tree.children.0 fills "item" of action "menu_update_item", which takes one of the menu_items values: use a Select with those values as options',
+      ]);
+    }
+  });
+
+  it("checks inputs for a disabled Button's action too", async () => {
+    const result = await check(
+      form(itemSelect("Latte"), actionButton("menu_archive_item", true)),
+      menuActions,
+      menuValues,
+    );
+    assert.deepEqual(result.errors, [
+      'tree.children.0.props.options "Latte" is not one of the menu_items values (call list_actions to get them)',
+    ]);
+  });
+
+  it("reports a bad option once when several actions share its source", async () => {
+    const tree = form(itemSelect("Latte"), nameInput, actionButton("menu_update_item"), actionButton("menu_archive_item"));
+    assert.deepEqual((await check(tree, menuActions, menuValues)).errors, [
+      'tree.children.0.props.options "Latte" is not one of the menu_items values (call list_actions to get them)',
+    ]);
+  });
+
+  it("doesn't check a source missing from choiceValues", async () => {
+    const textItem = { component: "TextInput", props: { label: "Item", name: "item" } };
+    for (const item of [itemSelect("Latte"), textItem]) {
+      assert.deepEqual((await check(editForm(item), menuActions, { menu_categories: ["Tea"] })).errors, []);
+      assert.deepEqual((await check(editForm(item), menuActions)).errors, []);
+    }
+  });
+});
+
+describe("validateUiTree edit-form check", () => {
+  const onlyRequired = (spec: ActionSpec, disabled = false) =>
+    check(form(itemSelect("Latte"), actionButton(spec.name, disabled)), [spec]);
+
+  it("refuses an edit action with only required inputs, naming its optional properties in schema order", async () => {
+    assert.deepEqual((await onlyRequired(updateItem)).errors, [
+      'tree.children.1 action "menu_update_item" changes nothing without an input for one of: name, description, category',
+    ]);
+  });
+
+  it("accepts an edit form with one optional input", async () => {
+    const tree = form(itemSelect("Latte"), nameInput, actionButton("menu_update_item"));
+    assert.deepEqual((await check(tree, [updateItem])).errors, []);
+  });
+
+  it("doesn't check a disabled Button, or actions that aren't edits", async () => {
+    assert.deepEqual((await onlyRequired(updateItem, true)).errors, []);
+    const { operation: _, ...noOperation } = updateItem;
+    for (const spec of [{ ...updateItem, operation: "create" as const }, noOperation]) {
+      assert.deepEqual((await onlyRequired(spec)).errors, []);
+    }
+  });
+
+  it("never refuses an edit action without optional properties", async () => {
+    assert.deepEqual((await onlyRequired({ ...archiveItem, operation: "edit" })).errors, []);
   });
 });
