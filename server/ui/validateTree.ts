@@ -87,10 +87,16 @@ function bindingMismatch(input: NamedInput, action: string, type: unknown): stri
 /**
  * Problems with a tree's `name` and `action` props: duplicate names always;
  * with `actions`, also unregistered actions, required action properties no
- * input fills (for Buttons that aren't disabled), and inputs of the wrong kind
- * for the action property they fill.
+ * input fills and `edit` actions with no input for any optional property (both
+ * for Buttons that aren't disabled), inputs of the wrong kind for the action
+ * property they fill, and, for dropdown sources in `choiceValues`, inputs that
+ * aren't a Select or list an option the source doesn't have.
  */
-function bindingProblems(tree: unknown, actions: ActionSpec[] | undefined): string[] {
+function bindingProblems(
+  tree: unknown,
+  actions: ActionSpec[] | undefined,
+  choiceValues: Record<string, string[]> | undefined,
+): string[] {
   const { inputs, buttons } = collectBindings(tree);
   const problems: string[] = [];
 
@@ -118,23 +124,51 @@ function bindingProblems(tree: unknown, actions: ActionSpec[] | undefined): stri
     if (!button.disabled && !enabledAt.has(spec)) enabledAt.set(spec, button.path);
   }
 
+  const optionsChecked = new Set<string>();
   for (const spec of used) {
     const schema = spec.input_schema as {
       properties?: Record<string, { type?: unknown }>;
       required?: string[];
     };
+    const required = schema.required ?? [];
     const path = enabledAt.get(spec);
     if (path) {
-      for (const key of schema.required ?? []) {
+      for (const key of required) {
         if (!byName.has(key)) {
           problems.push(`${path} action "${spec.name}" needs an input named "${key}", and none has that name`);
         }
       }
+      const optional = Object.keys(schema.properties ?? {}).filter((key) => !required.includes(key));
+      if (spec.operation === "edit" && optional.length > 0 && !optional.some((key) => byName.has(key))) {
+        problems.push(
+          `${path} action "${spec.name}" changes nothing without an input for one of: ${optional.join(", ")}`,
+        );
+      }
     }
     for (const input of inputs) {
       const property = schema.properties?.[input.name];
-      const mismatch = property && bindingMismatch(input, spec.name, property.type);
+      if (!property) continue;
+      const source = spec.choices?.[input.name];
+      const values = source ? choiceValues?.[source] : undefined;
+      if (values && input.component !== "Select") {
+        problems.push(
+          `${input.path} fills "${input.name}" of action "${spec.name}", which takes one of the ${source} values: use a Select with those values as options`,
+        );
+        continue;
+      }
+      const mismatch = bindingMismatch(input, spec.name, property.type);
       if (mismatch) problems.push(mismatch);
+      // Options don't depend on the action: check each input against a source once.
+      const checkKey = `${input.path} ${source}`;
+      if (!values || optionsChecked.has(checkKey)) continue;
+      optionsChecked.add(checkKey);
+      for (const option of input.options ?? []) {
+        if (!values.includes(option)) {
+          problems.push(
+            `${input.path}.props.options "${option}" is not one of the ${source} values (call list_actions to get them)`,
+          );
+        }
+      }
     }
   }
   return problems;
@@ -143,13 +177,15 @@ function bindingProblems(tree: unknown, actions: ActionSpec[] | undefined): stri
 /**
  * Checks a UI tree against the catalog: shape, component names, props, which
  * components take children, size limits, and bindings (see `bindingProblems`;
- * action checks only when `actions` is given). Walks the whole tree and
- * reports every problem (at most MAX_ERRORS entries).
+ * action checks only when `actions` is given, dropdown checks only for the
+ * sources in `choiceValues`, source name → its current values). Walks the
+ * whole tree and reports every problem (at most MAX_ERRORS entries).
  */
 export function validateUiTree(
   tree: unknown,
   catalog: Component[],
   actions?: ActionSpec[],
+  choiceValues?: Record<string, string[]>,
 ): UiTreeCheck {
   const byName = new Map(catalog.map((c) => [c.name, c]));
   const errors: string[] = [];
@@ -202,7 +238,7 @@ export function validateUiTree(
   };
 
   visit(tree, "tree", 1);
-  errors.push(...bindingProblems(tree, actions));
+  errors.push(...bindingProblems(tree, actions, choiceValues));
 
   const limits: string[] = [];
   if (stats.depth > MAX_DEPTH) limits.push(`tree is ${stats.depth} levels deep (max ${MAX_DEPTH})`);
