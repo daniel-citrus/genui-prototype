@@ -5,7 +5,9 @@ import { runMigrations } from "./adapters/db/migrate";
 import { seedComponents } from "./adapters/db/seed";
 import { createRedis } from "./adapters/redis/client";
 import { createOpenAILlm } from "./adapters/openai/OpenAILlm";
+import { createInMemoryPosMenu } from "./adapters/pos/InMemoryPosMenu";
 import { createActions } from "./actions/index";
+import { createMenuActions } from "./actions/menu/index";
 import { createActionRegistry } from "./actions/registry";
 import { SYSTEM_PROMPT } from "./agent/systemPrompt";
 import { catalog } from "./catalog/components";
@@ -42,8 +44,11 @@ const llm = agentAvailable
     })
   : undefined;
 
+// The demo café menu: in memory, reset on every start, shared by every conversation.
+const menu = createInMemoryPosMenu();
+
 // What a Button in a rendered design may run.
-const actions = createActionRegistry(createActions());
+const actions = createActionRegistry([...createActions(), ...createMenuActions(menu)]);
 
 // Without Postgres the API still starts; each tool call then fails on its own.
 const tools = createToolRegistry(createAgentTools({ components, actions: actions.specs }));
