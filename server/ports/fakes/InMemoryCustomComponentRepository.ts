@@ -1,5 +1,6 @@
 import type { CustomComponentDefinition, StoredCustomComponent } from "shared/customComponents";
 import {
+  assertCanActivate,
   assertCanAddVersion,
   assertCanCreate,
   type CustomComponentRepository,
@@ -81,11 +82,7 @@ export class InMemoryCustomComponentRepository implements CustomComponentReposit
         versions: entry.versions.length,
       });
     } else {
-      const all = [...this.entries.values()];
-      assertCanCreate({
-        notDeleted: all.filter((e) => e.deletedAt === null).length,
-        total: all.length,
-      });
+      assertCanCreate({ notDeleted: this.countNotDeleted(), total: this.entries.size });
       entry = {
         name: definition.name,
         currentVersion: 0,
@@ -110,7 +107,10 @@ export class InMemoryCustomComponentRepository implements CustomComponentReposit
 
   async restore(name: string): Promise<boolean> {
     const entry = this.find(name);
-    if (entry) entry.deletedAt = null;
+    if (entry?.deletedAt) {
+      assertCanActivate(this.countNotDeleted());
+      entry.deletedAt = null;
+    }
     return entry !== undefined;
   }
 
@@ -118,5 +118,9 @@ export class InMemoryCustomComponentRepository implements CustomComponentReposit
   private find(name: string): Entry | undefined {
     const entry = this.entries.get(name.toLowerCase());
     return entry?.name === name ? entry : undefined;
+  }
+
+  private countNotDeleted(): number {
+    return [...this.entries.values()].filter((e) => e.deletedAt === null).length;
   }
 }

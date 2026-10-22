@@ -171,12 +171,38 @@ const ELEMENT_KEYS = ["tag", "attrs", "style", "text", "action", "children"];
 const ACTION_NAME = /^[a-z][a-z0-9_]*$/;
 const UNSAFE_VALUE_PARTS = ["url(", "expression", "javascript:", "@", "\\", "<", ">"];
 
-/** Why an attribute or style value is refused, or undefined when it is fine. */
-export function markupValueProblem(value: string): string | undefined {
+/** The only functions a value may call; none of them can load anything. */
+export const MARKUP_FUNCTIONS: readonly string[] = [
+  "rgb",
+  "rgba",
+  "hsl",
+  "hsla",
+  "calc",
+  "min",
+  "max",
+  "clamp",
+  "repeat",
+  "minmax",
+  "fit-content",
+];
+/** The SVG `transform` attribute may also call these. */
+const SVG_TRANSFORM_FUNCTIONS = [...MARKUP_FUNCTIONS, "matrix", "translate", "scale", "rotate", "skewx", "skewy"];
+
+/**
+ * Why an attribute or style value is refused, or undefined when it is fine.
+ * A function call is any name followed by `(`, in any letter case; only
+ * `functions` may be called.
+ */
+export function markupValueProblem(
+  value: string,
+  functions: readonly string[] = MARKUP_FUNCTIONS,
+): string | undefined {
   if (value.length > MAX_MARKUP_VALUE_CHARS) return `is longer than ${MAX_MARKUP_VALUE_CHARS} characters`;
   const lower = value.toLowerCase();
   const part = UNSAFE_VALUE_PARTS.find((p) => lower.includes(p));
-  return part === undefined ? undefined : `must not contain ${JSON.stringify(part)}`;
+  if (part !== undefined) return `must not contain ${JSON.stringify(part)}`;
+  const call = [...lower.matchAll(/([\w-]+)\(/g)].find(([, name]) => !functions.includes(name));
+  return call === undefined ? undefined : `must not call ${JSON.stringify(call[0])} (use ${functions.join(", ")})`;
 }
 
 /** Only absolute `http:` or `https:` URLs. */
@@ -207,7 +233,7 @@ function attributeProblem(tag: string, name: string, value: unknown, allowed: re
   if (BOOLEAN_ATTRIBUTES.has(name)) return typeof value === "boolean" ? undefined : "must be true or false";
   if (typeof value !== "string" && typeof value !== "number") return "must be a string or number";
   const text = String(value);
-  const problem = markupValueProblem(text);
+  const problem = markupValueProblem(text, name === "transform" ? SVG_TRANSFORM_FUNCTIONS : MARKUP_FUNCTIONS);
   if (problem) return problem;
   if (tag === "img" && name === "src" && !isSafeImageSrc(text)) return "must be an http: or https: URL";
   if (tag === "input" && name === "type" && !MARKUP_INPUT_TYPES.includes(text)) {
@@ -234,13 +260,36 @@ function styleProblem(property: string, value: unknown): string | undefined {
   return undefined;
 }
 
+const SIZE_PROPERTIES = ["width", "height", "max-width", "max-height", "font-size"];
+
+/**
+ * Whether an allowed style could hide a control, so that a click would send a
+ * value the person never saw.
+ */
+function hidesControl(property: string, value: string): boolean {
+  if (property === "display") return value === "none";
+  if (property === "opacity") {
+    // Only a plain number or percentage can be checked here, not calc() and the like.
+    const plain = /^\s*(\d*\.?\d+)(%?)\s*$/.exec(value);
+    return !plain || Number(plain[1]) / (plain[2] ? 100 : 1) < 0.5;
+  }
+  if (SIZE_PROPERTIES.includes(property)) {
+    // Zero in any unit, also inside calc() and the like; a negative size is drawn as zero.
+    return (value.match(/[+-]?\d*\.?\d+/g) ?? []).some((n) => Number(n) <= 0);
+  }
+  // A minus sign: a negative length, or a subtraction that can make one.
+  return property.startsWith("margin") && value.includes("-");
+}
+
 /**
  * Checks a Markup root against the allowlist and returns it with everything
  * that breaks a rule left out: an element, attribute, style property, text or
  * action, and an input whose type is refused; null when the root itself is
- * left out. Calls `report` once per thing left out, with its path below
- * `path`. Elements past MAX_MARKUP_ELEMENTS (in document order) or
- * MAX_MARKUP_DEPTH are left out too, reported once each.
+ * left out. A control (a named input or select, or a button with an action)
+ * and every element holding one also lose any style that could hide them.
+ * Calls `report` once per thing left out, with its path below `path`.
+ * Elements past MAX_MARKUP_ELEMENTS (in document order) or MAX_MARKUP_DEPTH
+ * are left out too, reported once each.
  */
 export function sanitizeMarkup(
   root: unknown,
@@ -250,6 +299,8 @@ export function sanitizeMarkup(
   let elements = 0;
   let tooMany = false;
   let tooDeep = false;
+  /** Kept elements that are or hold a control. */
+  const holdingControl = new Set<MarkupElement>();
 
   const visit = (value: unknown, at: string, level: number, inSvg: boolean): MarkupElement | null => {
     if (!isObject(value) || typeof value.tag !== "string") {
@@ -344,7 +395,19 @@ export function sanitizeMarkup(
           .filter((child) => child !== null);
       }
     }
-    return refusedInputType ? null : element;
+    if (refusedInputType) return null;
+
+    // Only input and select take a `name`.
+    const isControl = tag === "button" ? element.action !== undefined : element.attrs?.name !== undefined;
+    if (isControl || element.children?.some((child) => holdingControl.has(child))) {
+      holdingControl.add(element);
+      for (const [property, css] of Object.entries(element.style ?? {})) {
+        if (!hidesControl(property, css as string)) continue;
+        report(`${at}.style.${property} hides a field that sends a value`);
+        delete element.style?.[property];
+      }
+    }
+    return element;
   };
 
   return visit(root, path, 1, false);
