@@ -35,6 +35,8 @@ export interface UiTreeOptions {
   maxNodes?: number;
   /** Default MAX_DEPTH. */
   maxDepth?: number;
+  /** Names besides the catalog's that an unknown component may be offered as ("did you mean X?"). */
+  suggestions?: string[];
 }
 
 const NODE_KEYS = new Set(["component", "props", "children"]);
@@ -65,6 +67,18 @@ export function limitErrors(errors: string[]): string[] {
   return errors.length > MAX_ERRORS
     ? [...errors.slice(0, MAX_ERRORS - 1), `…and ${errors.length - (MAX_ERRORS - 1)} more`]
     : errors;
+}
+
+/** The size limits a tree with `stats` goes over, as problems. */
+export function sizeProblems(
+  stats: Pick<UiTreeStats, "nodes" | "depth">,
+  maxNodes = MAX_NODES,
+  maxDepth = MAX_DEPTH,
+): string[] {
+  const problems: string[] = [];
+  if (stats.depth > maxDepth) problems.push(`tree is ${stats.depth} levels deep (max ${maxDepth})`);
+  if (stats.nodes > maxNodes) problems.push(`tree has ${stats.nodes} nodes (max ${maxNodes})`);
+  return problems;
 }
 
 /** "message" for one Ajv error; enums list their values. */
@@ -219,7 +233,7 @@ export function validateUiTree(
   choiceValues?: Record<string, string[]>,
   options: UiTreeOptions = {},
 ): UiTreeCheck {
-  const { designChecks = true, maxNodes = MAX_NODES, maxDepth = MAX_DEPTH } = options;
+  const { designChecks = true, maxNodes = MAX_NODES, maxDepth = MAX_DEPTH, suggestions = [] } = options;
   const byName = new Map(catalog.map((c) => [c.name, c]));
   const errors: string[] = [];
   const stats: UiTreeStats = { nodes: 0, depth: 0, components: {} };
@@ -245,10 +259,10 @@ export function validateUiTree(
         stats.components[component.name] = (stats.components[component.name] ?? 0) + 1;
       } else {
         const lower = node.component.toLowerCase();
-        const match = catalog.find((c) => c.name.toLowerCase() === lower);
+        const match = [...byName.keys(), ...suggestions].find((name) => name.toLowerCase() === lower);
         errors.push(
           `${path}.component "${node.component}" is not in the catalog` +
-            (match ? ` (did you mean ${match.name}?)` : ""),
+            (match ? ` (did you mean ${match}?)` : ""),
         );
       }
     }
@@ -279,9 +293,6 @@ export function validateUiTree(
   visit(tree, "tree", 1);
   errors.push(...bindingProblems(tree, actions, choiceValues, designChecks));
 
-  const limits: string[] = [];
-  if (stats.depth > maxDepth) limits.push(`tree is ${stats.depth} levels deep (max ${maxDepth})`);
-  if (stats.nodes > maxNodes) limits.push(`tree has ${stats.nodes} nodes (max ${maxNodes})`);
-  const all = [...limits, ...errors];
+  const all = [...sizeProblems(stats, maxNodes, maxDepth), ...errors];
   return { ok: all.length === 0, errors: limitErrors(all), stats };
 }

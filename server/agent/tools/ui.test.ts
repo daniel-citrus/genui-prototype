@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { TemplateNode } from "shared/customComponents";
 import type { UiNode } from "shared/ui";
 import type { ActionSpec } from "../../actions/types";
 import { catalog } from "../../catalog/components";
+import { menuItemCard, panel, specials, withTemplate } from "../../customComponents/testDefinitions";
 import type { ComponentRepository } from "../../ports/ComponentRepository";
+import type { CustomComponentRepository } from "../../ports/CustomComponentRepository";
 import { InMemoryComponentRepository } from "../../ports/fakes/InMemoryComponentRepository";
+import { InMemoryCustomComponentRepository } from "../../ports/fakes/InMemoryCustomComponentRepository";
+import { checkActionRequest } from "../../ui/checkAction";
 import { createToolRegistry } from "../registry";
 import type { ToolContext } from "../tools";
 import { createAgentTools } from "./index";
@@ -241,5 +246,209 @@ describe("render_ui dropdown checks", () => {
       ctx,
     );
     assert.equal(result.ok, true);
+  });
+});
+
+describe("render_ui with custom components", () => {
+  const latte = { name: "Latte", price: "$4.50", photo: "https://example.com/latte.jpg" };
+  const stack = (...children: unknown[]) => ({ component: "Stack", children });
+  const placeOrder: ActionSpec = {
+    name: "place_order",
+    description: "Order some.",
+    input_schema: {
+      type: "object",
+      properties: { qty: { type: "string", description: "How many." } },
+      required: ["qty"],
+      additionalProperties: false,
+    },
+  };
+  /** A Markup form with a quantity input and a button for `action`. */
+  const orderForm = (name: string, action: string) =>
+    withTemplate(name, {
+      component: "Markup",
+      props: {
+        root: {
+          tag: "div",
+          children: [
+            { tag: "input", attrs: { name: "qty" } },
+            { tag: "button", action, text: "Order" },
+          ],
+        },
+      },
+    });
+
+  /**
+   * render_ui over the catalog and `customComponents`, by default a repository
+   * holding the test definitions; `calls` lists what that one was asked.
+   */
+  async function setupCustom(customComponents?: CustomComponentRepository) {
+    const repo = new InMemoryCustomComponentRepository();
+    for (const definition of [menuItemCard, panel, specials, orderForm("OrderForm", "place_order")]) {
+      await repo.save(definition);
+    }
+    const calls: string[] = [];
+    const getByName = repo.getByName.bind(repo);
+    const list = repo.list.bind(repo);
+    repo.getByName = (name) => (calls.push(name), getByName(name));
+    repo.list = (opts) => (calls.push(`list ${opts?.search}`), list(opts));
+    const { ctx, shown, errors } = setup();
+    const components = new InMemoryComponentRepository(catalog);
+    const tools = createAgentTools({ components, actions: [placeOrder], customComponents: customComponents ?? repo });
+    return { registry: createToolRegistry(tools), repo, calls, ctx, shown, errors };
+  }
+
+  const names = (node: UiNode): string[] => [node.component, ...(node.children ?? []).flatMap(names)];
+
+  it("validates and shows the expanded tree and counts its nodes", async () => {
+    const { registry, ctx, shown } = await setupCustom();
+    const result = await registry.run("render_ui", { tree: stack({ component: "MenuItemCard", props: latte }) }, ctx);
+
+    assert.deepEqual(result, {
+      ok: true,
+      summary: "Rendered 5 components",
+      data: { stats: { nodes: 5, depth: 3, components: { Stack: 1, Card: 1, Image: 1, Heading: 1, Badge: 1 } } },
+    });
+    assert.deepEqual(shown, [
+      stack({
+        component: "Card",
+        props: {},
+        children: [
+          { component: "Image", props: { src: latte.photo, alt: "Latte" } },
+          { component: "Heading", props: { text: "Latte", level: 3 } },
+          { component: "Badge", props: { text: "$4.50", tone: "success" } },
+        ],
+      }),
+    ]);
+  });
+
+  it("refuses Markup in the agent's own tree, even when it is valid", async () => {
+    const { registry, ctx, shown } = await setupCustom();
+    const markup = { component: "Markup", props: { root: { tag: "p", text: "Hi" } } };
+    const result = await registry.run("render_ui", { tree: stack(markup) }, ctx);
+
+    assert.deepEqual(result, {
+      ok: false,
+      summary: "UI has 1 problem",
+      data: {
+        errors: ["tree.children.0 Markup can only be used inside a custom component; define one with define_component"],
+      },
+    });
+    assert.equal(shown.length, 0);
+  });
+
+  it("reports instance and template problems in the agent's terms", async () => {
+    const { registry, ctx, shown } = await setupCustom();
+    const result = await registry.run(
+      "render_ui",
+      {
+        tree: stack(
+          { component: "MenuItemCard", props: { name: "Latte", photo: latte.photo } },
+          { component: "MenuItemCard", props: { ...latte, photo: "ftp://example.com/latte.jpg" } },
+        ),
+      },
+      ctx,
+    );
+
+    assert.deepEqual(result.data, {
+      errors: [
+        "tree.children.0.props.price is required",
+        'tree.children.1 (MenuItemCard v1) template.children.0.props.src must match pattern "^https?://"',
+      ],
+    });
+    assert.equal(shown.length, 0);
+  });
+
+  it("refuses an unregistered action on a Markup button, and accepts clicks on a registered one", async () => {
+    const { registry, repo, ctx, shown } = await setupCustom();
+    await repo.save(orderForm("MailForm", "send_mail"));
+
+    const refused = await registry.run("render_ui", { tree: stack({ component: "MailForm" }) }, ctx);
+    assert.deepEqual(refused.data, {
+      errors: [
+        'tree.children.0 (MailForm v1) template.props.root.children.1.action "send_mail" is not a registered action' +
+          " (call list_actions to see them)",
+      ],
+    });
+
+    const rendered = await registry.run("render_ui", { tree: stack({ component: "OrderForm" }) }, ctx);
+    assert.equal(rendered.ok, true);
+    assert.deepEqual(names(shown[0]), ["Stack", "Markup"]);
+    assert.deepEqual(checkActionRequest(shown[0], "place_order", { qty: "2" }), { ok: true });
+  });
+
+  it("refuses a deleted component in the agent's tree, and still expands templates that use it", async () => {
+    const { registry, repo, ctx, shown } = await setupCustom();
+    await repo.softDelete("MenuItemCard");
+    const deleted =
+      'tree.component "MenuItemCard" was deleted; restore it in the Components panel or use another component';
+
+    const root = await registry.run("render_ui", { tree: { component: "MenuItemCard", props: latte } }, ctx);
+    assert.deepEqual(root, { ok: false, summary: "UI has 1 problem", data: { errors: [deleted] } });
+    const child = await registry.run("render_ui", { tree: stack({ component: "MenuItemCard", props: latte }) }, ctx);
+    assert.deepEqual(child.data, { errors: [deleted.replace("tree", "tree.children.0")] });
+    assert.equal(shown.length, 0);
+
+    const result = await registry.run("render_ui", { tree: { component: "Specials", props: { price: "$3.00" } } }, ctx);
+    assert.equal(result.ok, true);
+    assert.deepEqual(names(shown[0]), ["Card", "Heading", "Card", "Image", "Heading", "Badge", "Divider"]);
+  });
+
+  it("keeps the agent's tree within 100 nodes and allows 400 expanded nodes and 24 levels", async () => {
+    const { registry, repo, ctx } = await setupCustom();
+    const dividers = Array.from({ length: 6 }, () => ({ component: "Divider" }));
+    await repo.save(withTemplate("SixDividers", { component: "Stack", children: dividers }));
+    const around = (child: TemplateNode | { $children: true }): TemplateNode => ({
+      component: "Stack",
+      children: [child],
+    });
+    await repo.save(withTemplate("ThreeLevels", around(around(around({ $children: true }))), "any"));
+    const many = (count: number, component: string) => stack(...Array.from({ length: count }, () => ({ component })));
+
+    const tooMany = await registry.run("render_ui", { tree: many(100, "Divider") }, ctx);
+    assert.deepEqual(tooMany.data, { errors: ["tree has 101 nodes (max 100)"] });
+
+    const wide = await registry.run("render_ui", { tree: many(57, "SixDividers") }, ctx);
+    assert.equal(wide.summary, "Rendered 400 components");
+
+    let deep: unknown = { component: "ThreeLevels" };
+    for (let level = 2; level <= 8; level++) deep = { component: "ThreeLevels", children: [deep] };
+    const result = await registry.run("render_ui", { tree: deep }, ctx);
+    assert.equal(result.ok, true);
+    assert.equal((result.data as { stats: { depth: number } }).stats.depth, 24);
+  });
+
+  it("suggests a custom name for an unknown one that differs only in case", async () => {
+    const { registry, ctx } = await setupCustom();
+    const tree = stack({ component: "menuItemCard" }, { component: "button" });
+    const result = await registry.run("render_ui", { tree }, ctx);
+    assert.deepEqual(result.data, {
+      errors: [
+        'tree.children.0.component "menuItemCard" is not in the catalog (did you mean MenuItemCard?)',
+        'tree.children.1.component "button" is not in the catalog (did you mean Button?)',
+      ],
+    });
+  });
+
+  it("asks the repository nothing for a catalog-only design", async () => {
+    const { registry, calls, ctx, shown } = await setupCustom();
+    const tree = stack({ component: "Button", props: { label: "Go" } });
+    const result = await registry.run("render_ui", { tree }, ctx);
+    assert.equal(result.ok, true);
+    assert.equal(shown.length, 1);
+    assert.deepEqual(calls, []);
+  });
+
+  it("reports custom components unavailable only for designs that use names outside the catalog", async () => {
+    const down = new InMemoryCustomComponentRepository();
+    down.getByName = down.list = async () => {
+      throw new Error("connect ECONNREFUSED");
+    };
+    const { registry, ctx, shown, errors } = await setupCustom(down);
+
+    assert.equal((await registry.run("render_ui", { tree: stack({ component: "Divider" }) }, ctx)).ok, true);
+    const result = await registry.run("render_ui", { tree: stack({ component: "MenuItemCard", props: latte }) }, ctx);
+    assert.deepEqual(result, { ok: false, summary: "Custom components are unavailable" });
+    assert.equal(shown.length, 1);
+    assert.equal(errors.length, 1);
   });
 });
