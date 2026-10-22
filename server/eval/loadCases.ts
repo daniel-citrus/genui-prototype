@@ -10,6 +10,7 @@ const CHECK_KEYS = [
   "endedBy",
   "noError",
   "toolCalled",
+  "toolNotCalled",
   "toolSucceeded",
   "uiComponent",
   "uiButtonAction",
@@ -66,6 +67,7 @@ function parseCheck(raw: unknown, context: string): EvalCheck {
       }
       return { noError: true };
     case "toolCalled":
+    case "toolNotCalled":
     case "toolSucceeded":
     case "uiComponent":
     case "uiButtonAction":
