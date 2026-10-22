@@ -1,4 +1,4 @@
-import type { EndedBy } from "../agent/trace";
+import type { AgentTrace, EndedBy } from "../agent/trace";
 
 export type EvalCheck =
   | { endedBy: EndedBy }
@@ -25,6 +25,7 @@ export interface EvalCaseResult {
   id: string;
   ok: boolean;
   failures: CheckFailure[];
+  trace: AgentTrace;
   endedBy?: EndedBy;
   error?: string;
 }
