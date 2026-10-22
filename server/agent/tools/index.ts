@@ -4,6 +4,7 @@ import type { CustomComponentRepository } from "../../ports/CustomComponentRepos
 import type { ToolDefinition } from "../tools";
 import { listActionsTool } from "./actions";
 import { getComponentTool, listComponentsTool } from "./components";
+import { defineComponentTool, deleteComponentTool } from "./customComponents";
 import { renderUiTool } from "./ui";
 
 /** Every tool the agent can call, built over the given ports and actions. */
@@ -21,13 +22,20 @@ export function createAgentTools({
    * lists none and render_ui checks none.
    */
   listChoices?: ActionRegistry["listChoices"];
-  /** Custom components render_ui expands; without it render_ui knows only the catalog. */
+  /**
+   * Custom components the agent can list, read, define, delete and render;
+   * without it the tools know only the catalog, and there is no
+   * define_component or delete_component.
+   */
   customComponents?: CustomComponentRepository;
 }): ToolDefinition[] {
   return [
-    listComponentsTool(components),
-    getComponentTool(components),
+    listComponentsTool(components, customComponents),
+    getComponentTool(components, customComponents),
     listActionsTool(actions, listChoices),
     renderUiTool(components, actions, listChoices, customComponents),
+    ...(customComponents
+      ? [defineComponentTool(components, customComponents, actions), deleteComponentTool(components, customComponents)]
+      : []),
   ];
 }

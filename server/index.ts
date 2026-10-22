@@ -1,6 +1,7 @@
 import { agentAvailable, config } from "./config";
 import { createDb } from "./adapters/db/client";
 import { DrizzleComponentRepository } from "./adapters/db/DrizzleComponentRepository";
+import { DrizzleCustomComponentRepository } from "./adapters/db/DrizzleCustomComponentRepository";
 import { runMigrations } from "./adapters/db/migrate";
 import { seedComponents } from "./adapters/db/seed";
 import { createRedis } from "./adapters/redis/client";
@@ -34,6 +35,7 @@ function dbHost(url: string): string {
 // The only place real adapters are built.
 const database = createDb(config.databaseUrl);
 const components = new DrizzleComponentRepository(database.db);
+const customComponents = new DrizzleCustomComponentRepository(database.db);
 
 const llm = agentAvailable
   ? createOpenAILlm({
@@ -52,7 +54,7 @@ const actions = createActionRegistry([...createActions(), ...createMenuActions(m
 
 // Without Postgres the API still starts; each tool call then fails on its own.
 const tools = createToolRegistry(
-  createAgentTools({ components, actions: actions.specs, listChoices: actions.listChoices }),
+  createAgentTools({ components, actions: actions.specs, listChoices: actions.listChoices, customComponents }),
 );
 
 // Redis only backs the rate limit; the API starts and serves while it is down.
