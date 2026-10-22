@@ -15,6 +15,13 @@
       "when": 1791936542947,
       "tag": "0001_steep_albert_cleary",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792640794587,
+      "tag": "0002_medical_proemial_gods",
+      "breakpoints": true
     }
   ]
 }
