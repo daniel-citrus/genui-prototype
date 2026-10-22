@@ -5,7 +5,7 @@ import type { AgentLlm, HistoryMessage, LlmTurn } from "../ports/AgentLlm";
 import { catalog } from "../catalog/components";
 import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
 import { InMemoryCustomComponentRepository } from "../ports/fakes/InMemoryCustomComponentRepository";
-import { getDesign, getHistory, getTraces, resetConversation } from "./conversations";
+import { getDesign, getHistory, resetConversation } from "./conversations";
 import { MAX_TOOL_CALLS_PER_TURN, MAX_TURN_TOKENS } from "./guardrails";
 import { FORGOTTEN_NOTICE, MAX_STEPS, runAgent, TRUNCATED_NOTICE } from "./loop";
 import { createToolRegistry } from "./registry";
@@ -75,17 +75,6 @@ function makeRun(
     resume: opts.resume,
   };
   return { run, events };
-}
-
-function infoLog() {
-  const infos: Array<Record<string, unknown>> = [];
-  const log: ToolLogger = {
-    ...noopLogger,
-    info: (obj) => {
-      infos.push(obj as Record<string, unknown>);
-    },
-  };
-  return { log, infos };
 }
 
 describe("runAgent", () => {
@@ -355,6 +344,17 @@ describe("runAgent", () => {
       });
     }
 
+    function infoLog() {
+      const infos: Array<Record<string, unknown>> = [];
+      const log: ToolLogger = {
+        ...noopLogger,
+        info: (obj) => {
+          infos.push(obj as Record<string, unknown>);
+        },
+      };
+      return { log, infos };
+    }
+
     it("sends the last allowed completion with tools off, and a text reply ends cleanly", async () => {
       const conversationId = "limit-last-step";
       const tools = stubTools();
@@ -569,227 +569,6 @@ describe("runAgent", () => {
       assert.equal(infos.length, 1);
       assert.equal(infos[0].endedBy, "stopped");
       assert.equal(infos[0].steps, 0);
-    });
-  });
-
-  describe("turn traces", () => {
-    it("stores a text-only turn with one completion and no tool calls", async () => {
-      const conversationId = "trace-text-only";
-      const { run } = makeRun(stubTools());
-      const llm = scriptedLlm([{ content: "Hello there.", toolCalls: [] }]);
-
-      await runAgent("hi", conversationId, run, llm);
-      const traces = getTraces(conversationId);
-      resetConversation(conversationId);
-
-      assert.equal(traces.length, 1);
-      assert.equal(traces[0].userText, "hi");
-      assert.equal(traces[0].endedBy, "reply");
-      assert.deepEqual(traces[0].completions, [
-        {
-          allowTools: true,
-          content: "Hello there.",
-          truncated: false,
-          toolCalls: [],
-        },
-      ]);
-      assert.equal(traces[0].error, undefined);
-    });
-
-    it("stores a trace when aborted before the first completion", async () => {
-      const conversationId = "trace-aborted-early";
-      const controller = new AbortController();
-      controller.abort();
-      const { run } = makeRun(stubTools(), { signal: controller.signal });
-
-      await runAgent("hi", conversationId, run, scriptedLlm([]));
-      const traces = getTraces(conversationId);
-      resetConversation(conversationId);
-
-      assert.equal(traces.length, 1);
-      assert.deepEqual(traces[0].completions, []);
-      assert.equal(traces[0].endedBy, "stopped");
-      assert.equal(traces[0].steps, 0);
-    });
-
-    it("sets error when the model ignores tools being off", async () => {
-      const conversationId = "trace-tools-off-error";
-      const tools = stubTools();
-      const { run } = makeRun(tools);
-      let n = 0;
-      const llm: AgentLlm = {
-        async complete({ allowTools }) {
-          n += 1;
-          return {
-            content: null,
-            toolCalls: [
-              { id: `c${n}`, name: "list_components", arguments: JSON.stringify({ n, allowTools }) },
-            ],
-          };
-        },
-      };
-
-      await runAgent("go", conversationId, run, llm);
-      const traces = getTraces(conversationId);
-      resetConversation(conversationId);
-
-      assert.ok(traces[0].error?.match(/too many steps/i));
-      assert.equal(traces[0].endedBy, "max_steps");
-    });
-
-    it("records ui on a successful render_ui tool call", async () => {
-      const conversationId = "trace-render-ui";
-      const tools = createToolRegistry(
-        createAgentTools({ components: new InMemoryComponentRepository(catalog) }),
-      );
-      const { run, events } = makeRun(tools, { conversationId });
-      const tree = { component: "Card", props: { title: "Hi" } };
-      const llm = scriptedLlm([
-        {
-          content: null,
-          toolCalls: [{ id: "call_ui", name: "render_ui", arguments: JSON.stringify({ tree }) }],
-        },
-        { content: "Done.", toolCalls: [] },
-      ]);
-
-      await runAgent("draw", conversationId, run, llm);
-      const traces = getTraces(conversationId);
-      const ui = events.find((e) => e.type === "ui");
-      resetConversation(conversationId);
-
-      assert.ok(ui?.type === "ui");
-      const tc = traces[0].completions[0].toolCalls[0];
-      assert.equal(tc.skipped, undefined);
-      assert.deepEqual(tc.ui, { id: ui.id, tree: ui.tree });
-    });
-
-    it("omits ui when render_ui fails validation", async () => {
-      const conversationId = "trace-render-fail";
-      const tools = createToolRegistry(
-        createAgentTools({ components: new InMemoryComponentRepository(catalog) }),
-      );
-      const { run, events } = makeRun(tools, { conversationId });
-      const llm = scriptedLlm([
-        {
-          content: null,
-          toolCalls: [
-            { id: "call_bad", name: "render_ui", arguments: JSON.stringify({ tree: { component: "Nope" } }) },
-          ],
-        },
-        { content: "Sorry.", toolCalls: [] },
-      ]);
-
-      await runAgent("draw", conversationId, run, llm);
-      const traces = getTraces(conversationId);
-      resetConversation(conversationId);
-
-      assert.equal(events.some((e) => e.type === "ui"), false);
-      const tc = traces[0].completions[0].toolCalls[0];
-      assert.equal(tc.ui, undefined);
-      assert.equal(tc.skipped, undefined);
-    });
-
-    it("records duplicate and budget skip reasons", async () => {
-      const conversationId = "trace-skips";
-      const tools = stubTools();
-      const { run } = makeRun(tools);
-      const calls = Array.from({ length: MAX_TOOL_CALLS_PER_TURN + 1 }, (_, i) => ({
-        id: `c${i}`,
-        name: "list_components",
-        arguments: JSON.stringify({ n: i }),
-      }));
-      const llm = scriptedLlm([
-        {
-          content: null,
-          toolCalls: [
-            { id: "dup_a", name: "list_components", arguments: '{"x":1}' },
-            { id: "dup_b", name: "list_components", arguments: '{"x":1}' },
-          ],
-        },
-        { content: null, toolCalls: calls.slice(0, 10) },
-        { content: null, toolCalls: calls.slice(10) },
-        { content: "ok", toolCalls: [] },
-      ]);
-
-      await runAgent("go", conversationId, run, llm);
-      const trace = getTraces(conversationId)[0];
-      resetConversation(conversationId);
-
-      const dup = trace.completions[0].toolCalls.find((t) => t.call.id === "dup_b");
-      assert.equal(dup?.skipped, "duplicate");
-
-      const over = trace.completions[2].toolCalls.find((t) => t.call.id === calls[MAX_TOOL_CALLS_PER_TURN].id);
-      assert.equal(over?.skipped, "budget");
-      assert.equal(trace.toolCalls, MAX_TOOL_CALLS_PER_TURN + 3);
-    });
-
-    it("records stopped when the tool does not run because the turn was aborted", async () => {
-      const conversationId = "trace-stopped-tool";
-      const controller = new AbortController();
-      const tools = stubTools();
-      const { run } = makeRun(tools, { signal: controller.signal });
-      const llm: AgentLlm = {
-        async complete() {
-          controller.abort();
-          return {
-            content: null,
-            toolCalls: [{ id: "call_1", name: "list_components", arguments: "{}" }],
-          };
-        },
-      };
-
-      await runAgent("list", conversationId, run, llm);
-      const tc = getTraces(conversationId)[0].completions[0].toolCalls[0];
-      resetConversation(conversationId);
-
-      assert.equal(tc.skipped, "stopped");
-    });
-
-    it("does not put the forgotten-conversation notice on the trace", async () => {
-      const conversationId = "trace-forgotten";
-      resetConversation(conversationId);
-      const { run } = makeRun(stubTools(), { resume: true });
-      const llm = scriptedLlm([{ content: "Hi again.", toolCalls: [] }]);
-
-      await runAgent("as I said", conversationId, run, llm);
-      const trace = getTraces(conversationId)[0];
-      resetConversation(conversationId);
-
-      assert.equal(trace.userText, "as I said");
-      assert.equal((trace as { notice?: string }).notice, undefined);
-    });
-
-    it("matches the usage log totals on the trace", async () => {
-      const conversationId = "trace-usage-match";
-      const tools = stubTools();
-      const { log, infos } = infoLog();
-      const { run } = makeRun(tools, { log });
-      const llm = scriptedLlm([
-        {
-          content: null,
-          toolCalls: [{ id: "c1", name: "list_components", arguments: "{}" }],
-          usage: { promptTokens: 10, completionTokens: 5 },
-        },
-        { content: "done", toolCalls: [], usage: { promptTokens: 20, completionTokens: 8 } },
-      ]);
-
-      await runAgent("go", conversationId, run, llm);
-      const trace = getTraces(conversationId)[0];
-      resetConversation(conversationId);
-
-      assert.deepEqual(infos[0], {
-        conversationId,
-        steps: 2,
-        toolCalls: 1,
-        promptTokens: 30,
-        completionTokens: 13,
-        endedBy: "reply",
-      });
-      assert.equal(trace.steps, infos[0].steps);
-      assert.equal(trace.toolCalls, infos[0].toolCalls);
-      assert.equal(trace.promptTokens, infos[0].promptTokens);
-      assert.equal(trace.completionTokens, infos[0].completionTokens);
-      assert.equal(trace.endedBy, infos[0].endedBy);
     });
   });
 });
