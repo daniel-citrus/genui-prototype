@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { catalog } from "../catalog/components";
 import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
+import { InMemoryCustomComponentRepository } from "../ports/fakes/InMemoryCustomComponentRepository";
 import { SYSTEM_PROMPT } from "./systemPrompt";
 import { createAgentTools } from "./tools/index";
 
+// As the server builds them, with custom components.
 const toolNames = createAgentTools({
   components: new InMemoryComponentRepository(catalog),
+  customComponents: new InMemoryCustomComponentRepository(),
 }).map((t) => t.name);
 
 describe("SYSTEM_PROMPT", () => {
@@ -57,6 +60,46 @@ describe("SYSTEM_PROMPT", () => {
       "For an input that has choices, use a Select named after the input, with that source's values as its options.",
       "Besides every required property, give an input to each optional property the request mentions or implies; a form that edits something needs at least one field to change.",
       "If the action has a confirm question, the person is asked it before the action runs, so say so in the reply.",
+    ]) {
+      assert.ok(SYSTEM_PROMPT.includes(sentence), `prompt is missing: ${sentence}`);
+    }
+  });
+
+  it("names the custom component tools", () => {
+    for (const name of ["define_component", "delete_component"]) {
+      assert.ok(toolNames.includes(name));
+      assert.ok(SYSTEM_PROMPT.includes(name), `prompt does not mention tool ${name}`);
+    }
+  });
+
+  it("prefers existing components and says when to define one", () => {
+    for (const sentence of [
+      "in this order of preference: catalog components, then existing custom components (from list_components), then a new custom component composed of those, defined with define_component.",
+      "Only for what nothing existing can draw, define a custom component whose template uses Markup.",
+      "read a custom component with get_component like any other.",
+      "Define one with define_component when the person asks to save or reuse part of a design, or when the request needs something no existing component draws.",
+      "Never define one for a single use that existing components already cover.",
+    ]) {
+      assert.ok(SYSTEM_PROMPT.includes(sentence), `prompt is missing: ${sentence}`);
+    }
+    assert.doesNotMatch(SYSTEM_PROMPT, /using only catalog components/);
+    assert.doesNotMatch(SYSTEM_PROMPT, /nothing in the catalog fits/);
+  });
+
+  it("allows only registered actions in templates, and no code", () => {
+    for (const sentence of [
+      "A template's buttons may only use actions list_actions returned. Never invent action names, and never try to create actions.",
+      "Custom components cannot run JavaScript, link to other pages or cover the page.",
+      "Never invent action names; use only names list_actions returned.",
+    ]) {
+      assert.ok(SYSTEM_PROMPT.includes(sentence), `prompt is missing: ${sentence}`);
+    }
+  });
+
+  it("says when to report and delete custom components", () => {
+    for (const sentence of [
+      "Say in your reply when you created or updated a custom component.",
+      "Use delete_component only when the person asks to delete a custom component.",
     ]) {
       assert.ok(SYSTEM_PROMPT.includes(sentence), `prompt is missing: ${sentence}`);
     }

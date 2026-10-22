@@ -54,7 +54,7 @@ const actions = createActionRegistry([...createActions(), ...createMenuActions(m
 
 // Without Postgres the API still starts; each tool call then fails on its own.
 const tools = createToolRegistry(
-  createAgentTools({ components, actions: actions.specs, listChoices: actions.listChoices }),
+  createAgentTools({ components, actions: actions.specs, listChoices: actions.listChoices, customComponents }),
 );
 
 // Redis only backs the rate limit; the API starts and serves while it is down.
