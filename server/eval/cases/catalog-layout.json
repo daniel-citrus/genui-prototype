@@ -5,6 +5,7 @@
     { "endedBy": "reply" },
     { "noError": true },
     { "toolSucceeded": "render_ui" },
+    { "toolNotCalled": "list_actions" },
     { "uiComponent": "Stack" },
     { "uiComponent": "Card" },
     { "uiComponent": "Heading" },

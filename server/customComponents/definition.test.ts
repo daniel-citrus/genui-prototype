@@ -48,6 +48,21 @@ describe("validateDefinition", () => {
     }
   });
 
+  it("stores the template without an empty children array on a leaf and leaves the input alone", async () => {
+    const template = { component: "Stack", children: [{ component: "Heading", props: { text: "Hi" }, children: [] }] };
+    const definition = { ...menuItemCard, children: "none", template };
+    const result = await validate(definition);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.ok && result.definition.template, {
+      component: "Stack",
+      children: [{ component: "Heading", props: { text: "Hi" } }],
+    });
+    assert.deepEqual(template.children[0].children, []);
+
+    const bad = { ...template, children: [{ component: "Heading", props: { text: "Hi" }, children: [text("x")] }] };
+    assert.equal((await validate({ ...definition, template: bad })).ok, false);
+  });
+
   it("accepts a definition that uses existing custom components", async () => {
     await repo.save(menuItemCard);
     await repo.save(panel);

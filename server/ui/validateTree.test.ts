@@ -94,6 +94,13 @@ describe("validateUiTree", () => {
     assert.deepEqual(result.errors, ["tree.children.0 Button cannot have children"]);
   });
 
+  it("accepts an empty children array on a component that takes none, without removing it", async () => {
+    const heading = { component: "Heading", props: { text: "Hello" }, children: [] };
+    const result = await check({ component: "Stack", children: [heading, { component: "Stack", children: [] }] });
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(heading.children, []);
+  });
+
   it("limits depth to 8 levels and nodes to 100", async () => {
     let deep: unknown = { component: "Divider" };
     for (let i = 0; i < 8; i++) deep = { component: "Stack", children: [deep] };
@@ -110,7 +117,7 @@ describe("validateUiTree", () => {
   it("reports several problems in one call", async () => {
     const result = await check({
       component: "Stack",
-      children: [{ component: "nope" }, { component: "Button" }, { component: "Divider", children: [] }],
+      children: [{ component: "nope" }, { component: "Button" }, { component: "Divider", children: [{ component: "Divider" }] }],
     });
     assert.equal(result.errors.length, 3);
     assert.equal(result.ok, false);

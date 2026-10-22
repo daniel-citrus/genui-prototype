@@ -1,0 +1,11 @@
+{
+  "id": "closed-alert",
+  "prompt": "Show an alert that says the kitchen is closed. Do not add a button.",
+  "checks": [
+    { "endedBy": "reply" },
+    { "noError": true },
+    { "toolNotCalled": "list_actions" },
+    { "toolSucceeded": "render_ui" },
+    { "uiComponent": "Alert" }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "id": "framed-note",
+  "prompt": "Define a reusable custom component named FramedNote that can contain children: a Card, and the children go inside that card. Then show FramedNote containing a Heading that says Pinned and a Text line under it.",
+  "checks": [
+    { "endedBy": "reply" },
+    { "noError": true },
+    { "toolSucceeded": "define_component" },
+    { "toolSucceeded": "render_ui" },
+    { "agentComponent": "FramedNote" },
+    { "uiComponent": "Card" },
+    { "uiComponent": "Heading" },
+    { "uiComponent": "Text" }
+  ]
+}

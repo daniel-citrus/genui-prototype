@@ -15,6 +15,22 @@ const committedCasesDir = join(dirname(fileURLToPath(import.meta.url)), "cases")
 
 const committedCases: EvalCase[] = [
   {
+    id: "archive-item",
+    prompt:
+      "Show a form to archive a menu item or bring it back.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolCalled: "list_actions" },
+      { toolSucceeded: "render_ui" },
+      { uiButtonAction: "menu_set_item_archived" },
+      { uiNamedInput: "item" },
+      { uiNamedInput: "archived" },
+      { uiComponent: "Checkbox" },
+      { uiComponent: "Select" },
+    ],
+  },
+  {
     id: "catalog-layout",
     prompt:
       "Show a Card titled Specials. Inside it put a Heading that says Today's drinks and a Text line under the heading. Group them with a Stack.",
@@ -22,10 +38,23 @@ const committedCases: EvalCase[] = [
       { endedBy: "reply" },
       { noError: true },
       { toolSucceeded: "render_ui" },
+      { toolNotCalled: "list_actions" },
       { uiComponent: "Stack" },
       { uiComponent: "Card" },
       { uiComponent: "Heading" },
       { uiComponent: "Text" },
+    ],
+  },
+  {
+    id: "closed-alert",
+    prompt:
+      "Show an alert that says the kitchen is closed. Do not add a button.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolNotCalled: "list_actions" },
+      { toolSucceeded: "render_ui" },
+      { uiComponent: "Alert" },
     ],
   },
   {
@@ -37,7 +66,10 @@ const committedCases: EvalCase[] = [
       { noError: true },
       { toolSucceeded: "define_component" },
       { toolSucceeded: "render_ui" },
-      { uiComponent: "PromoBanner" },
+      { agentComponent: "PromoBanner" },
+      { uiComponent: "Card" },
+      { uiComponent: "Heading" },
+      { uiComponent: "Text" },
     ],
   },
   {
@@ -62,6 +94,34 @@ const committedCases: EvalCase[] = [
       { toolSucceeded: "render_ui" },
       { uiButtonAction: "demo_echo" },
       { uiNamedInput: "text" },
+    ],
+  },
+  {
+    id: "export-pdf",
+    prompt:
+      "Show a button labeled Export PDF. It should run a server action, but only if one of the registered actions actually exports a PDF.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolCalled: "list_actions" },
+      { toolSucceeded: "render_ui" },
+      { uiComponent: "Button" },
+      { noButtonAction: true },
+    ],
+  },
+  {
+    id: "framed-note",
+    prompt:
+      "Define a reusable custom component named FramedNote that can contain children: a Card, and the children go inside that card. Then show FramedNote containing a Heading that says Pinned and a Text line under it.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolSucceeded: "define_component" },
+      { toolSucceeded: "render_ui" },
+      { agentComponent: "FramedNote" },
+      { uiComponent: "Card" },
+      { uiComponent: "Heading" },
+      { uiComponent: "Text" },
     ],
   },
   {
@@ -113,6 +173,19 @@ const committedCases: EvalCase[] = [
       { toolNotCalled: "list_components" },
       { toolNotCalled: "list_actions" },
       { toolNotCalled: "render_ui" },
+    ],
+  },
+  {
+    id: "price-tag",
+    prompt:
+      "Define a custom component named PriceTag that uses Markup to draw a label no catalog component can: a span whose text is the price in bold. Then show PriceTag. Use Markup in the template.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolSucceeded: "define_component" },
+      { toolSucceeded: "render_ui" },
+      { agentComponent: "PriceTag" },
+      { uiComponent: "Markup" },
     ],
   },
   {

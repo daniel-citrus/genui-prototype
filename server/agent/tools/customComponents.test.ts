@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { MAX_CUSTOM_COMPONENT_VERSIONS, type CustomComponentDefinition } from "shared/customComponents";
+import { MAX_CUSTOM_COMPONENT_VERSIONS, type CustomComponentDefinition, type TemplateNode } from "shared/customComponents";
 import type { ActionSpec } from "../../actions/types";
 import { catalog } from "../../catalog/components";
 import { validateDefinition } from "../../customComponents/definition";
@@ -91,6 +91,23 @@ describe("define_component", () => {
     const { version, versions, createdAt, updatedAt, deletedAt, ...stored } = (await repo.getByName("MenuItemCard"))!;
     assert.deepEqual([version, versions, deletedAt], [2, 2, null]);
     assert.deepEqual(stored, changed);
+  });
+
+  it("saves the template without an empty children array on a leaf and refuses a real child", async () => {
+    const { registry, repo, ctx } = setup();
+    const heading: TemplateNode = { component: "Heading", props: { text: "Hi" }, children: [] };
+    const definition = { ...menuItemCard, template: { component: "Stack", children: [heading] } };
+
+    const result = await registry.run("define_component", args(definition), ctx);
+    assert.equal(result.ok, true);
+    const stored = await repo.getByName("MenuItemCard");
+    assert.deepEqual(stored?.template, { component: "Stack", children: [{ component: "Heading", props: { text: "Hi" } }] });
+    assert.deepEqual(heading.children, []);
+
+    heading.children = [{ component: "Divider" }];
+    const refused = await registry.run("define_component", args({ ...definition, name: "Other" }), ctx);
+    assert.equal(refused.ok, false);
+    assert.equal(await repo.getByName("Other"), undefined);
   });
 
   it("saves a Markup component whose button runs a registered action", async () => {

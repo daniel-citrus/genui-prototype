@@ -1,0 +1,15 @@
+{
+  "id": "archive-item",
+  "prompt": "Show a form to archive a menu item or bring it back.",
+  "checks": [
+    { "endedBy": "reply" },
+    { "noError": true },
+    { "toolCalled": "list_actions" },
+    { "toolSucceeded": "render_ui" },
+    { "uiButtonAction": "menu_set_item_archived" },
+    { "uiNamedInput": "item" },
+    { "uiNamedInput": "archived" },
+    { "uiComponent": "Checkbox" },
+    { "uiComponent": "Select" }
+  ]
+}
