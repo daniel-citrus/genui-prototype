@@ -86,10 +86,25 @@ flowchart LR
   Limits -. "optional" .-> Redis
   Routes -. "health check" .-> DB
   Routes -. "health check" .-> TracesDB
+
+  subgraph Eval ["Eval harness (CLI · §9)"]
+    EvalCLI["Eval CLI<br/>npm run eval"]
+    CaseFiles["Case files<br/>server/eval/cases/*.json"]
+    TraceChecks["Trace checkers<br/>checkTrace"]
+    EvalFakes["In-memory fakes<br/>catalog · custom · traces · menu"]
+    EvalCLI --> CaseFiles
+    EvalCLI --> TraceChecks
+  end
+
+  EvalCLI -. "runAgent per case<br/>(no Fastify, no SSE)" .-> Loop
+  EvalCLI --> OpenAIAdapter
+  Loop -. "eval wiring" .-> EvalFakes
+  TraceChecks -. "last AgentTrace" .-> EvalFakes
 ```
 
 - **The browser only talks to its own origin.** The web server serves the app and proxies `/api` to the API, so there is no CORS setup.
 - **The API follows ports and adapters.** The agent loop and future features depend on small interfaces (`AgentLlm`, `ComponentRepository`, `CustomComponentRepository`, `PosMenu`, `TraceRepository`). The OpenAI, Drizzle catalog and traces, and in-memory demo menu adapters implement them, and [server/index.ts](../server/index.ts) is the one place that wires real adapters in (it passes them to `buildApp` in [server/app.ts](../server/app.ts), which builds the Fastify app and is what tests use). Tests swap in fakes.
+- **Eval runs beside the HTTP API, not through it.** `npm run eval` ([server/eval/cli.ts](../server/eval/cli.ts)) loads committed JSON cases, calls the same agent loop and OpenAI adapter as chat (same model and [system prompt](../server/agent/systemPrompt.ts)), but wires in-memory catalog, custom-component, trace, and menu ports ([server/eval/runner.ts](../server/eval/runner.ts)) so nothing hits Postgres or the browser. After each turn it scores the saved `AgentTrace` with deterministic checks ([server/eval/checks.ts](../server/eval/checks.ts)). CI does not run eval (§9).
 - **Types shared by both sides** (request bodies, SSE event shapes, component and custom component types) live in [shared/](../shared/), so the browser and the API can't disagree about the wire format. So do the Markup rules ([shared/markup.ts](../shared/markup.ts)), which the API checks and the browser applies again before drawing (§3).
 
 ## 2. Browser app
