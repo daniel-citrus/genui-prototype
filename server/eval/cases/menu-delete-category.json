@@ -1,0 +1,12 @@
+{
+  "id": "menu-delete-category",
+  "prompt": "Show a form to delete a menu category. Say that the person will be asked to confirm before it runs.",
+  "checks": [
+    { "endedBy": "reply" },
+    { "noError": true },
+    { "toolCalled": "list_actions" },
+    { "toolSucceeded": "render_ui" },
+    { "uiButtonAction": "menu_delete_category" },
+    { "uiNamedInput": "category" }
+  ]
+}

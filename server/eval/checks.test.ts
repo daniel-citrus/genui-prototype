@@ -64,6 +64,21 @@ describe("checkTrace", () => {
     assert.equal(checkTrace(trace, [{ toolCalled: "render_ui" }]).length, 1);
   });
 
+  it("toolNotCalled passes when absent and fails on any call including skipped", () => {
+    assert.deepEqual(checkTrace(emptyTrace(), [{ toolNotCalled: "list_actions" }]), []);
+
+    const skipped = traceWithToolCalls(
+      toolCall({
+        call: { id: "1", name: "list_actions", args: {} },
+        result: { ok: true, summary: "ok" },
+        skipped: "budget",
+      }),
+    );
+    const failures = checkTrace(skipped, [{ toolNotCalled: "list_actions" }]);
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0]!.reason, 'toolNotCalled "list_actions": tool was called');
+  });
+
   it("toolSucceeded requires ok and not skipped", () => {
     const ok = traceWithToolCalls(
       toolCall({

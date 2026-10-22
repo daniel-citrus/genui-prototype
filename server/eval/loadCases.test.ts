@@ -98,6 +98,37 @@ describe("loadCases", () => {
     assert.throws(() => loadCases(dir), /unknown field "mystery"/);
   });
 
+  it("loads toolNotCalled check", () => {
+    const dir = caseDir();
+    writeCase(dir, "ok.json", {
+      id: "ok",
+      prompt: "hi",
+      checks: [{ toolNotCalled: "list_actions" }],
+    });
+    const cases = loadCases(dir);
+    assert.deepEqual(cases[0]!.checks, [{ toolNotCalled: "list_actions" }]);
+  });
+
+  it("refuses empty toolNotCalled", () => {
+    const dir = caseDir();
+    writeCase(dir, "bad.json", {
+      id: "ok",
+      prompt: "hi",
+      checks: [{ toolNotCalled: "" }],
+    });
+    assert.throws(() => loadCases(dir), /toolNotCalled must be a non-empty string/);
+  });
+
+  it("refuses toolCalled and toolNotCalled on one check", () => {
+    const dir = caseDir();
+    writeCase(dir, "bad.json", {
+      id: "ok",
+      prompt: "hi",
+      checks: [{ toolCalled: "list_actions", toolNotCalled: "render_ui" }],
+    });
+    assert.throws(() => loadCases(dir), /exactly one key/);
+  });
+
   it("refuses two keys on one check", () => {
     const dir = caseDir();
     writeCase(dir, "bad.json", {

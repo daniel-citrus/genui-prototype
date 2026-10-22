@@ -33,6 +33,7 @@ function checkLabel(check: EvalCheck): string {
   if ("endedBy" in check) return `endedBy "${check.endedBy}"`;
   if ("noError" in check) return "noError";
   if ("toolCalled" in check) return `toolCalled "${check.toolCalled}"`;
+  if ("toolNotCalled" in check) return `toolNotCalled "${check.toolNotCalled}"`;
   if ("toolSucceeded" in check) return `toolSucceeded "${check.toolSucceeded}"`;
   if ("uiComponent" in check) return `uiComponent "${check.uiComponent}"`;
   if ("uiButtonAction" in check) return `uiButtonAction "${check.uiButtonAction}"`;
@@ -74,6 +75,14 @@ function evaluateCheck(trace: AgentTrace, check: EvalCheck): CheckFailure | unde
     );
     if (found) return undefined;
     return { check, reason: `${label}: no successful matching tool call` };
+  }
+
+  if ("toolNotCalled" in check) {
+    const found = trace.completions.some((c) =>
+      c.toolCalls.some((tc) => tc.call.name === check.toolNotCalled),
+    );
+    if (!found) return undefined;
+    return { check, reason: `${label}: tool was called` };
   }
 
   const renderUi = lastSuccessfulRenderUi(trace);

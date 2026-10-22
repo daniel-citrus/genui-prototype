@@ -86,10 +86,25 @@ flowchart LR
   Limits -. "optional" .-> Redis
   Routes -. "health check" .-> DB
   Routes -. "health check" .-> TracesDB
+
+  subgraph Eval ["Eval harness (CLI · §9)"]
+    EvalCLI["Eval CLI<br/>npm run eval"]
+    CaseFiles["Case files<br/>server/eval/cases/*.json"]
+    TraceChecks["Trace checkers<br/>checkTrace"]
+    EvalFakes["In-memory fakes<br/>catalog · custom · traces · menu"]
+    EvalCLI --> CaseFiles
+    EvalCLI --> TraceChecks
+  end
+
+  EvalCLI -. "runAgent per case<br/>(no Fastify, no SSE)" .-> Loop
+  EvalCLI --> OpenAIAdapter
+  Loop -. "eval wiring" .-> EvalFakes
+  TraceChecks -. "last AgentTrace" .-> EvalFakes
 ```
 
 - **The browser only talks to its own origin.** The web server serves the app and proxies `/api` to the API, so there is no CORS setup.
 - **The API follows ports and adapters.** The agent loop and future features depend on small interfaces (`AgentLlm`, `ComponentRepository`, `CustomComponentRepository`, `PosMenu`, `TraceRepository`). The OpenAI, Drizzle catalog and traces, and in-memory demo menu adapters implement them, and [server/index.ts](../server/index.ts) is the one place that wires real adapters in (it passes them to `buildApp` in [server/app.ts](../server/app.ts), which builds the Fastify app and is what tests use). Tests swap in fakes.
+- **Eval runs beside the HTTP API, not through it.** `npm run eval` ([server/eval/cli.ts](../server/eval/cli.ts)) loads committed JSON cases, calls the same agent loop and OpenAI adapter as chat (same model and [system prompt](../server/agent/systemPrompt.ts)), but wires in-memory catalog, custom-component, trace, and menu ports ([server/eval/runner.ts](../server/eval/runner.ts)) so nothing hits Postgres or the browser. After each turn it scores the saved `AgentTrace` with deterministic checks ([server/eval/checks.ts](../server/eval/checks.ts)). CI does not run eval (§9).
 - **Types shared by both sides** (request bodies, SSE event shapes, component and custom component types) live in [shared/](../shared/), so the browser and the API can't disagree about the wire format. So do the Markup rules ([shared/markup.ts](../shared/markup.ts)), which the API checks and the browser applies again before drawing (§3).
 
 ## 2. Browser app
@@ -313,7 +328,7 @@ Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, `pg`, an
 - The session menu is a placeholder.
 - The `components` catalog table is not exposed over HTTP; custom components are exposed only through `/api/custom-components` for the panel, not for editing definitions.
 - There is no authentication.
-- **`npm run eval`** (§9) runs two committed live cases against OpenAI and scores each turn's saved `AgentTrace` with deterministic checks: `simple-heading` (a heading) and `echo-form` (a form whose button runs `demo_echo`). The runner uses in-memory ports and does not write `genui_traces`.
+- **`npm run eval`** (§9) runs nine committed live cases against OpenAI and scores each turn's saved `AgentTrace` with deterministic checks: `simple-heading` (catalog heading via `render_ui`); `echo-form` (form with `demo_echo` action); `catalog-layout` (stacked card with catalog components); `menu-create-item` (café menu create form); `menu-delete-category` (menu category delete with confirm); `define-and-use-custom` (define then show custom component); `delete-custom` (define then delete custom component); `mockup-no-action` (mockup must not call `list_actions`); `off-topic-refusal` (non-UI question, no design tools). The runner uses in-memory ports and does not write `genui_traces`.
 
 **Planned**
 
