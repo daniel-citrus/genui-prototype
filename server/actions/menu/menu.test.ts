@@ -20,6 +20,7 @@ function makeCtx() {
   const log: ToolLogger = {
     info() {},
     debug() {},
+    warn() {},
     error(obj) {
       errors.push(obj);
     },

@@ -3,12 +3,18 @@ import { describe, it } from "node:test";
 import Fastify from "fastify";
 import { MAX_MESSAGE_CHARS, type AgentEvent } from "shared/api";
 import { emptyToolRegistry } from "../agent/tools";
+import { InMemoryTraceRepository } from "../ports/fakes/InMemoryTraceRepository";
 import type { AgentLlm } from "../ports/AgentLlm";
 import { agentRouter } from "./agent";
 
 function buildApp(llm?: AgentLlm) {
   const app = Fastify();
-  app.register(agentRouter, { prefix: "/api/agent", llm, tools: emptyToolRegistry });
+  app.register(agentRouter, {
+    prefix: "/api/agent",
+    llm,
+    tools: emptyToolRegistry,
+    traces: new InMemoryTraceRepository(),
+  });
   return app;
 }
 

@@ -5,7 +5,9 @@ import type { AgentLlm, HistoryMessage, LlmTurn } from "../ports/AgentLlm";
 import { catalog } from "../catalog/components";
 import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
 import { InMemoryCustomComponentRepository } from "../ports/fakes/InMemoryCustomComponentRepository";
-import { getDesign, getHistory, getTraces, resetConversation } from "./conversations";
+import type { TraceRepository } from "../ports/TraceRepository";
+import { InMemoryTraceRepository } from "../ports/fakes/InMemoryTraceRepository";
+import { getDesign, getHistory, resetConversation } from "./conversations";
 import { MAX_TOOL_CALLS_PER_TURN, MAX_TURN_TOKENS } from "./guardrails";
 import { FORGOTTEN_NOTICE, MAX_STEPS, runAgent, TRUNCATED_NOTICE } from "./loop";
 import { createToolRegistry } from "./registry";
@@ -13,7 +15,7 @@ import type { AgentRun } from "./run";
 import type { ToolContext, ToolLogger, ToolRegistry, ToolSpec } from "./tools";
 import { createAgentTools } from "./tools/index";
 
-const noopLogger: ToolLogger = { debug() {}, error() {}, info() {} };
+const noopLogger: ToolLogger = { debug() {}, error() {}, info() {}, warn() {} };
 
 const specs: ToolSpec[] = [
   {
@@ -61,7 +63,13 @@ function stubTools(): ToolRegistry & {
 
 function makeRun(
   tools: ToolRegistry,
-  opts: { conversationId?: string; signal?: AbortSignal; resume?: boolean; log?: ToolLogger } = {},
+  opts: {
+    conversationId?: string;
+    signal?: AbortSignal;
+    resume?: boolean;
+    log?: ToolLogger;
+    traces?: TraceRepository;
+  } = {},
 ): { run: AgentRun; events: AgentEvent[] } {
   const events: AgentEvent[] = [];
   const run: AgentRun = {
@@ -72,6 +80,7 @@ function makeRun(
     signal: opts.signal ?? new AbortController().signal,
     tools,
     log: opts.log ?? noopLogger,
+    traces: opts.traces ?? new InMemoryTraceRepository(),
     resume: opts.resume,
   };
   return { run, events };
@@ -579,7 +588,7 @@ describe("runAgent", () => {
       const llm = scriptedLlm([{ content: "Hello there.", toolCalls: [] }]);
 
       await runAgent("hi", conversationId, run, llm);
-      const traces = getTraces(conversationId);
+      const traces = await run.traces.listByConversation(conversationId);
       resetConversation(conversationId);
 
       assert.equal(traces.length, 1);
@@ -603,7 +612,7 @@ describe("runAgent", () => {
       const { run } = makeRun(stubTools(), { signal: controller.signal });
 
       await runAgent("hi", conversationId, run, scriptedLlm([]));
-      const traces = getTraces(conversationId);
+      const traces = await run.traces.listByConversation(conversationId);
       resetConversation(conversationId);
 
       assert.equal(traces.length, 1);
@@ -630,7 +639,7 @@ describe("runAgent", () => {
       };
 
       await runAgent("go", conversationId, run, llm);
-      const traces = getTraces(conversationId);
+      const traces = await run.traces.listByConversation(conversationId);
       resetConversation(conversationId);
 
       assert.ok(traces[0].error?.match(/too many steps/i));
@@ -653,7 +662,7 @@ describe("runAgent", () => {
       ]);
 
       await runAgent("draw", conversationId, run, llm);
-      const traces = getTraces(conversationId);
+      const traces = await run.traces.listByConversation(conversationId);
       const ui = events.find((e) => e.type === "ui");
       resetConversation(conversationId);
 
@@ -680,7 +689,7 @@ describe("runAgent", () => {
       ]);
 
       await runAgent("draw", conversationId, run, llm);
-      const traces = getTraces(conversationId);
+      const traces = await run.traces.listByConversation(conversationId);
       resetConversation(conversationId);
 
       assert.equal(events.some((e) => e.type === "ui"), false);
@@ -712,7 +721,7 @@ describe("runAgent", () => {
       ]);
 
       await runAgent("go", conversationId, run, llm);
-      const trace = getTraces(conversationId)[0];
+      const trace = (await run.traces.listByConversation(conversationId))[0];
       resetConversation(conversationId);
 
       const dup = trace.completions[0].toolCalls.find((t) => t.call.id === "dup_b");
@@ -739,7 +748,7 @@ describe("runAgent", () => {
       };
 
       await runAgent("list", conversationId, run, llm);
-      const tc = getTraces(conversationId)[0].completions[0].toolCalls[0];
+      const tc = (await run.traces.listByConversation(conversationId))[0].completions[0].toolCalls[0];
       resetConversation(conversationId);
 
       assert.equal(tc.skipped, "stopped");
@@ -752,7 +761,7 @@ describe("runAgent", () => {
       const llm = scriptedLlm([{ content: "Hi again.", toolCalls: [] }]);
 
       await runAgent("as I said", conversationId, run, llm);
-      const trace = getTraces(conversationId)[0];
+      const trace = (await run.traces.listByConversation(conversationId))[0];
       resetConversation(conversationId);
 
       assert.equal(trace.userText, "as I said");
@@ -774,7 +783,7 @@ describe("runAgent", () => {
       ]);
 
       await runAgent("go", conversationId, run, llm);
-      const trace = getTraces(conversationId)[0];
+      const trace = (await run.traces.listByConversation(conversationId))[0];
       resetConversation(conversationId);
 
       assert.deepEqual(infos[0], {
@@ -790,6 +799,43 @@ describe("runAgent", () => {
       assert.equal(trace.promptTokens, infos[0].promptTokens);
       assert.equal(trace.completionTokens, infos[0].completionTokens);
       assert.equal(trace.endedBy, infos[0].endedBy);
+    });
+
+    it("keeps traces in the repository after resetConversation", async () => {
+      const conversationId = "trace-survives-reset";
+      const { run } = makeRun(stubTools());
+      const llm = scriptedLlm([{ content: "Hello.", toolCalls: [] }]);
+
+      await runAgent("hi", conversationId, run, llm);
+      assert.equal((await run.traces.listByConversation(conversationId)).length, 1);
+      resetConversation(conversationId);
+      assert.equal((await run.traces.listByConversation(conversationId)).length, 1);
+    });
+
+    it("still streams the same events when trace save fails", async () => {
+      const conversationId = "trace-save-fail";
+      const warns: Array<Record<string, unknown>> = [];
+      const log: ToolLogger = {
+        ...noopLogger,
+        warn: (obj) => warns.push(obj as Record<string, unknown>),
+      };
+      const traces: TraceRepository = {
+        async save() {
+          throw new Error("disk full");
+        },
+        async listByConversation() {
+          return [];
+        },
+      };
+      const { run, events } = makeRun(stubTools(), { conversationId, log, traces });
+      const llm = scriptedLlm([{ content: "Hello there.", toolCalls: [] }]);
+
+      await runAgent("hi", conversationId, run, llm);
+
+      assert.deepEqual(events, [{ type: "text", text: "Hello there." }]);
+      assert.equal(warns.length, 1);
+      assert.equal(warns[0].conversationId, conversationId);
+      assert.equal("userText" in warns[0], false);
     });
   });
 });
