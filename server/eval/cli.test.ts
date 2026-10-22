@@ -62,7 +62,11 @@ describe("eval cli main", () => {
         },
         createOpenAILlm: () => {
           llmCalled = true;
-          return { async complete() {} };
+          return {
+            async complete() {
+              return { content: null, toolCalls: [] };
+            },
+          };
         },
       },
     });
