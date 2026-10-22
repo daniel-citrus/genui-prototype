@@ -23,5 +23,11 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["server", "shared", "drizzle.config.ts", "src/**/*.test.ts"]
+  "include": [
+    "server",
+    "shared",
+    "drizzle.config.ts",
+    "drizzle.traces.config.ts",
+    "src/**/*.test.ts"
+  ]
 }

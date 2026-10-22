@@ -14,6 +14,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/server-dist ./server-dist
 # Applied on start in production; the path is relative to WORKDIR.
 COPY --from=build /app/server/adapters/db/migrations ./server/adapters/db/migrations
+COPY --from=build /app/server/adapters/traces/migrations ./server/adapters/traces/migrations
 ENV NODE_ENV=production API_HOST=0.0.0.0 API_PORT=3001
 USER node
 EXPOSE 3001
