@@ -2,7 +2,8 @@ import type { ErrorObject, ValidateFunction } from "ajv";
 import type { Component } from "shared/components";
 import type { ActionSpec } from "../actions/types";
 import { compileSchema, formatSchemaErrors } from "../validation/jsonSchema";
-import { collectBindings, isObject, type NamedInput } from "./bindings";
+import { collectBindings, isObject, type ActionButton, type NamedInput } from "./bindings";
+import { validateMarkup } from "./markup";
 
 /** Root is level 1. */
 export const MAX_DEPTH = 8;
@@ -21,6 +22,19 @@ export interface UiTreeCheck {
   ok: boolean;
   errors: string[];
   stats: UiTreeStats;
+}
+
+export interface UiTreeOptions {
+  /**
+   * false skips the checks that only make sense for a whole design: action
+   * properties no input fills, and edit forms with nothing to change.
+   * Default true.
+   */
+  designChecks?: boolean;
+  /** Default MAX_NODES. */
+  maxNodes?: number;
+  /** Default MAX_DEPTH. */
+  maxDepth?: number;
 }
 
 const NODE_KEYS = new Set(["component", "props", "children"]);
@@ -69,6 +83,12 @@ function propsProblems(component: Component, props: Record<string, unknown>, pat
   });
 }
 
+/** Where a binding's key is set: a catalog prop, or the part of a Markup element that holds it. */
+const MARKUP_KEY_PATHS = { name: "attrs.name", action: "action", options: "children" };
+function keyPath(binding: NamedInput | ActionButton, key: keyof typeof MARKUP_KEY_PATHS): string {
+  return `${binding.path}.${binding.markup ? MARKUP_KEY_PATHS[key] : `props.${key}`}`;
+}
+
 /** Why `input` can't fill `action`'s `type` property, or undefined if it can. */
 function bindingMismatch(input: NamedInput, action: string, type: unknown): string | undefined {
   const at = `${input.path} ${input.component} named "${input.name}"`;
@@ -88,14 +108,16 @@ function bindingMismatch(input: NamedInput, action: string, type: unknown): stri
  * Problems with a tree's `name` and `action` props: duplicate names always;
  * with `actions`, also unregistered actions, required action properties no
  * input fills and `edit` actions with no input for any optional property (both
- * for Buttons that aren't disabled), inputs of the wrong kind for the action
- * property they fill, and, for dropdown sources in `choiceValues`, inputs that
- * aren't a Select or list an option the source doesn't have.
+ * for Buttons that aren't disabled, and only with `designChecks`), inputs of
+ * the wrong kind for the action property they fill, and, for dropdown sources
+ * in `choiceValues`, inputs that aren't a Select or list an option the source
+ * doesn't have.
  */
 function bindingProblems(
   tree: unknown,
   actions: ActionSpec[] | undefined,
   choiceValues: Record<string, string[]> | undefined,
+  designChecks: boolean,
 ): string[] {
   const { inputs, buttons } = collectBindings(tree);
   const problems: string[] = [];
@@ -103,7 +125,7 @@ function bindingProblems(
   const byName = new Map<string, NamedInput>();
   for (const input of inputs) {
     const first = byName.get(input.name);
-    if (first) problems.push(`${input.path}.props.name "${input.name}" is already used by ${first.path}`);
+    if (first) problems.push(`${keyPath(input, "name")} "${input.name}" is already used by ${first.path}`);
     else byName.set(input.name, input);
   }
   if (!actions) return problems;
@@ -116,7 +138,7 @@ function bindingProblems(
     const spec = specs.get(button.action);
     if (!spec) {
       problems.push(
-        `${button.path}.props.action "${button.action}" is not a registered action (call list_actions to see them)`,
+        `${keyPath(button, "action")} "${button.action}" is not a registered action (call list_actions to see them)`,
       );
       continue;
     }
@@ -132,7 +154,7 @@ function bindingProblems(
     };
     const required = schema.required ?? [];
     const path = enabledAt.get(spec);
-    if (path) {
+    if (path && designChecks) {
       for (const key of required) {
         if (!byName.has(key)) {
           problems.push(`${path} action "${spec.name}" needs an input named "${key}", and none has that name`);
@@ -165,7 +187,7 @@ function bindingProblems(
       for (const option of input.options ?? []) {
         if (!values.includes(option)) {
           problems.push(
-            `${input.path}.props.options "${option}" is not one of the ${source} values (call list_actions to get them)`,
+            `${keyPath(input, "options")} "${option}" is not one of the ${source} values (call list_actions to get them)`,
           );
         }
       }
@@ -178,15 +200,19 @@ function bindingProblems(
  * Checks a UI tree against the catalog: shape, component names, props, which
  * components take children, size limits, and bindings (see `bindingProblems`;
  * action checks only when `actions` is given, dropdown checks only for the
- * sources in `choiceValues`, source name → its current values). Walks the
- * whole tree and reports every problem (at most MAX_ERRORS entries).
+ * sources in `choiceValues`, source name → its current values), and each
+ * Markup node's `root` (whose elements don't count toward the node and depth
+ * limits). Walks the whole tree and reports every problem (at most MAX_ERRORS
+ * entries).
  */
 export function validateUiTree(
   tree: unknown,
   catalog: Component[],
   actions?: ActionSpec[],
   choiceValues?: Record<string, string[]>,
+  options: UiTreeOptions = {},
 ): UiTreeCheck {
+  const { designChecks = true, maxNodes = MAX_NODES, maxDepth = MAX_DEPTH } = options;
   const byName = new Map(catalog.map((c) => [c.name, c]));
   const errors: string[] = [];
   const stats: UiTreeStats = { nodes: 0, depth: 0, components: {} };
@@ -221,8 +247,14 @@ export function validateUiTree(
     }
 
     if (node.props !== undefined) {
-      if (!isObject(node.props)) errors.push(`${path}.props must be an object`);
-      else if (component) errors.push(...propsProblems(component, node.props, path));
+      if (!isObject(node.props)) {
+        errors.push(`${path}.props must be an object`);
+      } else if (component) {
+        errors.push(...propsProblems(component, node.props, path));
+        if (component.name === "Markup" && isObject(node.props.root)) {
+          errors.push(...validateMarkup(node.props.root, `${path}.props.root`));
+        }
+      }
     } else if (component) {
       errors.push(...propsProblems(component, {}, path));
     }
@@ -238,11 +270,11 @@ export function validateUiTree(
   };
 
   visit(tree, "tree", 1);
-  errors.push(...bindingProblems(tree, actions, choiceValues));
+  errors.push(...bindingProblems(tree, actions, choiceValues, designChecks));
 
   const limits: string[] = [];
-  if (stats.depth > MAX_DEPTH) limits.push(`tree is ${stats.depth} levels deep (max ${MAX_DEPTH})`);
-  if (stats.nodes > MAX_NODES) limits.push(`tree has ${stats.nodes} nodes (max ${MAX_NODES})`);
+  if (stats.depth > maxDepth) limits.push(`tree is ${stats.depth} levels deep (max ${maxDepth})`);
+  if (stats.nodes > maxNodes) limits.push(`tree has ${stats.nodes} nodes (max ${maxNodes})`);
   const all = [...limits, ...errors];
 
   const shown =

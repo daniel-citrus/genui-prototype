@@ -302,4 +302,33 @@ export const catalog: CatalogComponent[] = [
     },
     exampleProps: { title: "Payment failed", message: "Check your card details and try again.", tone: "danger" },
   },
+  {
+    name: "Markup",
+    description:
+      "Draws allowlisted HTML and SVG elements from a JSON tree, for what no other component can show, such as a bar chart or a star rating. Only used inside custom component templates.",
+    category: "display",
+    children: "none",
+    propsSchema: {
+      type: "object",
+      properties: {
+        root: {
+          type: "object",
+          description:
+            'The root element: { "tag", "attrs"?, "style"?, "text"?, "action"?, "children"? }, with allowlisted tags, attributes and inline style properties; no scripts, classes or event handlers. Only used inside custom component templates.',
+        },
+      },
+      required: ["root"],
+      additionalProperties: false,
+    },
+    exampleProps: {
+      root: {
+        tag: "svg",
+        attrs: { viewBox: "0 0 100 20", width: 200, height: 40, "aria-label": "Sales: 60%" },
+        children: [
+          { tag: "rect", attrs: { width: 100, height: 20, fill: "#e4e4e7" } },
+          { tag: "rect", attrs: { width: 60, height: 20, fill: "#0ea5e9" } },
+        ],
+      },
+    },
+  },
 ];

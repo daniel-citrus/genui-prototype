@@ -4,7 +4,7 @@ import type { Component } from "shared/components";
 import type { ActionSpec } from "../actions/types";
 import { catalog } from "../catalog/components";
 import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
-import { validateUiTree, validatorCompileCount } from "./validateTree";
+import { type UiTreeOptions, validateUiTree, validatorCompileCount } from "./validateTree";
 
 const repo = new InMemoryComponentRepository(catalog);
 const stored = () => repo.list();
@@ -416,5 +416,104 @@ describe("validateUiTree edit-form check", () => {
 
   it("never refuses an edit action without optional properties", async () => {
     assert.deepEqual((await onlyRequired({ ...archiveItem, operation: "edit" })).errors, []);
+  });
+});
+
+const markup = (root: unknown) => ({ component: "Markup", props: { root } });
+
+describe("validateUiTree Markup", () => {
+  it("reports problems inside a Markup root at their path in the tree", async () => {
+    const result = await check(form(markup({ tag: "div", attrs: { onclick: "x" }, children: [{ tag: "script" }] })));
+    assert.deepEqual(result.errors, [
+      "tree.children.0.props.root.attrs.onclick is not allowed",
+      'tree.children.0.props.root.children.0.tag "script" is not allowed',
+    ]);
+  });
+
+  it("checks the root only when it is an object", async () => {
+    assert.deepEqual((await check({ component: "Markup" })).errors, ["tree.props.root is required"]);
+    assert.deepEqual((await check(markup("<b>x</b>"))).errors, ["tree.props.root must be object"]);
+  });
+
+  it("doesn't count Markup elements toward the node and depth limits", async () => {
+    let deep: unknown = { tag: "span" };
+    for (let i = 0; i < 11; i++) deep = { tag: "div", children: [deep] };
+    const wide = { tag: "div", children: Array.from({ length: 150 }, () => ({ tag: "span" })) };
+    assert.deepEqual(await check(form(markup(deep), markup(wide))), {
+      ok: true,
+      errors: [],
+      stats: { nodes: 3, depth: 2, components: { Stack: 1, Markup: 2 } },
+    });
+  });
+
+  it("applies the binding checks to Markup inputs and buttons", async () => {
+    const tree = form(
+      email,
+      markup({
+        tag: "div",
+        children: [
+          { tag: "input", attrs: { name: "email", type: "email" } },
+          { tag: "input", attrs: { name: "plan", type: "checkbox" } },
+          { tag: "button", action: "sign_in", text: "Sign in" },
+          { tag: "button", action: "sign_up", text: "Sign up" },
+        ],
+      }),
+    );
+    assert.deepEqual((await check(tree, actions)).errors, [
+      'tree.children.1.props.root.children.0.attrs.name "email" is already used by tree.children.0',
+      'tree.children.1.props.root.children.2.action "sign_in" is not a registered action (call list_actions to see them)',
+      'tree.children.1.props.root.children.1 Checkbox named "plan" fills a string of action "sign_up": use a TextInput or Select',
+    ]);
+  });
+
+  it("checks a Markup select's options against a dropdown source", async () => {
+    const select = {
+      tag: "select",
+      attrs: { name: "item" },
+      children: [{ tag: "option", text: "Bạc xỉu" }, { tag: "option", attrs: { value: "Latte" }, text: "Latte" }],
+    };
+    const tree = form(markup(select), nameInput, actionButton("menu_update_item"));
+    assert.deepEqual((await check(tree, [updateItem], menuValues)).errors, [
+      'tree.children.0.props.root.children "Latte" is not one of the menu_items values (call list_actions to get them)',
+    ]);
+  });
+});
+
+describe("validateUiTree options", () => {
+  const withOptions = async (tree: unknown, specs: ActionSpec[] | undefined, options: UiTreeOptions) =>
+    validateUiTree(tree, await stored(), specs, undefined, options);
+
+  it("skips the missing-input and edit-form checks with designChecks: false", async () => {
+    assert.equal((await check(form(submit), actions)).ok, false);
+    assert.deepEqual((await withOptions(form(submit), actions, { designChecks: false })).errors, []);
+
+    const edit = form(itemSelect("Latte"), actionButton("menu_update_item"));
+    assert.equal((await check(edit, [updateItem])).ok, false);
+    assert.deepEqual((await withOptions(edit, [updateItem], { designChecks: false })).errors, []);
+  });
+
+  it("keeps every other binding check with designChecks: false", async () => {
+    const tree = form(email, email, { component: "Checkbox", props: { label: "E", name: "email" } }, actionButton("nope"));
+    const options = { designChecks: false };
+    assert.deepEqual((await withOptions(tree, actions, options)).errors, [
+      'tree.children.1.props.name "email" is already used by tree.children.0',
+      'tree.children.2.props.name "email" is already used by tree.children.0',
+      'tree.children.3.props.action "nope" is not a registered action (call list_actions to see them)',
+    ]);
+    const kinds = form({ component: "Checkbox", props: { label: "Email", name: "email" } }, submit);
+    assert.deepEqual((await withOptions(kinds, actions, options)).errors, [
+      'tree.children.0 Checkbox named "email" fills a string of action "sign_up": use a TextInput or Select',
+    ]);
+  });
+
+  it("uses maxNodes and maxDepth instead of the defaults", async () => {
+    const wide = { component: "Stack", children: Array.from({ length: 139 }, () => ({ component: "Divider" })) };
+    assert.deepEqual((await withOptions(wide, undefined, { maxNodes: 140 })).errors, []);
+    assert.deepEqual((await withOptions(wide, undefined, { maxNodes: 50 })).errors, ["tree has 140 nodes (max 50)"]);
+
+    let deep: unknown = { component: "Divider" };
+    for (let i = 0; i < 8; i++) deep = { component: "Stack", children: [deep] };
+    assert.deepEqual((await withOptions(deep, undefined, { maxDepth: 9 })).errors, []);
+    assert.deepEqual((await withOptions(deep, undefined, { maxDepth: 3 })).errors, ["tree is 9 levels deep (max 3)"]);
   });
 });
