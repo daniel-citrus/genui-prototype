@@ -14,6 +14,7 @@ import { isPlaceholder } from "shared/markup";
 import type { ActionSpec } from "../actions/types";
 import { propsSchemaProblems } from "../catalog/validate";
 import { isObject } from "../ui/bindings";
+import { omitEmptyChildren } from "../ui/omitEmptyChildren";
 import { limitErrors, validateUiTree } from "../ui/validateTree";
 import { cachedResolve, deletedProblem, type ExpandContext, expandTree, isSlot, rewritePaths } from "./expand";
 
@@ -235,9 +236,17 @@ export async function validateDefinition(
   const resolveStored = cachedResolve(ctx.resolve);
   const resolve = (n: string) => (n === name ? Promise.resolve(candidate) : resolveStored(n));
 
+  const childrenOf = new Map<string, ComponentChildren>(ctx.catalog.map((c) => [c.name, c.children]));
+  if (typeof name === "string" && CHILDREN.includes(children as ComponentChildren)) {
+    childrenOf.set(name, children as ComponentChildren);
+  }
+
   for (const reference of shape.references) {
     const found = await resolve(reference.name);
-    if (found && found.deletedAt === null) continue;
+    if (found && found.deletedAt === null) {
+      childrenOf.set(reference.name, found.children);
+      continue;
+    }
     expandable = false;
     if (found) {
       problems.push(deletedProblem(reference.path, reference.name));
@@ -249,6 +258,9 @@ export async function validateDefinition(
       );
     }
   }
+
+  const stripped = omitEmptyChildren(template, (n) => childrenOf.get(n));
+  candidate.template = stripped as StoredCustomComponent["template"];
 
   if (expandable) {
     const expansion = await expandTree({ component: name, props: exampleProps }, { catalog: ctx.catalog, resolve });
@@ -266,5 +278,5 @@ export async function validateDefinition(
   }
 
   if (problems.length > 0) return { ok: false, errors: limitErrors(problems) };
-  return { ok: true, definition: definition as unknown as CustomComponentDefinition };
+  return { ok: true, definition: { ...definition, template: stripped } as unknown as CustomComponentDefinition };
 }

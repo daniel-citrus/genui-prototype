@@ -6,6 +6,7 @@ import { expandTree, rewritePaths } from "../../customComponents/expand";
 import type { ComponentRepository } from "../../ports/ComponentRepository";
 import type { CustomComponentRepository } from "../../ports/CustomComponentRepository";
 import { collectBindings, isObject } from "../../ui/bindings";
+import { omitEmptyChildren } from "../../ui/omitEmptyChildren";
 import { limitErrors, sizeProblems, type UiTreeCheck, type UiTreeOptions, validateUiTree } from "../../ui/validateTree";
 import type { ToolContext, ToolDefinition } from "../tools";
 
@@ -157,7 +158,7 @@ export function renderUiTool(
           return { ok: false, summary: "Custom components are unavailable" };
         }
       }
-      const { tree } = design;
+      const tree = omitEmptyChildren(design.tree, (name) => catalog.find((c) => c.name === name)?.children);
       let check: UiTreeCheck | undefined;
       if (tree !== null) {
         const choiceValues = listChoices && (await loadChoices(choiceSources(tree, actions), listChoices, ctx));
