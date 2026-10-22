@@ -261,6 +261,7 @@ genui-prototype/
 ├── server/         Fastify API
 │   ├── routes/     health, chat, action and custom-component endpoints
 │   ├── agent/      agent loop, conversations, remembered designs, tool registry, tools
+│   ├── eval/       `server/eval/`: case files, trace checkers, runner, and CLI (`npm run eval`)
 │   ├── actions/    action registry, confirm questions, and demo_echo
 │   │   └── menu/   the menu actions, their dropdown sources, name and price parsing
 │   ├── customComponents/  definition checks and expanding custom components into catalog trees
@@ -292,9 +293,10 @@ Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, `pg`, an
 | `npm run db:generate` / `npm run db:migrate` | Creates a migration from the catalog schema / applies catalog migrations to `DATABASE_URL` |
 | `npm run db:generate:traces` / `npm run db:migrate:traces` | Creates a migration from the traces schema / ensures `genui_traces` exists and applies traces migrations to `TRACE_DATABASE_URL` |
 | `npm run db:seed` | Brings the `components` table in line with the catalog file and prints the counts; run it after pulling catalog changes |
+| `npm run eval` | Runs every committed eval case through the live agent (OpenAI, same model and system prompt as chat); needs `OPENAI_API_KEY` and is not run in CI |
 
 - **Tests** use a fake model, so they need no OpenAI key. Catalog database tests run only when `DATABASE_URL` is set; traces database tests run only when `TRACE_DATABASE_URL` is set. They share one database each, so `npm test` runs test files one at a time.
-- **CI** ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs on every pull request and on pushes to `main`: it starts Postgres (creating database `genui_traces` on the same instance) and Redis (so the Redis store tests run), sets `TRACE_DATABASE_URL`, runs catalog and traces migrations, then install, typecheck, tests (including the database tests), and both builds on Node 24. `main` accepts changes only through pull requests that pass it.
+- **CI** ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs on every pull request and on pushes to `main`: it starts Postgres (creating database `genui_traces` on the same instance) and Redis (so the Redis store tests run), sets `TRACE_DATABASE_URL`, runs catalog and traces migrations, then install, typecheck, tests (including the database tests), and both builds on Node 24. It does not run `npm run eval`. `main` accepts changes only through pull requests that pass it.
 
 ## 10. Current limits and what's next
 
@@ -311,6 +313,7 @@ Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, `pg`, an
 - The session menu is a placeholder.
 - The `components` catalog table is not exposed over HTTP; custom components are exposed only through `/api/custom-components` for the panel, not for editing definitions.
 - There is no authentication.
+- **`npm run eval`** (§9) runs two committed live cases against OpenAI and scores each turn's saved `AgentTrace` with deterministic checks: `simple-heading` (a heading) and `echo-form` (a form whose button runs `demo_echo`). The runner uses in-memory ports and does not write `genui_traces`.
 
 **Planned**
 
