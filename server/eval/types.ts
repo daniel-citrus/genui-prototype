@@ -8,7 +8,9 @@ export type EvalCheck =
   | { toolSucceeded: string }
   | { uiComponent: string }
   | { uiButtonAction: string }
-  | { uiNamedInput: string };
+  | { uiNamedInput: string }
+  | { agentComponent: string }
+  | { noButtonAction: true };
 
 export interface EvalCase {
   id: string;
