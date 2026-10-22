@@ -104,4 +104,14 @@ describe("SYSTEM_PROMPT", () => {
       assert.ok(SYSTEM_PROMPT.includes(sentence), `prompt is missing: ${sentence}`);
     }
   });
+
+  it("says how to read components and fill booleans", () => {
+    for (const sentence of [
+      "all in the same turn",
+      "Omit the children property when a component's children is none. An empty array is dropped.",
+      "Use a Checkbox for a boolean property.",
+    ]) {
+      assert.ok(SYSTEM_PROMPT.includes(sentence), `prompt is missing: ${sentence}`);
+    }
+  });
 });
