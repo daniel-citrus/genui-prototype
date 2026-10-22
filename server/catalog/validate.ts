@@ -19,17 +19,14 @@ function valueProblems(schema: Record<string, unknown>, value: unknown, prefix: 
   return formatSchemaErrors(validate.errors).map((e) => `${dotted(prefix, e.path)} ${e.message}`);
 }
 
-function componentProblems(component: CatalogComponent): string[] {
+/**
+ * The catalog's rules for a props schema and its example: a valid JSON Schema
+ * for a closed object, a description on every property, defaults that fit,
+ * and `exampleProps` valid against it. One message per problem, with a path
+ * starting at "propsSchema" or "exampleProps".
+ */
+export function propsSchemaProblems(propsSchema: unknown, exampleProps: unknown): string[] {
   const problems: string[] = [];
-  const { name, description, propsSchema, exampleProps } = component;
-
-  if (typeof name !== "string" || !NAME_RE.test(name)) {
-    problems.push(`name must match ${NAME_RE.source}`);
-  }
-  if (typeof description !== "string" || description.trim() === "") {
-    problems.push("description must not be empty");
-  }
-
   const schemaError = schemaProblem(propsSchema);
   if (schemaError) {
     problems.push(`propsSchema is not a valid JSON Schema: ${schemaError}`);
@@ -54,6 +51,20 @@ function componentProblems(component: CatalogComponent): string[] {
   }
 
   problems.push(...valueProblems(schema, exampleProps, "exampleProps"));
+  return problems;
+}
+
+function componentProblems(component: CatalogComponent): string[] {
+  const problems: string[] = [];
+  const { name, description, propsSchema, exampleProps } = component;
+
+  if (typeof name !== "string" || !NAME_RE.test(name)) {
+    problems.push(`name must match ${NAME_RE.source}`);
+  }
+  if (typeof description !== "string" || description.trim() === "") {
+    problems.push("description must not be empty");
+  }
+  problems.push(...propsSchemaProblems(propsSchema, exampleProps));
   return problems;
 }
 

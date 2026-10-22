@@ -194,7 +194,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isPlaceholder(value: unknown): boolean {
+/** A `{ "$prop": … }` object: a custom component prop to fill in. */
+export function isPlaceholder(value: unknown): value is Record<string, unknown> {
   return isObject(value) && "$prop" in value;
 }
 
