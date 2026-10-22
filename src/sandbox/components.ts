@@ -12,7 +12,7 @@ export type Renderer = (props: Record<string, unknown>, children: HTMLElement[])
 
 type Props = Record<string, unknown>;
 
-function el<K extends keyof HTMLElementTagNameMap>(
+export function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   className: string,
   text?: string,

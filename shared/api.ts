@@ -3,6 +3,7 @@
  * API's agent route are the two ends of this.
  */
 
+import type { StoredCustomComponent } from "./customComponents";
 import type { UiNode } from "./ui";
 
 export interface ToolCall {
@@ -69,4 +70,22 @@ export interface ActionResult {
   message: string;
   /** The action did not run: ask this, then resend with confirmed: true. */
   confirm?: string;
+}
+
+/** One entry of `GET /api/custom-components`; `deletedAt` is set for a deleted one. */
+export type CustomComponentSummary = Pick<
+  StoredCustomComponent,
+  "name" | "description" | "category" | "version" | "versions" | "updatedAt" | "deletedAt"
+>;
+
+/** `GET /api/custom-components/:name`. */
+export interface CustomComponentDetail {
+  /** The current version. */
+  component: StoredCustomComponent;
+  /** Every version, oldest first. */
+  versions: { version: number; description: string; createdAt: string }[];
+  /** The component with its example props, expanded to catalog components; null when that fails. */
+  preview: UiNode | null;
+  /** Why `preview` is null. */
+  previewErrors: string[];
 }
