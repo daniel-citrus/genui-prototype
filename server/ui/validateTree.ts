@@ -284,7 +284,7 @@ export function validateUiTree(
       if (!Array.isArray(node.children)) {
         errors.push(`${path}.children must be an array`);
       } else {
-        if (component?.children === "none") errors.push(`${path} ${component.name} cannot have children`);
+        if (component?.children === "none" && node.children.length > 0) errors.push(`${path} ${component.name} cannot have children`);
         node.children.forEach((child, i) => visit(child, `${path}.children.${i}`, level + 1));
       }
     }

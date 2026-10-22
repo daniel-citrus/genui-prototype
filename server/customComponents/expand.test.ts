@@ -133,7 +133,7 @@ describe("expandTree", () => {
   });
 
   it("refuses bad instance props and children with the agent's paths and leaves the node out", async () => {
-    const result = await expand({
+    const input = {
       component: "Stack",
       children: [
         { component: "MenuItemCard", props: { name: 5, size: "lg" } },
@@ -141,19 +141,44 @@ describe("expandTree", () => {
         { component: "Panel", props: "Today", extra: true },
         text(5),
       ],
-    });
+    };
+    const result = await expand(input);
     assert.deepEqual(result.errors, [
       "tree.children.0.props.price is required",
       "tree.children.0.props.photo is required",
       "tree.children.0.props.size is not allowed",
       "tree.children.0.props.name must be string",
-      "tree.children.1 MenuItemCard cannot have children",
       "tree.children.2.extra is not allowed (use component, props, children)",
       "tree.children.2.props must be an object",
     ]);
-    assert.deepEqual(result.tree, { component: "Stack", children: [text(5)] });
-    // The Text moved up to children.0; its problem still names the agent's node.
+    // An empty children array on a "none" instance counts as absent; the input keeps it.
+    assert.deepEqual(result.tree, {
+      component: "Stack",
+      children: [
+        {
+          component: "Card",
+          props: {},
+          children: [
+            { component: "Image", props: { src: latte.photo, alt: "Latte" } },
+            { component: "Heading", props: { text: "Latte", level: 3 } },
+            { component: "Badge", props: { text: "$4.50", tone: "success" } },
+          ],
+        },
+        text(5),
+      ],
+    });
+    assert.deepEqual((input.children[1] as { children?: unknown }).children, []);
+    // The Text moved up to children.1; its problem still names the agent's node.
     assert.deepEqual(validatorErrors(result), ["tree.children.3.props.text must be string"]);
+  });
+
+  it("refuses a non-empty children array on a none instance and leaves the node out", async () => {
+    const result = await expand({
+      component: "Stack",
+      children: [{ component: "MenuItemCard", props: latte, children: [text("x")] }],
+    });
+    assert.deepEqual(result.errors, ["tree.children.0 MenuItemCard cannot have children"]);
+    assert.deepEqual(result.tree, { component: "Stack", children: [] });
   });
 
   it("refuses a deleted component in the agent's tree but expands one used inside a template", async () => {

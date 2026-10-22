@@ -30,6 +30,21 @@ function setup(
 }
 
 describe("render_ui", () => {
+  it("shows a leaf without its empty children array and keeps the arguments as sent", async () => {
+    const { registry, ctx, shown } = setup();
+    const tree = { component: "Heading", props: { text: "Hi" }, children: [] };
+    const result = await registry.run("render_ui", { tree }, ctx);
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(shown, [{ component: "Heading", props: { text: "Hi" } }]);
+    assert.deepEqual(tree.children, []);
+    assert.equal(
+      (await registry.run("render_ui", { tree: { ...tree, children: [{ component: "Divider" }] } }, ctx)).ok,
+      false,
+    );
+    assert.equal(shown.length, 1);
+  });
+
   it("shows a valid tree once and reports the stats without echoing it", async () => {
     const { registry, ctx, shown } = setup();
     const tree = {
@@ -319,6 +334,31 @@ describe("render_ui with custom components", () => {
         ],
       }),
     ]);
+  });
+
+  it("shows a custom none instance with an empty children array and refuses a non-empty one", async () => {
+    const { registry, ctx, shown } = await setupCustom();
+    const card = { component: "MenuItemCard", props: latte };
+    const ok = await registry.run("render_ui", { tree: stack({ ...card, children: [] }) }, ctx);
+    assert.equal(ok.ok, true);
+    assert.equal(shown.length, 1);
+    assert.equal(names(shown[0]).includes("Card"), true);
+
+    const bad = await registry.run("render_ui", { tree: stack({ ...card, children: [{ component: "Divider" }] }) }, ctx);
+    assert.deepEqual(bad, {
+      ok: false,
+      summary: "UI has 1 problem",
+      data: { errors: ["tree.children.0 MenuItemCard cannot have children"] },
+    });
+    assert.equal(shown.length, 1);
+  });
+
+  it("drops an empty children array on a leaf that came out of a stored template", async () => {
+    const { registry, repo, ctx, shown } = await setupCustom();
+    await repo.save(withTemplate("Greeting", { component: "Heading", props: { text: "Hi" }, children: [] }));
+    const result = await registry.run("render_ui", { tree: stack({ component: "Greeting" }) }, ctx);
+    assert.equal(result.ok, true);
+    assert.deepEqual(shown, [stack({ component: "Heading", props: { text: "Hi" } })]);
   });
 
   it("refuses Markup in the agent's own tree, even when it is valid", async () => {

@@ -199,7 +199,7 @@ export async function expandTree(tree: unknown, ctx: ExpandContext): Promise<Exp
     else problems.push(...propsErrors(propsValidator(custom), node.props ?? {}, where));
     if (node.children !== undefined) {
       if (!Array.isArray(node.children)) problems.push(`${where}.children must be an array`);
-      else if (custom.children === "none") problems.push(`${where} ${name} cannot have children`);
+      else if (custom.children === "none" && node.children.length > 0) problems.push(`${where} ${name} cannot have children`);
     }
     if (problems.length > 0) {
       errors.push(...problems);
