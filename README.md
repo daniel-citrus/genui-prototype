@@ -61,7 +61,7 @@ npm run db:generate:traces   # new migration after editing server/adapters/trace
 npm run db:migrate:traces    # ensure genui_traces exists and apply traces migrations
 npm run db:seed       # sync the components table with server/catalog/components.ts (rerun after pulling catalog changes)
 npm run db:studio     # browse the database
-npm run eval          # live OpenAI eval cases (needs OPENAI_API_KEY; same model as chat; not run in CI)
+npm run eval          # live OpenAI eval cases; gitignored eval-logs JSON per case (needs OPENAI_API_KEY; same model as chat; not run in CI)
 ```
 
 ## Docker
