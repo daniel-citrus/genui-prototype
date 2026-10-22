@@ -113,6 +113,11 @@ describe("validateDefinition", () => {
     ]);
   });
 
+  it("refuses example props that break their own schema without naming the definition", async () => {
+    const errors = await problems({ exampleProps: { ...menuItemCard.exampleProps, name: 5, size: "lg" } });
+    assert.deepEqual(errors, ["exampleProps.size is not allowed", "exampleProps.name must be string"]);
+  });
+
   it("refuses a definition over 8,000 characters", async () => {
     const errors = await problems({ template: withChild(text("x".repeat(8000))) });
     assert.equal(errors.length, 1);
@@ -226,12 +231,36 @@ describe("validateDefinition", () => {
   it("refuses catalog prop and Markup problems in the expanded example", async () => {
     const heading = { component: "Heading", props: { text: { $prop: "name" }, level: 7 } };
     assert.deepEqual(await problems({ template: withChild(heading) }), [
-      "template.children.3.props.level must be one of 1, 2, 3",
+      "template.children.3.props.level must be one of 1, 2, 3 (call get_component Heading for its props)",
     ]);
     const script = { tag: "div", children: [{ tag: "script", text: "alert(1)" }] };
     assert.deepEqual(await problems({ template: withChild({ component: "Markup", props: { root: script } }) }), [
       'template.children.3.props.root.children.0.tag "script" is not allowed',
     ]);
+  });
+
+  it("points guessed Markup props at get_component", async () => {
+    const priceTag = {
+      ...withTemplate("PriceTag", {
+        component: "Markup",
+        props: { markup: "<span><strong>{{price}}</strong></span>" },
+        children: [],
+      }),
+      propsSchema: {
+        type: "object",
+        properties: { price: { type: "string", description: "The price." } },
+        required: ["price"],
+        additionalProperties: false,
+      },
+      exampleProps: { price: "$4.50" },
+    };
+    assert.deepEqual(await validate(priceTag), {
+      ok: false,
+      errors: [
+        "template.props.root is required (call get_component Markup for its props)",
+        "template.props.markup is not allowed",
+      ],
+    });
   });
 
   it("reports every problem together, at most 20", async () => {

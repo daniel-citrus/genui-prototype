@@ -4,7 +4,7 @@ import type { Component } from "shared/components";
 import type { ActionSpec } from "../actions/types";
 import { catalog } from "../catalog/components";
 import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
-import { type UiTreeOptions, validateUiTree, validatorCompileCount } from "./validateTree";
+import { type UiTreeOptions, validateUiTree, validatorCompileCount, withPropsHint } from "./validateTree";
 
 const repo = new InMemoryComponentRepository(catalog);
 const stored = () => repo.list();
@@ -71,7 +71,7 @@ describe("validateUiTree", () => {
     ]);
   });
 
-  it("reports props that break the schema", async () => {
+  it("reports props that break the schema, pointing the first at get_component", async () => {
     const result = await check({
       component: "Stack",
       children: [
@@ -82,11 +82,53 @@ describe("validateUiTree", () => {
       ],
     });
     assert.deepEqual(result.errors, [
-      "tree.children.0.props.label is required",
+      "tree.children.0.props.label is required (call get_component Button for its props)",
       "tree.children.1.props.label must be string",
       "tree.children.2.props.variant must be one of primary, secondary, danger",
       "tree.children.3.props.color is not allowed",
     ]);
+  });
+
+  it("points each component's first props problem at get_component, enums included", async () => {
+    const result = await check({
+      component: "Stack",
+      children: [
+        { component: "Button", props: { label: "x", variant: "huge" } },
+        { component: "Heading" },
+        { component: "Button" },
+        { component: "Heading", props: { text: 3 } },
+      ],
+    });
+    assert.deepEqual(result.errors, [
+      "tree.children.0.props.variant must be one of primary, secondary, danger (call get_component Button for its props)",
+      "tree.children.1.props.text is required (call get_component Heading for its props)",
+      "tree.children.2.props.label is required",
+      "tree.children.3.props.text must be string",
+    ]);
+  });
+
+  it("adds no get_component hint to problems that don't come from the props schema", async () => {
+    const result = await check({
+      component: "Stack",
+      children: [
+        { component: "Carousel" },
+        { component: "Divider", props: [] },
+        { ...button, children: [button] },
+        { component: "Markup", props: { root: { tag: "script" } } },
+        { component: "TextInput", props: { label: "A", name: "dup" } },
+        { component: "TextInput", props: { label: "B", name: "dup" } },
+      ],
+    });
+    assert.deepEqual(result.errors, [
+      'tree.children.0.component "Carousel" is not in the catalog',
+      "tree.children.1.props must be an object",
+      "tree.children.2 Button cannot have children",
+      'tree.children.3.props.root.tag "script" is not allowed',
+      'tree.children.5.props.name "dup" is already used by tree.children.4',
+    ]);
+    const wide = { component: "Stack", children: [button, button] };
+    const sized = validateUiTree(wide, await stored(), undefined, undefined, { maxNodes: 2 });
+    assert.deepEqual(sized.errors, ["tree has 3 nodes (max 2)"]);
   });
 
   it("rejects children on a component that takes none", async () => {
@@ -438,8 +480,12 @@ describe("validateUiTree Markup", () => {
   });
 
   it("checks the root only when it is an object", async () => {
-    assert.deepEqual((await check({ component: "Markup" })).errors, ["tree.props.root is required"]);
-    assert.deepEqual((await check(markup("<b>x</b>"))).errors, ["tree.props.root must be object"]);
+    assert.deepEqual((await check({ component: "Markup" })).errors, [
+      "tree.props.root is required (call get_component Markup for its props)",
+    ]);
+    assert.deepEqual((await check(markup("<b>x</b>"))).errors, [
+      "tree.props.root must be object (call get_component Markup for its props)",
+    ]);
   });
 
   it("doesn't count Markup elements toward the node and depth limits", async () => {
@@ -522,5 +568,31 @@ describe("validateUiTree options", () => {
     for (let i = 0; i < 8; i++) deep = { component: "Stack", children: [deep] };
     assert.deepEqual((await withOptions(deep, undefined, { maxDepth: 9 })).errors, []);
     assert.deepEqual((await withOptions(deep, undefined, { maxDepth: 3 })).errors, ["tree is 9 levels deep (max 3)"]);
+  });
+});
+
+describe("withPropsHint", () => {
+  it("returns no problems unchanged and doesn't mark the name", () => {
+    const hinted = new Set<string>();
+    assert.deepEqual(withPropsHint([], "Button", hinted), []);
+    assert.equal(hinted.size, 0);
+  });
+
+  it("hints the first problem for a new name and marks it", () => {
+    const hinted = new Set<string>();
+    const problems = ["tree.props.label is required", "tree.props.color is not allowed"];
+    assert.deepEqual(withPropsHint(problems, "Button", hinted), [
+      "tree.props.label is required (call get_component Button for its props)",
+      "tree.props.color is not allowed",
+    ]);
+    assert.deepEqual(problems, ["tree.props.label is required", "tree.props.color is not allowed"]);
+    assert.deepEqual([...hinted], ["Button"]);
+  });
+
+  it("returns the problems unchanged for a name already hinted", () => {
+    const hinted = new Set(["Button"]);
+    const problems = ["tree.children.1.props.label must be string"];
+    assert.equal(withPropsHint(problems, "Button", hinted), problems);
+    assert.deepEqual([...hinted], ["Button"]);
   });
 });
