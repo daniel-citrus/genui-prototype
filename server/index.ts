@@ -1,6 +1,7 @@
 import { agentAvailable, config } from "./config";
 import { createDb } from "./adapters/db/client";
 import { DrizzleComponentRepository } from "./adapters/db/DrizzleComponentRepository";
+import { DrizzleCustomComponentRepository } from "./adapters/db/DrizzleCustomComponentRepository";
 import { runMigrations } from "./adapters/db/migrate";
 import { seedComponents } from "./adapters/db/seed";
 import { createRedis } from "./adapters/redis/client";
@@ -34,6 +35,7 @@ function dbHost(url: string): string {
 // The only place real adapters are built.
 const database = createDb(config.databaseUrl);
 const components = new DrizzleComponentRepository(database.db);
+const customComponents = new DrizzleCustomComponentRepository(database.db);
 
 const llm = agentAvailable
   ? createOpenAILlm({
@@ -74,6 +76,8 @@ const app = await buildApp({
   trustProxy: config.trustProxy,
   rateLimit: { max: config.rateLimitPerMinute },
   redis,
+  customComponents,
+  components,
 });
 appLog = app.log;
 app.decorate("components", components);
