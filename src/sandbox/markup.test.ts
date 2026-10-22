@@ -80,6 +80,54 @@ describe("filterMarkup", () => {
     });
   });
 
+  it("drops styles that could hide a control from it and from the elements holding it, and nothing else", () => {
+    const option = { tag: "option", text: "Small" };
+    const field = { tag: "input", attrs: { name: "price", value: "1" } };
+    const root = {
+      tag: "div",
+      style: { display: "none", color: "red" },
+      children: [
+        {
+          tag: "label",
+          style: { opacity: "0.1", "font-size": "12px" },
+          children: [{ ...field, style: { width: "0", margin: "-40px", padding: "4px" } }],
+        },
+        { tag: "select", attrs: { name: "size" }, style: { "font-size": "0" }, children: [option] },
+        { tag: "button", action: "save", style: { "max-height": "0px", color: "white" }, text: "Save" },
+        { tag: "span", style: { display: "none" }, text: "Note" },
+        { tag: "input", attrs: { type: "text" }, style: { opacity: "0" } },
+        { tag: "svg", style: { "margin-top": "-4px" }, children: [{ tag: "rect", attrs: { width: 0 } }] },
+      ],
+    };
+    assert.deepEqual(filterMarkup(root), {
+      tag: "div",
+      style: { color: "red" },
+      children: [
+        {
+          tag: "label",
+          style: { "font-size": "12px" },
+          children: [{ ...field, style: { padding: "4px" } }],
+        },
+        { tag: "select", attrs: { name: "size" }, style: {}, children: [option] },
+        { tag: "button", action: "save", style: { color: "white" }, text: "Save" },
+        { tag: "span", style: { display: "none" }, text: "Note" },
+        { tag: "input", attrs: { type: "text" }, style: { opacity: "0" } },
+        { tag: "svg", style: { "margin-top": "-4px" }, children: [{ tag: "rect", attrs: { width: 0 } }] },
+      ],
+    });
+  });
+
+  it("drops values that call a function other than the allowed ones", () => {
+    const root = {
+      tag: "div",
+      style: { color: "var(--x)", "background-color": "rgb(0 0 0)", width: "src(a.png)", height: "calc(100% - 8px)" },
+    };
+    assert.deepEqual(filterMarkup(root), {
+      tag: "div",
+      style: { "background-color": "rgb(0 0 0)", height: "calc(100% - 8px)" },
+    });
+  });
+
   it("returns null for a root that isn't an allowed element, and cuts the tree at the limits", () => {
     assert.equal(filterMarkup({ tag: "script" }), null);
     assert.equal(filterMarkup("<p>x</p>"), null);

@@ -47,6 +47,11 @@ export interface CustomComponentRepository {
   save(definition: CustomComponentDefinition): Promise<StoredCustomComponent>;
   /** Resolve false for an unknown name. */
   softDelete(name: string): Promise<boolean>;
+  /**
+   * Resolves false for an unknown name, and true without changes for one that
+   * isn't deleted. Rejects CustomComponentError limit when one more component
+   * not deleted would pass the limit.
+   */
   restore(name: string): Promise<boolean>;
 }
 
@@ -78,14 +83,19 @@ export function assertCanAddVersion(
   }
 }
 
-/** Throws the refusal when one more component would pass a count limit. */
-export function assertCanCreate(counts: { notDeleted: number; total: number }): void {
-  if (counts.notDeleted >= MAX_CUSTOM_COMPONENTS) {
+/** Throws the refusal when one more component not deleted, created or restored, would pass the limit. */
+export function assertCanActivate(notDeleted: number): void {
+  if (notDeleted >= MAX_CUSTOM_COMPONENTS) {
     throw new CustomComponentError(
       "limit",
       `There are already ${MAX_CUSTOM_COMPONENTS} custom components, the limit: delete one first.`,
     );
   }
+}
+
+/** Throws the refusal when one more component would pass a count limit. */
+export function assertCanCreate(counts: { notDeleted: number; total: number }): void {
+  assertCanActivate(counts.notDeleted);
   if (counts.total >= MAX_CUSTOM_COMPONENTS_TOTAL) {
     throw new CustomComponentError(
       "limit",

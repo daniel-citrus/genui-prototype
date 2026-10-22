@@ -246,9 +246,22 @@ function readFields(controls: Array<HTMLInputElement | HTMLSelectElement>): Fiel
     });
 }
 
+/** Whether the person can't see `control`, so a click would send a value they never saw. */
+function isHidden(control: Element): boolean {
+  const box = control.getBoundingClientRect();
+  return (
+    !control.checkVisibility({ opacityProperty: true, visibilityProperty: true }) || box.width < 1 || box.height < 1
+  );
+}
+
 async function sendAction(action: string) {
   if (!sandbox || !shownUiId) return;
   const controls = [...sandbox.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select")];
+  // Markup styles can put a field out of sight; the server and filterMarkup refuse the known ways.
+  if (controls.some((control) => control.name && isHidden(control))) {
+    showStatus({ ok: false, message: "This design has a hidden field, so the action was not sent." });
+    return;
+  }
   const invalid = controls.find((control) => !control.checkValidity());
   if (invalid) {
     invalid.reportValidity();

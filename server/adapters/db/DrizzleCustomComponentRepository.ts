@@ -1,6 +1,7 @@
 import { and, count, eq, isNull, or, sql, type Column, type SQL } from "drizzle-orm";
 import type { CustomComponentDefinition, StoredCustomComponent } from "shared/customComponents";
 import {
+  assertCanActivate,
   assertCanAddVersion,
   assertCanCreate,
   CustomComponentError,
@@ -48,6 +49,11 @@ const containsIgnoringCase = (column: Column, search: string) =>
 const isCurrentVersion = eq(customComponentVersions.version, customComponents.currentVersion);
 // Byte order, so the order doesn't depend on the database's collation.
 const byName = sql`${customComponents.name} collate "C"`;
+/**
+ * Creations and restores take this lock in turns, so concurrent ones can't
+ * all pass the count limits.
+ */
+const countLimitsLock = sql`select pg_advisory_xact_lock(hashtext('custom_components'))`;
 
 export class DrizzleCustomComponentRepository implements CustomComponentRepository {
   private readonly db: Db;
@@ -129,8 +135,7 @@ export class DrizzleCustomComponentRepository implements CustomComponentReposito
             versions,
           });
         } else {
-          // Creations take turns, so concurrent ones can't both pass the count limits.
-          await tx.execute(sql`select pg_advisory_xact_lock(hashtext('custom_components'))`);
+          await tx.execute(countLimitsLock);
           const [counts] = await tx
             .select({ total: count(), deleted: count(customComponents.deletedAt) })
             .from(customComponents);
@@ -180,12 +185,20 @@ export class DrizzleCustomComponentRepository implements CustomComponentReposito
   }
 
   async restore(name: string): Promise<boolean> {
-    const rows = await this.db
-      .update(customComponents)
-      .set({ deletedAt: null })
-      .where(eq(customComponents.name, name))
-      .returning({ id: customComponents.id });
-    return rows.length > 0;
+    return this.db.transaction(async (tx) => {
+      await tx.execute(countLimitsLock);
+      const [component] = await tx
+        .select({ deletedAt: customComponents.deletedAt })
+        .from(customComponents)
+        .where(eq(customComponents.name, name));
+      if (!component?.deletedAt) return component !== undefined;
+      assertCanActivate(await tx.$count(customComponents, isNull(customComponents.deletedAt)));
+      await tx
+        .update(customComponents)
+        .set({ deletedAt: null })
+        .where(eq(customComponents.name, name));
+      return true;
+    });
   }
 
   /** Joins a component to the version `which` picks. */
