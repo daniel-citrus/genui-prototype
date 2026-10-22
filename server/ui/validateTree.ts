@@ -104,6 +104,18 @@ export function propsErrors(validate: ValidateFunction, props: unknown, path: st
   });
 }
 
+/**
+ * `problems` from `propsErrors` for a use of `name`, the first one saying
+ * where to read its props unless `hinted` already has `name`. Adds `name` to
+ * `hinted`, so one check names each component once.
+ */
+export function withPropsHint(problems: string[], name: string, hinted: Set<string>): string[] {
+  if (problems.length === 0 || hinted.has(name)) return problems;
+  hinted.add(name);
+  const [first, ...rest] = problems;
+  return [`${first} (call get_component ${name} for its props)`, ...rest];
+}
+
 /** Where a binding's key is set: a catalog prop, or the part of a Markup element that holds it. */
 const MARKUP_KEY_PATHS = { name: "attrs.name", action: "action", options: "children" };
 function keyPath(binding: NamedInput | ActionButton, key: keyof typeof MARKUP_KEY_PATHS): string {
@@ -236,6 +248,7 @@ export function validateUiTree(
   const { designChecks = true, maxNodes = MAX_NODES, maxDepth = MAX_DEPTH, suggestions = [] } = options;
   const byName = new Map(catalog.map((c) => [c.name, c]));
   const errors: string[] = [];
+  const hinted = new Set<string>();
   const stats: UiTreeStats = { nodes: 0, depth: 0, components: {} };
 
   const visit = (node: unknown, path: string, level: number): void => {
@@ -271,13 +284,13 @@ export function validateUiTree(
       if (!isObject(node.props)) {
         errors.push(`${path}.props must be an object`);
       } else if (component) {
-        errors.push(...propsErrors(propsValidator(component), node.props, path));
+        errors.push(...withPropsHint(propsErrors(propsValidator(component), node.props, path), component.name, hinted));
         if (component.name === "Markup" && isObject(node.props.root)) {
           errors.push(...validateMarkup(node.props.root, `${path}.props.root`));
         }
       }
     } else if (component) {
-      errors.push(...propsErrors(propsValidator(component), {}, path));
+      errors.push(...withPropsHint(propsErrors(propsValidator(component), {}, path), component.name, hinted));
     }
 
     if (node.children !== undefined) {

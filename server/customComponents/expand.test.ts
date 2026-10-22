@@ -104,7 +104,9 @@ describe("expandTree", () => {
         { component: "Divider" },
       ],
     });
-    assert.deepEqual(validatorErrors(result), ["tree.children.1.props.text must be string"]);
+    assert.deepEqual(validatorErrors(result), [
+      "tree.children.1.props.text must be string (call get_component Text for its props)",
+    ]);
   });
 
   it("expands custom components used inside templates", async () => {
@@ -144,7 +146,7 @@ describe("expandTree", () => {
     };
     const result = await expand(input);
     assert.deepEqual(result.errors, [
-      "tree.children.0.props.price is required",
+      "tree.children.0.props.price is required (call get_component MenuItemCard for its props)",
       "tree.children.0.props.photo is required",
       "tree.children.0.props.size is not allowed",
       "tree.children.0.props.name must be string",
@@ -169,7 +171,26 @@ describe("expandTree", () => {
     });
     assert.deepEqual((input.children[1] as { children?: unknown }).children, []);
     // The Text moved up to children.1; its problem still names the agent's node.
-    assert.deepEqual(validatorErrors(result), ["tree.children.3.props.text must be string"]);
+    assert.deepEqual(validatorErrors(result), [
+      "tree.children.3.props.text must be string (call get_component Text for its props)",
+    ]);
+  });
+
+  it("points each custom component's first props problem at get_component, once per name", async () => {
+    const result = await expand({
+      component: "Stack",
+      children: [
+        { component: "MenuItemCard", props: { ...latte, price: 4 } },
+        { component: "BarChart", props: { label: "Sales" } },
+        { component: "MenuItemCard", props: { name: "Mocha" } },
+      ],
+    });
+    assert.deepEqual(result.errors, [
+      "tree.children.0.props.price must be string (call get_component MenuItemCard for its props)",
+      "tree.children.1.props.value is required (call get_component BarChart for its props)",
+      "tree.children.2.props.price is required",
+      "tree.children.2.props.photo is required",
+    ]);
   });
 
   it("refuses a non-empty children array on a none instance and leaves the node out", async () => {
