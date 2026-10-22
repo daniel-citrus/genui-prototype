@@ -51,6 +51,13 @@ describe("runEvalCase", () => {
     assert.equal(result.ok, true);
     assert.deepEqual(result.failures, []);
     assert.equal(result.endedBy, "reply");
+    assert.equal(result.trace.endedBy, "reply");
+    assert.equal(result.trace.userText, headingCase.prompt);
+    assert.match(result.trace.conversationId, /^eval:heading-test:/);
+    const toolNames = result.trace.completions.flatMap((c) =>
+      c.toolCalls.map((tc) => tc.call.name),
+    );
+    assert(toolNames.includes("render_ui"));
   });
 
   it("fails checks without throwing when the model only replies with text", async () => {
@@ -63,6 +70,12 @@ describe("runEvalCase", () => {
     assert.match(result.failures[0]!.reason, /toolSucceeded "render_ui"/);
     assert.match(result.failures[1]!.reason, /uiComponent "Heading"/);
     assert.equal(result.endedBy, "reply");
+    assert.equal(result.trace.endedBy, "reply");
+    assert.match(result.trace.conversationId, /^eval:heading-test:/);
+    const hasRenderUi = result.trace.completions.some((c) =>
+      c.toolCalls.some((tc) => tc.call.name === "render_ui"),
+    );
+    assert.equal(hasRenderUi, false);
   });
 
   it("clears the in-memory conversation after the case", async () => {

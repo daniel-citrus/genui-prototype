@@ -94,6 +94,7 @@ export async function runEvalCase(
     id: evalCase.id,
     ok: failures.length === 0,
     failures,
+    trace,
     endedBy: trace.endedBy,
   };
   if (trace.error !== undefined) result.error = trace.error;
