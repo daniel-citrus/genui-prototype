@@ -14,6 +14,7 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
     "test": "tsx --tsconfig ./tsconfig.server.json --test --test-concurrency=1 \"server/**/*.test.ts\" \"src/**/*.test.ts\"",
+    "eval": "tsx --tsconfig ./tsconfig.server.json --env-file-if-exists=.env.local server/eval/cli.ts",
     "db:generate": "drizzle-kit generate",
     "db:generate:traces": "drizzle-kit generate --config drizzle.traces.config.ts",
     "db:migrate": "drizzle-kit migrate",

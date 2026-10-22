@@ -1,0 +1,12 @@
+{
+  "id": "echo-form",
+  "prompt": "Show a form with a text field and a button that runs the demo echo action with what I type",
+  "checks": [
+    { "endedBy": "reply" },
+    { "noError": true },
+    { "toolCalled": "list_actions" },
+    { "toolSucceeded": "render_ui" },
+    { "uiButtonAction": "demo_echo" },
+    { "uiNamedInput": "text" }
+  ]
+}
