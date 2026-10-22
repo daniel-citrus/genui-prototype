@@ -4,7 +4,7 @@ import { MAX_CUSTOM_NESTING, MAX_EXPANDED_NODES, type StoredCustomComponent } fr
 import { isPlaceholder } from "shared/markup";
 import type { UiNode } from "shared/ui";
 import { isObject } from "../ui/bindings";
-import { propsErrors } from "../ui/validateTree";
+import { propsErrors, withPropsHint } from "../ui/validateTree";
 import { compileSchema } from "../validation/jsonSchema";
 
 export type ResolveCustomComponent = (name: string) => Promise<StoredCustomComponent | undefined>;
@@ -137,6 +137,7 @@ export async function expandTree(tree: unknown, ctx: ExpandContext): Promise<Exp
   const resolve = cachedResolve(ctx.resolve);
   const errors: string[] = [];
   const origins = new Map<string, string>();
+  const hinted = new Set<string>();
   let nodes = 0;
   let tooMany = false;
 
@@ -196,7 +197,7 @@ export async function expandTree(tree: unknown, ctx: ExpandContext): Promise<Exp
       if (!NODE_KEYS.includes(key)) problems.push(`${where}.${key} is not allowed (use component, props, children)`);
     }
     if (node.props !== undefined && !isObject(node.props)) problems.push(`${where}.props must be an object`);
-    else problems.push(...propsErrors(propsValidator(custom), node.props ?? {}, where));
+    else problems.push(...withPropsHint(propsErrors(propsValidator(custom), node.props ?? {}, where), name, hinted));
     if (node.children !== undefined) {
       if (!Array.isArray(node.children)) problems.push(`${where}.children must be an array`);
       else if (custom.children === "none" && node.children.length > 0) problems.push(`${where} ${name} cannot have children`);

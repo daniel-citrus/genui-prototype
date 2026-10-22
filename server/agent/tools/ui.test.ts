@@ -74,7 +74,7 @@ describe("render_ui", () => {
     assert.equal(result.summary, "UI has 2 problems");
     assert.deepEqual(result.data, {
       errors: [
-        "tree.children.0.props.label is required",
+        "tree.children.0.props.label is required (call get_component Button for its props)",
         'tree.children.1.component "button" is not in the catalog (did you mean Button?)',
       ],
     });
@@ -389,10 +389,12 @@ describe("render_ui with custom components", () => {
       ctx,
     );
 
+    assert.equal(result.summary, "UI has 2 problems");
     assert.deepEqual(result.data, {
       errors: [
-        "tree.children.0.props.price is required",
-        'tree.children.1 (MenuItemCard v1) template.children.0.props.src must match pattern "^https?://"',
+        "tree.children.0.props.price is required (call get_component MenuItemCard for its props)",
+        'tree.children.1 (MenuItemCard v1) template.children.0.props.src must match pattern "^https?://"' +
+          " (call get_component Image for its props)",
       ],
     });
     assert.equal(shown.length, 0);
