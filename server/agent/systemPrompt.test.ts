@@ -105,6 +105,15 @@ describe("SYSTEM_PROMPT", () => {
     }
   });
 
+  it("fixes reported problems in the same turn instead of promising to retry", () => {
+    const fix =
+      "- Problems that render_ui or define_component reports are not failures: fix them and call the tool again in the same turn. Never reply that you will try again; call the tool instead.";
+    const fail =
+      "- If a tool fails for any other reason, say what you couldn't do instead of guessing. If you can no longer call tools in this turn, answer with what you have and say what is missing.";
+    assert.ok(SYSTEM_PROMPT.endsWith(`\n${fix}\n${fail}`), "prompt does not end with the retry and failure rules");
+    assert.ok(!SYSTEM_PROMPT.includes("If a tool fails, say what you couldn't do instead of guessing."));
+  });
+
   it("says how to read components and fill booleans", () => {
     for (const sentence of [
       "all in the same turn",
