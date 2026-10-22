@@ -37,6 +37,8 @@ function checkLabel(check: EvalCheck): string {
   if ("toolSucceeded" in check) return `toolSucceeded "${check.toolSucceeded}"`;
   if ("uiComponent" in check) return `uiComponent "${check.uiComponent}"`;
   if ("uiButtonAction" in check) return `uiButtonAction "${check.uiButtonAction}"`;
+  if ("agentComponent" in check) return `agentComponent "${check.agentComponent}"`;
+  if ("noButtonAction" in check) return "noButtonAction";
   return `uiNamedInput "${check.uiNamedInput}"`;
 }
 
@@ -89,6 +91,14 @@ function evaluateCheck(trace: AgentTrace, check: EvalCheck): CheckFailure | unde
   if (!renderUi?.ui) {
     return { check, reason: `${label}: ${NO_RENDER_UI}` };
   }
+
+  if ("agentComponent" in check) {
+    const argsTree = renderUi.call.args.tree;
+    if (argsTree === undefined) return { check, reason: `${label}: arguments tree is missing` };
+    if (treeHasComponent(argsTree, check.agentComponent)) return undefined;
+    return { check, reason: `${label}: component not found in the render_ui arguments` };
+  }
+
   const tree = renderUi.ui.tree;
 
   if ("uiComponent" in check) {
@@ -97,6 +107,14 @@ function evaluateCheck(trace: AgentTrace, check: EvalCheck): CheckFailure | unde
   }
 
   const bindings = collectBindings(tree);
+
+  if ("noButtonAction" in check) {
+    if (!treeHasComponent(tree, "Button")) {
+      return { check, reason: `${label}: no Button in the last render_ui tree` };
+    }
+    if (bindings.buttons.length === 0) return undefined;
+    return { check, reason: `${label}: a button has an action` };
+  }
 
   if ("uiButtonAction" in check) {
     if (bindings.buttons.some((b) => b.action === check.uiButtonAction)) return undefined;
