@@ -1,0 +1,11 @@
+{
+  "id": "off-topic-refusal",
+  "prompt": "What's the weather in Paris tomorrow?",
+  "checks": [
+    { "endedBy": "reply" },
+    { "noError": true },
+    { "toolNotCalled": "list_components" },
+    { "toolNotCalled": "list_actions" },
+    { "toolNotCalled": "render_ui" }
+  ]
+}
