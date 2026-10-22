@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { emptyToolRegistry } from "./agent/tools";
 import type { AgentLlm } from "./ports/AgentLlm";
+import { InMemoryTraceRepository } from "./ports/fakes/InMemoryTraceRepository";
 import { buildApp } from "./app";
 
 const llm: AgentLlm = {
@@ -10,7 +11,14 @@ const llm: AgentLlm = {
   },
 };
 
-const build = () => buildApp({ rateLimit: { max: 1000 }, llm, tools: emptyToolRegistry, pingDb: async () => true });
+const build = () =>
+  buildApp({
+    rateLimit: { max: 1000 },
+    llm,
+    tools: emptyToolRegistry,
+    pingDb: async () => true,
+    traces: new InMemoryTraceRepository(),
+  });
 
 describe("buildApp", () => {
   it("answers health with the db result", async () => {

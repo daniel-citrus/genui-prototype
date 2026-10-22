@@ -11,6 +11,7 @@ function recordingLogger(): ToolLogger & { errors: Record<string, unknown>[] } {
     errors,
     info() {},
     debug() {},
+    warn() {},
     error(obj) {
       errors.push(obj as Record<string, unknown>);
     },

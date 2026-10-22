@@ -30,4 +30,23 @@ describe("GET /api/health", () => {
     assert.equal(body.redis, false);
     assert.equal(body.ok, true);
   });
+
+  it("reports traces false without pingTraces", async () => {
+    assert.equal((await health({})).traces, false);
+  });
+
+  it("reports the traces ping result", async () => {
+    assert.equal((await health({ pingTraces: async () => true })).traces, true);
+    assert.equal((await health({ pingTraces: async () => false })).traces, false);
+  });
+
+  it("reports traces false when the ping throws", async () => {
+    const body = await health({
+      pingTraces: async () => {
+        throw new Error("down");
+      },
+    });
+    assert.equal(body.traces, false);
+    assert.equal(body.ok, true);
+  });
 });

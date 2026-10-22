@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import type { AgentEvent } from "shared/api";
 import { catalog } from "../catalog/components";
 import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
+import { InMemoryTraceRepository } from "../ports/fakes/InMemoryTraceRepository";
 import { getDesign, resetConversation } from "./conversations";
 import { createToolRegistry } from "./registry";
 import { handleToolCall, type AgentRun } from "./run";
@@ -15,7 +16,8 @@ function makeRun(): { run: AgentRun; events: AgentEvent[] } {
     conversationId: "run-test",
     signal: new AbortController().signal,
     tools: createToolRegistry(createAgentTools({ components: new InMemoryComponentRepository(catalog) })),
-    log: { info() {}, debug() {}, error() {} },
+    log: { info() {}, debug() {}, error() {}, warn() {} },
+    traces: new InMemoryTraceRepository(),
   };
   return { run, events };
 }

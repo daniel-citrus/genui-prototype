@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { MAX_MESSAGE_CHARS, type AgentChatRequest, type AgentEvent } from "shared/api";
 import type { AgentLlm } from "../ports/AgentLlm";
+import type { TraceRepository } from "../ports/TraceRepository";
 import type { ToolRegistry } from "../agent/tools";
 import { runAgent } from "../agent/loop";
 import type { AgentRun } from "../agent/run";
@@ -12,6 +13,7 @@ export interface AgentRouterOptions {
   /** The model behind the agent. Without it, `/chat` reports it isn't configured. */
   llm?: AgentLlm;
   tools: ToolRegistry;
+  traces: TraceRepository;
 }
 
 export const agentRouter: FastifyPluginAsync<AgentRouterOptions> = async (app, opts) => {
@@ -70,6 +72,7 @@ export const agentRouter: FastifyPluginAsync<AgentRouterOptions> = async (app, o
         signal: controller.signal,
         tools: opts.tools,
         log: req.log,
+        traces: opts.traces,
         resume: Boolean(resume),
       };
       await runAgent(text, conversationId, run, opts.llm);

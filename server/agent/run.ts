@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AgentEvent, ToolCall } from "shared/api";
+import type { TraceRepository } from "../ports/TraceRepository";
 import { rememberDesign } from "./conversations";
 import type { ToolLogger, ToolRegistry } from "./tools";
 
@@ -12,6 +13,8 @@ export interface AgentRun {
   tools: ToolRegistry;
   /** The request's logger, handed to tools. */
   log: ToolLogger;
+  /** Where turn traces are stored for this process. */
+  traces: TraceRepository;
   /** The chat already shows earlier messages of this conversation. */
   resume?: boolean;
 }

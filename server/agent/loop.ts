@@ -1,7 +1,7 @@
 import type { AgentEvent, ToolCall, ToolResult } from "shared/api";
 import type { UiNode } from "shared/ui";
 import type { AgentLlm, HistoryMessage } from "../ports/AgentLlm";
-import { getHistory, hasConversation, oneTurnAtATime, rememberTrace } from "./conversations";
+import { getHistory, hasConversation, oneTurnAtATime } from "./conversations";
 import {
   callKey,
   MAX_STEPS,
@@ -230,7 +230,11 @@ async function runTurn(
     trace.toolCalls = toolCalls;
     trace.promptTokens = promptTokens;
     trace.completionTokens = completionTokens;
-    rememberTrace(conversationId, trace);
+    try {
+      await run.traces.save(trace);
+    } catch (err) {
+      run.log.warn({ conversationId, err }, "failed to save agent trace");
+    }
     run.emit = baseEmit;
     run.log.info(
       { conversationId, steps, toolCalls, promptTokens, completionTokens, endedBy },

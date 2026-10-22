@@ -4,6 +4,7 @@ import type { UiNode } from "shared/ui";
 import { createActionRegistry } from "../actions/registry";
 import { rememberDesign, resetConversation } from "../agent/conversations";
 import { emptyToolRegistry } from "../agent/tools";
+import { InMemoryTraceRepository } from "../ports/fakes/InMemoryTraceRepository";
 import { buildApp } from "../app";
 import { DESIGN_GONE_MESSAGE } from "./actions";
 
@@ -81,6 +82,7 @@ const build = (opts: { max?: number; logLines?: string[] } = {}) =>
     rateLimit: { max: opts.max ?? 1000 },
     logLevel: opts.logLines ? "info" : undefined,
     logStream: opts.logLines && { write: (line) => void opts.logLines?.push(line) },
+    traces: new InMemoryTraceRepository(),
   });
 
 type App = Awaited<ReturnType<typeof build>>;
