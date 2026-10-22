@@ -2,6 +2,7 @@ import "./style.css";
 import { MAX_MESSAGE_CHARS, type ActionResult, type ActionRunRequest, type AgentEvent } from "shared/api";
 import { runAction } from "./actionsClient";
 import { streamChat } from "./agentClient";
+import { createCustomComponentsPanel } from "./customComponentsPanel";
 import { actionValues, type FieldReading } from "./sandbox/actionValues";
 import { renderEmpty, renderUi } from "./sandbox/render";
 
@@ -32,38 +33,48 @@ const conversationId = crypto.randomUUID();
 app.innerHTML = `
   <div class="grid h-full min-h-0 grid-cols-2 bg-zinc-50 text-zinc-900">
     <section class="flex min-h-0 min-w-0 flex-col border-r border-zinc-200 bg-white" aria-label="Agent chat">
-      <header class="shrink-0 border-b border-zinc-200 px-4 py-3">
+      <header class="flex shrink-0 items-center gap-2 border-b border-zinc-200 px-4 py-3">
         <label class="sr-only" for="session-select">Session</label>
         <select
           id="session-select"
           aria-label="Session"
           class="w-full max-w-xs rounded-lg border border-zinc-300 bg-zinc-50 px-3 py-2 text-sm text-zinc-700 shadow-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
         ></select>
+        <button
+          type="button"
+          class="components-toggle ml-auto shrink-0 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 shadow-sm hover:bg-zinc-50 aria-expanded:bg-sky-50 aria-expanded:text-sky-800"
+          aria-controls="components-panel"
+          aria-expanded="false"
+        >
+          Components
+        </button>
       </header>
-      <div
-        class="thread flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4"
-        role="log"
-        aria-live="polite"
-        aria-relevant="additions"
-      ></div>
-      <form class="composer shrink-0 border-t border-zinc-200 bg-zinc-50/80 px-4 py-3" aria-label="Send a message">
-        <textarea
-          name="message"
-          rows="3"
-          maxlength="${MAX_MESSAGE_CHARS}"
-          placeholder="Message the agent…"
-          aria-label="Message"
-          class="mb-2 w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm outline-none placeholder:text-zinc-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
-        ></textarea>
-        <div class="flex justify-end">
-          <button
-            type="submit"
-            class="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-sky-700 active:bg-sky-800"
-          >
-            Send
-          </button>
-        </div>
-      </form>
+      <div class="chat-body relative flex min-h-0 flex-1 flex-col">
+        <div
+          class="thread flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
+        ></div>
+        <form class="composer shrink-0 border-t border-zinc-200 bg-zinc-50/80 px-4 py-3" aria-label="Send a message">
+          <textarea
+            name="message"
+            rows="3"
+            maxlength="${MAX_MESSAGE_CHARS}"
+            placeholder="Message the agent…"
+            aria-label="Message"
+            class="mb-2 w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm outline-none placeholder:text-zinc-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
+          ></textarea>
+          <div class="flex justify-end">
+            <button
+              type="submit"
+              class="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-sky-700 active:bg-sky-800"
+            >
+              Send
+            </button>
+          </div>
+        </form>
+      </div>
     </section>
     <section class="flex min-h-0 min-w-0 flex-col bg-zinc-100/80 p-4" aria-label="Sandbox">
       <div class="${statusBaseClass}" role="status"></div>
@@ -79,6 +90,14 @@ const submitButton = form?.querySelector<HTMLButtonElement>('button[type="submit
 const sandbox = app.querySelector<HTMLDivElement>(".sandbox-canvas");
 const sandboxStatus = app.querySelector<HTMLDivElement>(".sandbox-status");
 if (sandbox) renderEmpty(sandbox);
+
+// Opens over the chat; its previews are drawn there, outside the sandbox.
+const componentsPanel = createCustomComponentsPanel();
+app.querySelector(".chat-body")?.append(componentsPanel.element);
+const componentsToggle = app.querySelector<HTMLButtonElement>(".components-toggle");
+componentsToggle?.addEventListener("click", () => {
+  componentsToggle.setAttribute("aria-expanded", String(componentsPanel.toggle()));
+});
 
 /** Set while a turn streams; aborting it closes the stream. */
 let activeTurn: AbortController | null = null;
@@ -246,9 +265,22 @@ function readFields(controls: Array<HTMLInputElement | HTMLSelectElement>): Fiel
     });
 }
 
+/** Whether the person can't see `control`, so a click would send a value they never saw. */
+function isHidden(control: Element): boolean {
+  const box = control.getBoundingClientRect();
+  return (
+    !control.checkVisibility({ opacityProperty: true, visibilityProperty: true }) || box.width < 1 || box.height < 1
+  );
+}
+
 async function sendAction(action: string) {
   if (!sandbox || !shownUiId) return;
   const controls = [...sandbox.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select")];
+  // Markup styles can put a field out of sight; the server and filterMarkup refuse the known ways.
+  if (controls.some((control) => control.name && isHidden(control))) {
+    showStatus({ ok: false, message: "This design has a hidden field, so the action was not sent." });
+    return;
+  }
   const invalid = controls.find((control) => !control.checkValidity());
   if (invalid) {
     invalid.reportValidity();

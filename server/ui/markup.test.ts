@@ -7,6 +7,7 @@ const at = "tree.children.0.props.root";
 const check = (root: unknown) => validateMarkup(root, at);
 const div = (...children: unknown[]) => ({ tag: "div", children });
 const svg = (...children: unknown[]) => ({ tag: "svg", attrs: { viewBox: "0 0 100 40" }, children });
+const useAllowed = "(use rgb, rgba, hsl, hsla, calc, min, max, clamp, repeat, minmax, fit-content)";
 
 const barChart = {
   tag: "figure",
@@ -230,6 +231,86 @@ describe("validateMarkup", () => {
       `${at}.children must be an array`,
     ]);
   });
+
+  /** Styles that could hide a field, one per line. */
+  const hiding: [string, string][] = [
+    ["display", "none"],
+    ["opacity", "0"],
+    ["opacity", "0.49"],
+    ["opacity", "40%"],
+    ["opacity", "calc(1)"],
+    ["width", "0"],
+    ["width", "-1px"],
+    ["height", "0px"],
+    ["max-width", "0%"],
+    ["max-height", "0em"],
+    ["max-height", "min(0px, 10px)"],
+    ["font-size", "0"],
+    ["margin", "0 0 -1px"],
+    ["margin-top", "-5px"],
+    ["margin-right", "-1em"],
+    ["margin-bottom", "calc(0px - 10px)"],
+    ["margin-left", "-100%"],
+  ];
+
+  it("refuses styles that could hide a control or an element holding one", () => {
+    const controls = [
+      { tag: "input", attrs: { name: "price", value: "1" } },
+      { tag: "select", attrs: { name: "size" }, children: [{ tag: "option", text: "Small" }] },
+      { tag: "button", action: "save", text: "Save" },
+    ];
+    for (const [property, value] of hiding) {
+      const style = { [property]: value };
+      const hides = (path: string) => [`${at}${path}.style.${property} hides a field that sends a value`];
+      for (const control of controls) {
+        assert.deepEqual(check(div({ ...control, style })), hides(".children.0"), `${control.tag} ${property}`);
+      }
+      assert.deepEqual(
+        check({ tag: "div", style, children: [{ tag: "p" }, { tag: "label", children: [controls[0]] }] }),
+        hides(""),
+        `ancestor ${property}`,
+      );
+    }
+  });
+
+  it("accepts those styles on elements with no control inside, and other sizes on controls", () => {
+    for (const [property, value] of hiding) {
+      const style = { [property]: value };
+      const decorations = [
+        { tag: "span", style, text: "Note" },
+        svg({ tag: "rect", attrs: { width: 0 } }),
+        { tag: "input", attrs: { type: "text" }, style },
+        { tag: "button", style, text: "Close" },
+      ];
+      assert.deepEqual(check(div(...decorations, orderForm)), [], property);
+    }
+    const style = {
+      display: "block",
+      opacity: "0.5",
+      width: "calc(100% - 16px)",
+      "max-width": "none",
+      "font-size": "0.9rem",
+      margin: "0 auto",
+    };
+    assert.deepEqual(check({ tag: "div", style, children: [{ tag: "input", attrs: { name: "price" }, style }] }), []);
+    assert.deepEqual(check({ tag: "div", style: { opacity: "50%" }, children: [orderForm] }), []);
+  });
+
+  it("refuses function calls other than the allowed ones, and SVG transforms outside transform", () => {
+    assert.deepEqual(
+      check(
+        svg({
+          tag: "g",
+          attrs: { transform: "rotate(45) translate(1 2) SkewX(3)", fill: "scale(2)" },
+          style: { fill: "var(--x)" },
+        }),
+      ),
+      [
+        `${at}.children.0.attrs.fill must not call "scale(" ${useAllowed}`,
+        `${at}.children.0.style.fill must not call "var(" ${useAllowed}`,
+      ],
+    );
+  });
 });
 
 describe("markupValueProblem", () => {
@@ -240,6 +321,42 @@ describe("markupValueProblem", () => {
     for (const value of ["Url(x)", "EXPRESSION(x)", "JavaScript:void(0)", "a@b", "a\\b", "<", ">"]) {
       assert.notEqual(markupValueProblem(value), undefined, value);
     }
+  });
+
+  it("refuses function calls other than the allowed ones in any case, keeping the url( message", () => {
+    const refused = {
+      'src("a.png")': "src(",
+      "IMAGE-SET(a.png 1x)": "image-set(",
+      "-webkit-image-set(a.png 1x)": "-webkit-image-set(",
+      "Image(red)": "image(",
+      "element(#a)": "element(",
+      "cross-fade(red, blue)": "cross-fade(",
+      "VAR(--x)": "var(",
+      "attr(title)": "attr(",
+      "calc(1px + var(--x))": "var(",
+    };
+    for (const [value, call] of Object.entries(refused)) {
+      assert.equal(markupValueProblem(value), `must not call ${JSON.stringify(call)} ${useAllowed}`, value);
+    }
+    assert.equal(markupValueProblem("URL(a.png)"), 'must not contain "url("');
+
+    const accepted = [
+      "rgb(0 0 0)",
+      "RGBA(0, 0, 0, .5)",
+      "hsl(200 50% 40%)",
+      "hsla(200, 50%, 40%, 0.5)",
+      "calc(100% - 8px)",
+      "min(10px, 5vw)",
+      "max(10px, 5vw)",
+      "clamp(1rem, 2vw, 2rem)",
+      "repeat(3, minmax(0, 1fr))",
+      "fit-content(200px)",
+      "#1f2937",
+      "12px",
+      "1fr 2fr",
+      "Sales (first quarter)",
+    ];
+    for (const value of accepted) assert.equal(markupValueProblem(value), undefined, value);
   });
 });
 

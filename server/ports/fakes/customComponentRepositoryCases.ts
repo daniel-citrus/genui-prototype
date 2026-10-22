@@ -169,6 +169,34 @@ export function customComponentRepositoryCases(fresh: () => Promise<CustomCompon
     assert.equal((await repo.save(definition("OneMore"))).version, 1);
   });
 
+  it(`refuses to restore a component past ${MAX_CUSTOM_COMPONENTS} not deleted, even concurrently`, async () => {
+    const repo = await fresh();
+    for (let i = 0; i < MAX_CUSTOM_COMPONENTS; i++) await repo.save(definition(`Card${i}`));
+    await repo.softDelete("Card0");
+    await repo.softDelete("Card1");
+    await repo.save(definition("OneMore"));
+
+    const results = await Promise.allSettled([repo.restore("Card0"), repo.restore("Card1")]);
+    assert.deepEqual(results.map((r) => r.status).sort(), ["fulfilled", "rejected"]);
+    for (const r of results) {
+      if (r.status === "fulfilled") assert.equal(r.value, true);
+      else rejectsWith("limit", new RegExp(`already ${MAX_CUSTOM_COMPONENTS} custom components`))(r.reason);
+    }
+    const loser = results[0].status === "rejected" ? "Card0" : "Card1";
+    assert.ok((await repo.getByName(loser))?.deletedAt);
+    assert.equal((await repo.list()).total, MAX_CUSTOM_COMPONENTS);
+
+    await assert.rejects(repo.restore(loser), rejectsWith("limit", /delete one first/));
+    const card2 = await repo.getByName("Card2");
+    assert.equal(await repo.restore("Card2"), true);
+    assert.deepEqual(await repo.getByName("Card2"), card2);
+    assert.equal(await repo.restore("Missing"), false);
+
+    await repo.softDelete("OneMore");
+    assert.equal(await repo.restore(loser), true);
+    assert.equal((await repo.getByName(loser))?.deletedAt, null);
+  });
+
   it(`refuses a component past ${MAX_CUSTOM_COMPONENTS_TOTAL} counting deleted ones`, async () => {
     const repo = await fresh();
     for (let i = 0; i < MAX_CUSTOM_COMPONENTS_TOTAL; i++) {

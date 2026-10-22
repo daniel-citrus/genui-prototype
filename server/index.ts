@@ -76,6 +76,8 @@ const app = await buildApp({
   trustProxy: config.trustProxy,
   rateLimit: { max: config.rateLimitPerMinute },
   redis,
+  customComponents,
+  components,
 });
 appLog = app.log;
 app.decorate("components", components);
