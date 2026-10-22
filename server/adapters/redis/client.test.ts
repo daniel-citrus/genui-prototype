@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { emptyToolRegistry } from "../../agent/tools";
+import { InMemoryTraceRepository } from "../../ports/fakes/InMemoryTraceRepository";
 import { buildApp } from "../../app";
 import type { AgentLlm } from "../../ports/AgentLlm";
 import { createRedis } from "./client";
@@ -29,7 +30,13 @@ describe("redis client with Redis down", () => {
 
   it("lets a chat request through quickly", async () => {
     const redis = createRedis(DEAD_URL, { warn: () => {}, info: () => {} });
-    const app = await buildApp({ llm, tools: emptyToolRegistry, rateLimit: { max: 5 }, redis });
+    const app = await buildApp({
+      llm,
+      tools: emptyToolRegistry,
+      rateLimit: { max: 5 },
+      redis,
+      traces: new InMemoryTraceRepository(),
+    });
     const started = Date.now();
     const res = await app.inject({
       method: "POST",

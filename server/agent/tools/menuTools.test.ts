@@ -25,7 +25,7 @@ function setup() {
   const shown: UiNode[] = [];
   const ctx: ToolContext = {
     signal: new AbortController().signal,
-    log: { info() {}, debug() {}, error() {} },
+    log: { info() {}, debug() {}, error() {}, warn() {} },
     showUi: (tree) => void shown.push(tree),
   };
   return { actions, tools, ctx, shown };

@@ -1,5 +1,9 @@
 import { agentAvailable, config } from "./config";
 import { createDb } from "./adapters/db/client";
+import { createTracesDb } from "./adapters/traces/client";
+import { DrizzleTraceRepository } from "./adapters/traces/DrizzleTraceRepository";
+import { ensureTracesDatabase } from "./adapters/traces/ensureDatabase";
+import { runMigrations as runTracesMigrations } from "./adapters/traces/migrate";
 import { DrizzleComponentRepository } from "./adapters/db/DrizzleComponentRepository";
 import { DrizzleCustomComponentRepository } from "./adapters/db/DrizzleCustomComponentRepository";
 import { runMigrations } from "./adapters/db/migrate";
@@ -34,6 +38,8 @@ function dbHost(url: string): string {
 
 // The only place real adapters are built.
 const database = createDb(config.databaseUrl);
+const tracesDatabase = createTracesDb(config.traceDatabaseUrl, config.databaseUrl);
+const traces = new DrizzleTraceRepository(tracesDatabase.db);
 const components = new DrizzleComponentRepository(database.db);
 const customComponents = new DrizzleCustomComponentRepository(database.db);
 
@@ -73,16 +79,19 @@ const app = await buildApp({
   tools,
   actions,
   pingDb: database.ping,
+  pingTraces: tracesDatabase.ping,
   trustProxy: config.trustProxy,
   rateLimit: { max: config.rateLimitPerMinute },
   redis,
   customComponents,
   components,
+  traces,
 });
 appLog = app.log;
 app.decorate("components", components);
 app.addHook("onClose", async () => {
   await database.close();
+  await tracesDatabase.close();
 });
 
 // In production the schema and the component catalog are brought up to date on
@@ -92,6 +101,7 @@ if (process.env.NODE_ENV === "production") {
   const failStartup = async (err: unknown, what: string) => {
     app.log.error({ err }, `${what} failed (${dbHost(config.databaseUrl)})`);
     await database.close().catch(() => {});
+    await tracesDatabase.close().catch(() => {});
     process.exit(1);
   };
   try {
@@ -106,6 +116,20 @@ if (process.env.NODE_ENV === "production") {
     );
   } catch (err) {
     await failStartup(err, "component seed");
+  }
+  try {
+    await ensureTracesDatabase(config.databaseUrl);
+  } catch (err) {
+    await failStartup(err, "traces database ensure");
+  }
+  try {
+    await runTracesMigrations(
+      tracesDatabase.db,
+      config.databaseUrl,
+      config.traceDatabaseUrl,
+    );
+  } catch (err) {
+    await failStartup(err, "traces database migration");
   }
 }
 

@@ -7,7 +7,7 @@ import type { ActionContext } from "./types";
 const ctx: ActionContext = {
   conversationId: "conv-1",
   signal: new AbortController().signal,
-  log: { info() {}, debug() {}, error() {} },
+  log: { info() {}, debug() {}, error() {}, warn() {} },
 };
 
 describe("demo_echo", () => {

@@ -6,9 +6,11 @@ export interface HealthOptions {
   pingDb?: () => Promise<boolean>;
   /** Resolves whether Redis answers. Without it, `redis` is null. */
   pingRedis?: () => Promise<boolean>;
+  /** Resolves whether the traces database answers. Without it, `traces` is false. */
+  pingTraces?: () => Promise<boolean>;
 }
 
-/** `GET /` → `{ ok: true, db, agent, redis }`. */
+/** `GET /` → `{ ok: true, db, agent, redis, traces }`. */
 export const healthRouter: FastifyPluginAsync<HealthOptions> = async (app, opts) => {
   app.get("/", async () => {
     let db = false;
@@ -27,6 +29,14 @@ export const healthRouter: FastifyPluginAsync<HealthOptions> = async (app, opts)
         redis = false;
       }
     }
-    return { ok: true, db, agent: agentAvailable, redis };
+    let traces = false;
+    if (opts.pingTraces) {
+      try {
+        traces = await opts.pingTraces();
+      } catch {
+        traces = false;
+      }
+    }
+    return { ok: true, db, agent: agentAvailable, redis, traces };
   });
 };

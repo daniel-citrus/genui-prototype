@@ -10,7 +10,7 @@ import { createAgentTools } from "./index";
 
 const ctx: ToolContext = {
   signal: new AbortController().signal,
-  log: { info() {}, debug() {}, error() {} },
+  log: { info() {}, debug() {}, error() {}, warn() {} },
   showUi() {},
 };
 const components = new InMemoryComponentRepository(catalog);

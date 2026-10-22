@@ -15,6 +15,7 @@ export interface ToolLogger {
   info(obj: object, msg?: string): void;
   debug(obj: object, msg?: string): void;
   error(obj: object, msg?: string): void;
+  warn(obj: object, msg?: string): void;
 }
 
 /** What a tool handler gets besides its arguments. */

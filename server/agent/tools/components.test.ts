@@ -16,6 +16,7 @@ function recordingLogger(): ToolLogger & { errors: object[] } {
     errors,
     info() {},
     debug() {},
+    warn() {},
     error(obj) {
       errors.push(obj);
     },

@@ -1,7 +1,5 @@
 import type { UiNode } from "shared/ui";
 import type { HistoryMessage } from "../ports/AgentLlm";
-import type { AgentTrace } from "./trace";
-
 /**
  * Per-conversation message history, in memory only. The client owns the
  * `conversationId`; the server keeps its transcript here for as long as the
@@ -20,8 +18,6 @@ interface Conversation {
   history: History;
   /** Oldest first (Map insertion order). */
   designs: Map<string, UiNode>;
-  /** Oldest first. */
-  traces: AgentTrace[];
 }
 
 /**
@@ -33,16 +29,12 @@ export const MAX_CONVERSATIONS = 500;
 /** Most designs remembered per conversation; a newer one evicts the oldest. */
 export const MAX_DESIGNS_PER_CONVERSATION = 5;
 
-/** Most turn traces remembered per conversation; a newer one evicts the oldest. */
-export const MAX_TRACES_PER_CONVERSATION = 5;
-
 /** Least recently used first: every use moves an entry to the end. */
 const store = new Map<string, Conversation>();
 
 /** Returns the conversation's entry, creating it, and marks it most recently used. */
 function useConversation(conversationId: string): Conversation {
-  const conversation =
-    store.get(conversationId) ?? { history: [], designs: new Map(), traces: [] };
+  const conversation = store.get(conversationId) ?? { history: [], designs: new Map() };
   store.delete(conversationId);
   store.set(conversationId, conversation);
   if (store.size > MAX_CONVERSATIONS) {
@@ -69,18 +61,6 @@ export function rememberDesign(conversationId: string, id: string, tree: UiNode)
 /** The design sent as `ui` event `id`, if still remembered. Doesn't count as a use. */
 export function getDesign(conversationId: string, id: string): UiNode | undefined {
   return store.get(conversationId)?.designs.get(id);
-}
-
-/** Appends a turn trace; creates the conversation if needed. Oldest traces drop past the cap. */
-export function rememberTrace(conversationId: string, trace: AgentTrace): void {
-  const { traces } = useConversation(conversationId);
-  traces.push(trace);
-  if (traces.length > MAX_TRACES_PER_CONVERSATION) traces.shift();
-}
-
-/** Turn traces oldest first, or empty if the conversation is unknown. Doesn't count as a use. */
-export function getTraces(conversationId: string): AgentTrace[] {
-  return store.get(conversationId)?.traces ?? [];
 }
 
 /** Whether the server still has this conversation (it may have been forgotten). */

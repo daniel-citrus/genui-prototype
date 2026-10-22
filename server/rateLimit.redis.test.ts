@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { after, describe, it } from "node:test";
 import { createRedis } from "./adapters/redis/client";
 import { emptyToolRegistry } from "./agent/tools";
+import { InMemoryTraceRepository } from "./ports/fakes/InMemoryTraceRepository";
 import { buildApp } from "./app";
 import type { AgentLlm } from "./ports/AgentLlm";
 
@@ -23,7 +24,13 @@ describe("chat rate limit in Redis", { skip: !url }, () => {
     handles.push(redis);
     // Commands fail fast until connected (no offline queue), so wait for it.
     while (!(await redis.ping())) await new Promise((r) => setTimeout(r, 20));
-    return buildApp({ llm, tools: emptyToolRegistry, rateLimit: { max: 20, nameSpace }, redis });
+    return buildApp({
+      llm,
+      tools: emptyToolRegistry,
+      rateLimit: { max: 20, nameSpace },
+      redis,
+      traces: new InMemoryTraceRepository(),
+    });
   };
   // Fails validation (400) without reaching the model; still counts toward the limit.
   const chat = (app: Awaited<ReturnType<typeof build>>, remoteAddress: string) =>

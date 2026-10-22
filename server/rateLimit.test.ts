@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { emptyToolRegistry } from "./agent/tools";
+import { InMemoryTraceRepository } from "./ports/fakes/InMemoryTraceRepository";
 import { buildApp } from "./app";
 import { parseTrustProxy } from "./config";
 import type { AgentLlm } from "./ports/AgentLlm";
@@ -13,7 +14,14 @@ const llm: AgentLlm = {
 };
 
 const build = (max: number, trustProxy?: number | false) =>
-  buildApp({ llm, tools: emptyToolRegistry, pingDb: async () => true, rateLimit: { max }, trustProxy });
+  buildApp({
+    llm,
+    tools: emptyToolRegistry,
+    pingDb: async () => true,
+    rateLimit: { max },
+    trustProxy,
+    traces: new InMemoryTraceRepository(),
+  });
 
 // Fails validation (400) without reaching the model; still counts toward the limit.
 const chat = (app: Awaited<ReturnType<typeof build>>, remoteAddress: string, headers = {}) =>

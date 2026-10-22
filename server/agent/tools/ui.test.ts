@@ -23,7 +23,7 @@ function setup(
   const errors: object[] = [];
   const ctx: ToolContext = {
     signal: new AbortController().signal,
-    log: { info() {}, debug() {}, error: (obj) => void errors.push(obj) },
+    log: { info() {}, debug() {}, warn() {}, error: (obj) => void errors.push(obj) },
     showUi: (tree) => void shown.push(tree),
   };
   return { registry: createToolRegistry(createAgentTools({ components, actions })), ctx, shown, errors };

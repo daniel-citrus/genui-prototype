@@ -52,6 +52,7 @@ function setup(repo: CustomComponentRepository = new InMemoryCustomComponentRepo
     log: {
       info: (obj, msg) => void logs.push({ level: "info", obj, msg }),
       debug() {},
+      warn() {},
       error: (obj, msg) => void logs.push({ level: "error", obj, msg }),
     },
     showUi() {},

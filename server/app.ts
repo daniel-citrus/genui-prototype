@@ -6,6 +6,7 @@ import type { ToolRegistry } from "./agent/tools";
 import type { AgentLlm } from "./ports/AgentLlm";
 import type { ComponentRepository } from "./ports/ComponentRepository";
 import type { CustomComponentRepository } from "./ports/CustomComponentRepository";
+import type { TraceRepository } from "./ports/TraceRepository";
 import { registerRateLimit, type ChatRateLimitOptions } from "./rateLimit";
 import { actionsRouter } from "./routes/actions";
 import { agentRouter } from "./routes/agent";
@@ -20,6 +21,7 @@ export interface AppDeps {
   /** What a Button click may run; omit for none. */
   actions?: ActionRegistry;
   pingDb?: () => Promise<boolean>;
+  pingTraces?: () => Promise<boolean>;
   /** Number of proxy hops to trust for the client IP; default false. */
   trustProxy?: number | false;
   rateLimit: ChatRateLimitOptions;
@@ -31,6 +33,7 @@ export interface AppDeps {
   customComponents?: CustomComponentRepository;
   /** The catalog custom component previews are expanded into. */
   components?: ComponentRepository;
+  traces: TraceRepository;
 }
 
 /**
@@ -86,8 +89,14 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     prefix: "/api/health",
     pingDb: deps.pingDb,
     pingRedis: redis?.ping,
+    pingTraces: deps.pingTraces,
   });
-  app.register(agentRouter, { prefix: "/api/agent", llm: deps.llm, tools: deps.tools });
+  app.register(agentRouter, {
+    prefix: "/api/agent",
+    llm: deps.llm,
+    tools: deps.tools,
+    traces: deps.traces,
+  });
   app.register(actionsRouter, {
     prefix: "/api/actions",
     actions: deps.actions ?? createActionRegistry([]),
