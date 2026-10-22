@@ -4,6 +4,7 @@ export type EvalCheck =
   | { endedBy: EndedBy }
   | { noError: true }
   | { toolCalled: string }
+  | { toolNotCalled: string }
   | { toolSucceeded: string }
   | { uiComponent: string }
   | { uiButtonAction: string }
