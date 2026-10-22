@@ -1,6 +1,7 @@
-import type { ToolCall } from "shared/api";
+import type { AgentEvent, ToolCall, ToolResult } from "shared/api";
+import type { UiNode } from "shared/ui";
 import type { AgentLlm, HistoryMessage } from "../ports/AgentLlm";
-import { getHistory, hasConversation, oneTurnAtATime } from "./conversations";
+import { getHistory, hasConversation, oneTurnAtATime, rememberTrace } from "./conversations";
 import {
   callKey,
   MAX_STEPS,
@@ -9,11 +10,15 @@ import {
 } from "./guardrails";
 import { parseToolArguments } from "./openaiTools";
 import { handleToolCall, type AgentRun } from "./run";
+import type {
+  AgentTrace,
+  AgentTraceCompletion,
+  AgentTraceToolCall,
+  EndedBy,
+  ToolSkipReason,
+} from "./trace";
 
 export { MAX_STEPS };
-
-/** Why a turn ended, for the per-turn usage log. */
-type EndedBy = "reply" | "max_steps" | "tool_budget" | "token_budget" | "stopped";
 
 export const TRUNCATED_NOTICE = "The reply was cut off because it was too long.";
 
@@ -67,6 +72,50 @@ async function runTurn(
   const seen = new Set<string>();
   let endedBy: EndedBy = "stopped";
 
+  const trace: AgentTrace = {
+    conversationId,
+    userText,
+    endedBy,
+    steps: 0,
+    toolCalls: 0,
+    promptTokens: 0,
+    completionTokens: 0,
+    completions: [],
+  };
+
+  let currentCompletion: AgentTraceCompletion | null = null;
+  let recordingTool: ToolCall | null = null;
+  let uiForCurrentTool: { id: string; tree: UiNode } | undefined;
+  let lastToolResult: ToolResult | null = null;
+
+  const baseEmit = run.emit.bind(run);
+  run.emit = (event: AgentEvent) => {
+    if (event.type === "error") trace.error = event.message;
+    if (event.type === "ui" && recordingTool) {
+      uiForCurrentTool = { id: event.id, tree: event.tree };
+    }
+    if (
+      event.type === "tool_result" &&
+      recordingTool &&
+      event.call.id === recordingTool.id
+    ) {
+      lastToolResult = event.result;
+    }
+    baseEmit(event);
+  };
+
+  const finishToolRecord = (call: ToolCall) => {
+    if (!currentCompletion || !lastToolResult) return;
+    const entry: AgentTraceToolCall = { call, result: lastToolResult };
+    const skipped = skipReason(lastToolResult.summary);
+    if (skipped) entry.skipped = skipped;
+    if (uiForCurrentTool) entry.ui = uiForCurrentTool;
+    currentCompletion.toolCalls.push(entry);
+    recordingTool = null;
+    lastToolResult = null;
+    uiForCurrentTool = undefined;
+  };
+
   try {
     for (let step = 0; step < MAX_STEPS; step += 1) {
       if (run.signal.aborted) return;
@@ -81,18 +130,29 @@ async function runTurn(
               ? "max_steps"
               : undefined;
 
+      const allowTools = toolsOff === undefined;
+
       // Ask the model. Text deltas go out as SSE `text` events.
       steps += 1;
       const turn = await llm.complete({
         messages: history,
         tools: run.tools.specs,
-        allowTools: toolsOff === undefined,
+        allowTools,
         signal: run.signal,
         onText: (text) => run.emit({ type: "text", text }),
       });
       promptTokens += turn.usage?.promptTokens ?? 0;
       completionTokens += turn.usage?.completionTokens ?? 0;
       if (turn.truncated) run.emit({ type: "notice", message: TRUNCATED_NOTICE });
+
+      currentCompletion = {
+        allowTools,
+        content: turn.content,
+        truncated: turn.truncated === true,
+        toolCalls: [],
+      };
+      if (turn.usage) currentCompletion.usage = turn.usage;
+      trace.completions.push(currentCompletion);
 
       // Remember this assistant turn so the next iteration includes it.
       const assistant: Extract<HistoryMessage, { role: "assistant" }> = {
@@ -126,6 +186,10 @@ async function runTurn(
         const key = callKey(call.name, call.args);
         toolCalls += 1;
 
+        recordingTool = call;
+        lastToolResult = null;
+        uiForCurrentTool = undefined;
+
         let content: string;
         if (toolsOff !== undefined || toolCalls > MAX_TOOL_CALLS_PER_TURN) {
           content = skipCall(
@@ -145,6 +209,7 @@ async function runTurn(
           seen.add(key);
           content = (await handleToolCall(run, call)).content;
         }
+        finishToolRecord(call);
         history.push({ role: "tool", tool_call_id: tc.id, content });
       }
 
@@ -160,11 +225,25 @@ async function runTurn(
       message: "Stopped after too many steps. Try a smaller request.",
     });
   } finally {
+    trace.endedBy = endedBy;
+    trace.steps = steps;
+    trace.toolCalls = toolCalls;
+    trace.promptTokens = promptTokens;
+    trace.completionTokens = completionTokens;
+    rememberTrace(conversationId, trace);
+    run.emit = baseEmit;
     run.log.info(
       { conversationId, steps, toolCalls, promptTokens, completionTokens, endedBy },
       "agent turn finished",
     );
   }
+}
+
+function skipReason(summary: string): ToolSkipReason | undefined {
+  if (summary === "Stopped before this ran.") return "stopped";
+  if (summary === "Already called with these arguments") return "duplicate";
+  if (summary === "Tool budget used up") return "budget";
+  return undefined;
 }
 
 /** Reports a call that was not run, and returns what the model is told. */
