@@ -1,0 +1,12 @@
+{
+  "id": "export-pdf",
+  "prompt": "Show a button labeled Export PDF. It should run a server action, but only if one of the registered actions actually exports a PDF.",
+  "checks": [
+    { "endedBy": "reply" },
+    { "noError": true },
+    { "toolCalled": "list_actions" },
+    { "toolSucceeded": "render_ui" },
+    { "uiComponent": "Button" },
+    { "noButtonAction": true }
+  ]
+}

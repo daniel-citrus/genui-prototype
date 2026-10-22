@@ -1,0 +1,12 @@
+{
+  "id": "price-tag",
+  "prompt": "Define a custom component named PriceTag that uses Markup to draw a label no catalog component can: a span whose text is the price in bold. Then show PriceTag. Use Markup in the template.",
+  "checks": [
+    { "endedBy": "reply" },
+    { "noError": true },
+    { "toolSucceeded": "define_component" },
+    { "toolSucceeded": "render_ui" },
+    { "agentComponent": "PriceTag" },
+    { "uiComponent": "Markup" }
+  ]
+}
