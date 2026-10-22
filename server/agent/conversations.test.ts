@@ -4,13 +4,30 @@ import type { UiNode } from "shared/ui";
 import {
   MAX_CONVERSATIONS,
   MAX_DESIGNS_PER_CONVERSATION,
+  MAX_TRACES_PER_CONVERSATION,
   getDesign,
   getHistory,
+  getTraces,
   hasConversation,
   oneTurnAtATime,
   rememberDesign,
+  rememberTrace,
   resetConversation,
 } from "./conversations";
+import type { AgentTrace } from "./trace";
+
+function trace(conversationId: string, userText: string): AgentTrace {
+  return {
+    conversationId,
+    userText,
+    endedBy: "reply",
+    steps: 1,
+    toolCalls: 0,
+    promptTokens: 0,
+    completionTokens: 0,
+    completions: [],
+  };
+}
 
 function deferred() {
   let resolve!: () => void;
@@ -132,5 +149,55 @@ describe("rememberDesign and getDesign", () => {
     assert.equal(getDesign("evict-0", "ui-1"), undefined);
 
     for (const id of [...others, "evict-new"]) resetConversation(id);
+  });
+});
+
+describe("rememberTrace and getTraces", () => {
+  it("returns empty for unknown ids without creating a conversation", () => {
+    assert.deepEqual(getTraces("unknown-traces"), []);
+    assert.equal(hasConversation("unknown-traces"), false);
+  });
+
+  it("returns empty for a conversation created only via getHistory", () => {
+    getHistory("history-only");
+    assert.deepEqual(getTraces("history-only"), []);
+    resetConversation("history-only");
+  });
+
+  it("keeps the last five traces and evicts the oldest", () => {
+    assert.equal(MAX_TRACES_PER_CONVERSATION, 5);
+    for (let n = 1; n <= 5; n++) rememberTrace("traces", trace("traces", `turn-${n}`));
+    assert.deepEqual(
+      getTraces("traces").map((t) => t.userText),
+      ["turn-1", "turn-2", "turn-3", "turn-4", "turn-5"],
+    );
+
+    rememberTrace("traces", trace("traces", "turn-6"));
+    assert.deepEqual(
+      getTraces("traces").map((t) => t.userText),
+      ["turn-2", "turn-3", "turn-4", "turn-5", "turn-6"],
+    );
+
+    resetConversation("traces");
+  });
+
+  it("drops traces on reset", () => {
+    rememberTrace("reset-traces", trace("reset-traces", "once"));
+    resetConversation("reset-traces");
+    assert.deepEqual(getTraces("reset-traces"), []);
+  });
+
+  it("drops traces when LRU forgets the conversation, and getTraces doesn't count as a use", () => {
+    rememberTrace("trace-evict-0", trace("trace-evict-0", "only"));
+    const others = Array.from({ length: MAX_CONVERSATIONS - 1 }, (_, i) => `trace-evict-${i + 1}`);
+    for (const id of others) getHistory(id);
+
+    assert.deepEqual(getTraces("trace-evict-0").map((t) => t.userText), ["only"]);
+    getHistory("trace-evict-new");
+
+    assert.equal(hasConversation("trace-evict-0"), false);
+    assert.deepEqual(getTraces("trace-evict-0"), []);
+
+    for (const id of [...others, "trace-evict-new"]) resetConversation(id);
   });
 });
