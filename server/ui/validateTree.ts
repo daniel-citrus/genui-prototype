@@ -60,6 +60,13 @@ function propsValidator(component: Component): ValidateFunction {
   return validate;
 }
 
+/** At most MAX_ERRORS of `errors`; when there are more, the last one says how many were left out. */
+export function limitErrors(errors: string[]): string[] {
+  return errors.length > MAX_ERRORS
+    ? [...errors.slice(0, MAX_ERRORS - 1), `…and ${errors.length - (MAX_ERRORS - 1)} more`]
+    : errors;
+}
+
 /** "message" for one Ajv error; enums list their values. */
 function propMessage(error: ErrorObject): string {
   if (error.keyword === "enum") {
@@ -74,8 +81,8 @@ function dotted(pointer: string): string {
   return pointer === "/" ? "" : pointer.replaceAll("/", ".");
 }
 
-function propsProblems(component: Component, props: Record<string, unknown>, path: string): string[] {
-  const validate = propsValidator(component);
+/** Every problem `validate` finds in `props`, as "<path>.props.<prop> <message>". */
+export function propsErrors(validate: ValidateFunction, props: unknown, path: string): string[] {
   if (validate(props)) return [];
   return (validate.errors ?? []).map((error) => {
     const [formatted] = formatSchemaErrors([error]);
@@ -250,13 +257,13 @@ export function validateUiTree(
       if (!isObject(node.props)) {
         errors.push(`${path}.props must be an object`);
       } else if (component) {
-        errors.push(...propsProblems(component, node.props, path));
+        errors.push(...propsErrors(propsValidator(component), node.props, path));
         if (component.name === "Markup" && isObject(node.props.root)) {
           errors.push(...validateMarkup(node.props.root, `${path}.props.root`));
         }
       }
     } else if (component) {
-      errors.push(...propsProblems(component, {}, path));
+      errors.push(...propsErrors(propsValidator(component), {}, path));
     }
 
     if (node.children !== undefined) {
@@ -276,10 +283,5 @@ export function validateUiTree(
   if (stats.depth > maxDepth) limits.push(`tree is ${stats.depth} levels deep (max ${maxDepth})`);
   if (stats.nodes > maxNodes) limits.push(`tree has ${stats.nodes} nodes (max ${maxNodes})`);
   const all = [...limits, ...errors];
-
-  const shown =
-    all.length > MAX_ERRORS
-      ? [...all.slice(0, MAX_ERRORS - 1), `…and ${all.length - (MAX_ERRORS - 1)} more`]
-      : all;
-  return { ok: all.length === 0, errors: shown, stats };
+  return { ok: all.length === 0, errors: limitErrors(all), stats };
 }
