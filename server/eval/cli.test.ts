@@ -147,7 +147,21 @@ describe("eval cli main", () => {
         },
         runEvalCase: async () => {
           runCalled = true;
-          return { id: "x", ok: true, failures: [] };
+          return {
+            id: "x",
+            ok: true,
+            failures: [],
+            trace: {
+              conversationId: "eval:x:test",
+              userText: "",
+              endedBy: "stopped",
+              steps: 0,
+              toolCalls: 0,
+              promptTokens: 0,
+              completionTokens: 0,
+              completions: [],
+            },
+          };
         },
         createOpenAILlm: () => {
           llmCalled = true;

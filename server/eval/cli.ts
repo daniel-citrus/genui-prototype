@@ -36,6 +36,7 @@ function timeoutResult(id: string, partial: EvalCaseResult): EvalCaseResult {
     id,
     ok: false,
     failures: [{ check: { noError: true }, reason: "case timed out after 180 seconds" }],
+    trace: partial.trace,
     ...(partial.endedBy !== undefined ? { endedBy: partial.endedBy } : {}),
     ...(partial.error !== undefined ? { error: partial.error } : {}),
   };
