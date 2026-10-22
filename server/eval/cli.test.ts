@@ -37,7 +37,10 @@ const committedCases: EvalCase[] = [
       { noError: true },
       { toolSucceeded: "define_component" },
       { toolSucceeded: "render_ui" },
-      { uiComponent: "PromoBanner" },
+      { agentComponent: "PromoBanner" },
+      { uiComponent: "Card" },
+      { uiComponent: "Heading" },
+      { uiComponent: "Text" },
     ],
   },
   {

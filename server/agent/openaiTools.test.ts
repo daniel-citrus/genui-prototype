@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   createTurnAccumulator,
+  jsonObjectArguments,
   parseToolArguments,
   toOpenAITools,
 } from "./openaiTools";
@@ -53,6 +54,18 @@ describe("parseToolArguments", () => {
     assert.deepEqual(parseToolArguments("{"), {});
     assert.deepEqual(parseToolArguments("[]"), {});
     assert.deepEqual(parseToolArguments('"just a string"'), {});
+  });
+});
+
+describe("jsonObjectArguments", () => {
+  it("returns a JSON object", () => {
+    assert.deepEqual(jsonObjectArguments(' {"a":1} '), { a: 1 });
+  });
+
+  it("returns undefined for anything else", () => {
+    for (const raw of ["", "   ", "{", "[]", '"s"', "null", "1", "true"]) {
+      assert.equal(jsonObjectArguments(raw), undefined, raw);
+    }
   });
 });
 
