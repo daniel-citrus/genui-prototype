@@ -91,9 +91,11 @@ flowchart LR
     EvalCLI["Eval CLI<br/>npm run eval"]
     CaseFiles["Case files<br/>server/eval/cases/*.json"]
     TraceChecks["Trace checkers<br/>checkTrace"]
+    EvalLogFiles["Eval log files<br/>eval-logs/ (gitignored)"]
     EvalFakes["In-memory fakes<br/>catalog · custom · traces · menu"]
     EvalCLI --> CaseFiles
     EvalCLI --> TraceChecks
+    EvalCLI --> EvalLogFiles
   end
 
   EvalCLI -. "runAgent per case<br/>(no Fastify, no SSE)" .-> Loop
@@ -104,7 +106,7 @@ flowchart LR
 
 - **The browser only talks to its own origin.** The web server serves the app and proxies `/api` to the API, so there is no CORS setup.
 - **The API follows ports and adapters.** The agent loop and future features depend on small interfaces (`AgentLlm`, `ComponentRepository`, `CustomComponentRepository`, `PosMenu`, `TraceRepository`). The OpenAI, Drizzle catalog and traces, and in-memory demo menu adapters implement them, and [server/index.ts](../server/index.ts) is the one place that wires real adapters in (it passes them to `buildApp` in [server/app.ts](../server/app.ts), which builds the Fastify app and is what tests use). Tests swap in fakes.
-- **Eval runs beside the HTTP API, not through it.** `npm run eval` ([server/eval/cli.ts](../server/eval/cli.ts)) loads committed JSON cases, calls the same agent loop and OpenAI adapter as chat (same model and [system prompt](../server/agent/systemPrompt.ts)), but wires in-memory catalog, custom-component, trace, and menu ports ([server/eval/runner.ts](../server/eval/runner.ts)) so nothing hits Postgres or the browser. After each turn it scores the saved `AgentTrace` with deterministic checks ([server/eval/checks.ts](../server/eval/checks.ts)). CI does not run eval (§9).
+- **Eval runs beside the HTTP API, not through it.** `npm run eval` ([server/eval/cli.ts](../server/eval/cli.ts)) loads committed JSON cases, calls the same agent loop and OpenAI adapter as chat (same model and [system prompt](../server/agent/systemPrompt.ts)), but wires in-memory catalog, custom-component, trace, and menu ports ([server/eval/runner.ts](../server/eval/runner.ts)) so nothing hits Postgres or the browser and it does not write `genui_traces`. After each turn it scores the saved `AgentTrace` with deterministic checks ([server/eval/checks.ts](../server/eval/checks.ts)), writes one JSON file per case under a gitignored `eval-logs/<timestamp>/` directory (the file holds the case prompt, checks, result, and full turn trace), and prints one `pass` or `fail` line per case followed by a `logs` line with the directory's absolute path. Eval needs `OPENAI_API_KEY` and CI does not run it (§9).
 - **Types shared by both sides** (request bodies, SSE event shapes, component and custom component types) live in [shared/](../shared/), so the browser and the API can't disagree about the wire format. So do the Markup rules ([shared/markup.ts](../shared/markup.ts)), which the API checks and the browser applies again before drawing (§3).
 
 ## 2. Browser app
@@ -276,7 +278,7 @@ genui-prototype/
 ├── server/         Fastify API
 │   ├── routes/     health, chat, action and custom-component endpoints
 │   ├── agent/      agent loop, conversations, remembered designs, tool registry, tools
-│   ├── eval/       `server/eval/`: case files, trace checkers, runner, and CLI (`npm run eval`)
+│   ├── eval/       `server/eval/`: case files, trace checkers, runner, log writer, and CLI (`npm run eval`)
 │   ├── actions/    action registry, confirm questions, and demo_echo
 │   │   └── menu/   the menu actions, their dropdown sources, name and price parsing
 │   ├── customComponents/  definition checks and expanding custom components into catalog trees
@@ -308,7 +310,7 @@ Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, `pg`, an
 | `npm run db:generate` / `npm run db:migrate` | Creates a migration from the catalog schema / applies catalog migrations to `DATABASE_URL` |
 | `npm run db:generate:traces` / `npm run db:migrate:traces` | Creates a migration from the traces schema / ensures `genui_traces` exists and applies traces migrations to `TRACE_DATABASE_URL` |
 | `npm run db:seed` | Brings the `components` table in line with the catalog file and prints the counts; run it after pulling catalog changes |
-| `npm run eval` | Runs every committed eval case through the live agent (OpenAI, same model and system prompt as chat); needs `OPENAI_API_KEY` and is not run in CI |
+| `npm run eval` | Runs every committed eval case through the live agent (OpenAI, same model and system prompt as chat); writes one JSON file per case under a gitignored `eval-logs` directory (prompt, checks, result, and full turn trace) and prints one result line per case plus the log directory path; needs `OPENAI_API_KEY`, does not write `genui_traces`, and is not run in CI |
 
 - **Tests** use a fake model, so they need no OpenAI key. Catalog database tests run only when `DATABASE_URL` is set; traces database tests run only when `TRACE_DATABASE_URL` is set. They share one database each, so `npm test` runs test files one at a time.
 - **CI** ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs on every pull request and on pushes to `main`: it starts Postgres (creating database `genui_traces` on the same instance) and Redis (so the Redis store tests run), sets `TRACE_DATABASE_URL`, runs catalog and traces migrations, then install, typecheck, tests (including the database tests), and both builds on Node 24. It does not run `npm run eval`. `main` accepts changes only through pull requests that pass it.
@@ -328,7 +330,7 @@ Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, `pg`, an
 - The session menu is a placeholder.
 - The `components` catalog table is not exposed over HTTP; custom components are exposed only through `/api/custom-components` for the panel, not for editing definitions.
 - There is no authentication.
-- **`npm run eval`** (§9) runs nine committed live cases against OpenAI and scores each turn's saved `AgentTrace` with deterministic checks: `simple-heading` (catalog heading via `render_ui`); `echo-form` (form with `demo_echo` action); `catalog-layout` (stacked card with catalog components); `menu-create-item` (café menu create form); `menu-delete-category` (menu category delete with confirm); `define-and-use-custom` (define then show custom component); `delete-custom` (define then delete custom component); `mockup-no-action` (mockup must not call `list_actions`); `off-topic-refusal` (non-UI question, no design tools). The runner uses in-memory ports and does not write `genui_traces`.
+- **`npm run eval`** (§9) runs nine committed live cases against OpenAI and scores each turn's saved `AgentTrace` with deterministic checks: `simple-heading` (catalog heading via `render_ui`); `echo-form` (form with `demo_echo` action); `catalog-layout` (stacked card with catalog components); `menu-create-item` (café menu create form); `menu-delete-category` (menu category delete with confirm); `define-and-use-custom` (define then show custom component); `delete-custom` (define then delete custom component); `mockup-no-action` (mockup must not call `list_actions`); `off-topic-refusal` (non-UI question, no design tools). The CLI writes one JSON log file per case under a gitignored `eval-logs` directory; the runner uses in-memory ports and does not write `genui_traces`.
 
 **Planned**
 
