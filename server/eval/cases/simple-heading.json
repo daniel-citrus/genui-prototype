@@ -1,0 +1,10 @@
+{
+  "id": "simple-heading",
+  "prompt": "Show a heading that says Hello",
+  "checks": [
+    { "endedBy": "reply" },
+    { "noError": true },
+    { "toolSucceeded": "render_ui" },
+    { "uiComponent": "Heading" }
+  ]
+}
