@@ -84,4 +84,54 @@ describe("checkActionRequest", () => {
     assert.equal(checkActionRequest(shared, "go", { pick: "y" }).ok, false);
     assert.equal(checkActionRequest(shared, "go", { secret: "s" }).ok, false);
   });
+
+  describe("with Markup", () => {
+    const withMarkup: UiNode = {
+      component: "Stack",
+      children: [
+        { component: "TextInput", props: { label: "Email", name: "email" } },
+        {
+          component: "Markup",
+          props: {
+            root: {
+              tag: "div",
+              children: [
+                { tag: "input", attrs: { name: "qty", type: "number" } },
+                { tag: "input", attrs: { name: "gift", type: "checkbox" } },
+                {
+                  tag: "select",
+                  attrs: { name: "size" },
+                  children: [
+                    { tag: "option", attrs: { value: "s" }, text: "Small" },
+                    { tag: "option", text: "Large" },
+                  ],
+                },
+                { tag: "button", action: "order", text: "Order" },
+                { tag: "button", action: "cancel", attrs: { disabled: true }, text: "Cancel" },
+              ],
+            },
+          },
+        },
+      ],
+    };
+
+    it("accepts an enabled Markup button's action with values that fit its inputs", () => {
+      assert.deepEqual(
+        checkActionRequest(withMarkup, "order", { email: "a@b.c", qty: "2", gift: true, size: "Large" }),
+        { ok: true },
+      );
+      assert.deepEqual(checkActionRequest(withMarkup, "order", { size: "s" }), { ok: true });
+    });
+
+    it("refuses a disabled Markup button and values that don't fit or have no input", () => {
+      const message = (action: string, values: Record<string, string | boolean>) => {
+        const check = checkActionRequest(withMarkup, action, values);
+        return check.ok ? "" : check.message;
+      };
+      assert.match(message("cancel", {}), /no enabled button/);
+      assert.match(message("order", { note: "x" }), /no input named "note"/);
+      assert.match(message("order", { size: "Small" }), /doesn't fit/);
+      assert.match(message("order", { gift: "yes" }), /doesn't fit/);
+    });
+  });
 });

@@ -4,6 +4,7 @@ import type { AgentEvent, ToolResult } from "shared/api";
 import type { AgentLlm, HistoryMessage, LlmTurn } from "../ports/AgentLlm";
 import { catalog } from "../catalog/components";
 import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
+import { InMemoryCustomComponentRepository } from "../ports/fakes/InMemoryCustomComponentRepository";
 import { getDesign, getHistory, resetConversation } from "./conversations";
 import { MAX_TOOL_CALLS_PER_TURN, MAX_TURN_TOKENS } from "./guardrails";
 import { FORGOTTEN_NOTICE, MAX_STEPS, runAgent, TRUNCATED_NOTICE } from "./loop";
@@ -173,7 +174,10 @@ describe("runAgent", () => {
   it("looks up components with the real tools, then replies", async () => {
     const conversationId = "component-tools";
     const tools = createToolRegistry(
-      createAgentTools({ components: new InMemoryComponentRepository(catalog) }),
+      createAgentTools({
+        components: new InMemoryComponentRepository(catalog),
+        customComponents: new InMemoryCustomComponentRepository(),
+      }),
     );
     const { run, events } = makeRun(tools);
     const llm = scriptedLlm([
@@ -195,7 +199,7 @@ describe("runAgent", () => {
     assert.equal(llm.calls.length, 3);
     assert.deepEqual(
       llm.calls[0].tools.map((t) => t.name),
-      ["list_components", "get_component", "list_actions", "render_ui"],
+      ["list_components", "get_component", "list_actions", "render_ui", "define_component", "delete_component"],
     );
 
     const listCall = { id: "call_list", name: "list_components", args: {} };

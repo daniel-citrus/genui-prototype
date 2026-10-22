@@ -33,7 +33,7 @@ function isActionResult(body: unknown): body is ActionResult {
 }
 
 /** `{ error: { message } }` from the API, or `{ message }` from the rate limiter. */
-function errorMessage(body: unknown): string | undefined {
+export function errorMessage(body: unknown): string | undefined {
   const b = body as { error?: { message?: unknown }; message?: unknown } | null | undefined;
   const message = b?.error?.message ?? b?.message;
   return typeof message === "string" && message ? message : undefined;

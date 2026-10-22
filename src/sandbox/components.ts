@@ -1,5 +1,7 @@
 import { MAX_FIELD_CHARS } from "shared/api";
+import type { MarkupElement } from "shared/markup";
 import type { RenderedComponentName } from "./componentNames";
+import { filterMarkup } from "./markup";
 
 /**
  * Draws one catalog component. Props come from a tree the server already
@@ -10,7 +12,7 @@ export type Renderer = (props: Record<string, unknown>, children: HTMLElement[])
 
 type Props = Record<string, unknown>;
 
-function el<K extends keyof HTMLElementTagNameMap>(
+export function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   className: string,
   text?: string,
@@ -250,6 +252,50 @@ const Alert: Renderer = (props) => {
   return node;
 };
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function buildMarkup(element: MarkupElement, inSvg: boolean): HTMLElement | SVGElement {
+  const svg = inSvg || element.tag === "svg";
+  const node = svg
+    ? (document.createElementNS(SVG_NS, element.tag) as SVGElement)
+    : document.createElement(element.tag);
+
+  for (const [name, value] of Object.entries(element.attrs ?? {})) {
+    if (value !== false) node.setAttribute(name, value === true ? "" : String(value));
+  }
+  for (const [property, value] of Object.entries(element.style ?? {})) {
+    node.style.setProperty(property, String(value));
+  }
+  if (element.text !== undefined) node.textContent = String(element.text);
+
+  if (node instanceof HTMLInputElement && !node.hasAttribute("maxlength")) node.maxLength = MAX_FIELD_CHARS;
+  // The server lists an option without a value by its text: send exactly that.
+  if (node instanceof HTMLOptionElement && !node.hasAttribute("value")) node.value = String(element.text ?? "");
+  if (node instanceof HTMLImageElement) node.referrerPolicy = "no-referrer";
+  if (node instanceof HTMLButtonElement) {
+    node.type = "button";
+    // Only an enabled button can send its action; the filter kept only snake_case names.
+    if (element.action && !node.disabled) node.dataset.action = element.action;
+  }
+
+  node.append(...(element.children ?? []).map((child) => buildMarkup(child, svg)));
+  return node;
+}
+
+/**
+ * Draws the `root` element tree element by element, leaving out anything
+ * outside the allowlist, inside a wrapper that keeps everything in its own
+ * box, so nothing in it can cover the chat or the page.
+ */
+const Markup: Renderer = (props) => {
+  const wrapper = document.createElement("div");
+  wrapper.style.setProperty("contain", "content");
+  wrapper.style.setProperty("overflow", "hidden");
+  const root = filterMarkup(props.root);
+  if (root) wrapper.append(buildMarkup(root, false));
+  return wrapper;
+};
+
 /** One function per rendered component; TypeScript fails if a name is missing. */
 export const components: Record<RenderedComponentName, Renderer> = {
   Stack,
@@ -264,4 +310,5 @@ export const components: Record<RenderedComponentName, Renderer> = {
   Image,
   Badge,
   Alert,
+  Markup,
 };

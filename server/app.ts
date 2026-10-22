@@ -4,9 +4,12 @@ import type { ActionRegistry } from "./actions/types";
 import type { RedisHandle } from "./adapters/redis/client";
 import type { ToolRegistry } from "./agent/tools";
 import type { AgentLlm } from "./ports/AgentLlm";
+import type { ComponentRepository } from "./ports/ComponentRepository";
+import type { CustomComponentRepository } from "./ports/CustomComponentRepository";
 import { registerRateLimit, type ChatRateLimitOptions } from "./rateLimit";
 import { actionsRouter } from "./routes/actions";
 import { agentRouter } from "./routes/agent";
+import { customComponentsRouter } from "./routes/customComponents";
 import { healthRouter } from "./routes/health";
 
 export interface AppDeps {
@@ -24,6 +27,10 @@ export interface AppDeps {
   redis?: RedisHandle;
   /** Where log lines go when `logLevel` is set; default stdout. Tests capture them here. */
   logStream?: { write(line: string): void };
+  /** Custom components for the Components panel; its route needs `components` too. */
+  customComponents?: CustomComponentRepository;
+  /** The catalog custom component previews are expanded into. */
+  components?: ComponentRepository;
 }
 
 /**
@@ -85,6 +92,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     prefix: "/api/actions",
     actions: deps.actions ?? createActionRegistry([]),
   });
+  if (deps.customComponents && deps.components) {
+    app.register(customComponentsRouter, {
+      prefix: "/api/custom-components",
+      customComponents: deps.customComponents,
+      components: deps.components,
+    });
+  }
 
   return app;
 }

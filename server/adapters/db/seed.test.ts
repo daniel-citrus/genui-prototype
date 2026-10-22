@@ -30,7 +30,7 @@ describe("seedComponents", { skip: databaseUrl ? false : "DATABASE_URL is not se
 
   it("adds every entry to an empty table", async () => {
     assert.deepEqual(await seedComponents(handle.db, catalog), {
-      added: 12,
+      added: catalog.length,
       updated: 0,
       removed: 0,
       unchanged: 0,
@@ -57,7 +57,7 @@ describe("seedComponents", { skip: databaseUrl ? false : "DATABASE_URL is not se
       added: 0,
       updated: 0,
       removed: 0,
-      unchanged: 12,
+      unchanged: catalog.length,
     });
     assert.deepEqual(await updatedAtByName(), before);
   });
@@ -72,7 +72,7 @@ describe("seedComponents", { skip: databaseUrl ? false : "DATABASE_URL is not se
       added: 0,
       updated: 1,
       removed: 0,
-      unchanged: 11,
+      unchanged: catalog.length - 1,
     });
     const after = await updatedAtByName();
     for (const [name, time] of after) {
@@ -90,10 +90,10 @@ describe("seedComponents", { skip: databaseUrl ? false : "DATABASE_URL is not se
       added: 0,
       updated: 0,
       removed: 1,
-      unchanged: 11,
+      unchanged: catalog.length - 1,
     });
     const names = (await rows()).map((r) => r.name);
-    assert.equal(names.length, 11);
+    assert.equal(names.length, catalog.length - 1);
     assert.ok(!names.includes("Divider"));
   });
 
