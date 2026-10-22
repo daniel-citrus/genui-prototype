@@ -149,6 +149,37 @@ describe("loadCases", () => {
     assert.throws(() => loadCases(dir), /noError must be true/);
   });
 
+  it("loads agentComponent and noButtonAction", () => {
+    const dir = caseDir();
+    writeCase(dir, "a.json", {
+      id: "ok",
+      prompt: "hi",
+      checks: [{ agentComponent: "PromoBanner" }, { noButtonAction: true }],
+    });
+    assert.deepEqual(loadCases(dir)[0]!.checks, [
+      { agentComponent: "PromoBanner" },
+      { noButtonAction: true },
+    ]);
+  });
+
+  it("refuses noButtonAction other than true", () => {
+    const dir = caseDir();
+    writeCase(dir, "bad.json", { id: "ok", prompt: "hi", checks: [{ noButtonAction: false }] });
+    assert.throws(() => loadCases(dir), /noButtonAction must be true/);
+  });
+
+  it("refuses an empty agentComponent and a two-key check with a new key", () => {
+    const dir = caseDir();
+    writeCase(dir, "bad.json", { id: "ok", prompt: "hi", checks: [{ agentComponent: "" }] });
+    assert.throws(() => loadCases(dir), /agentComponent must be a non-empty string/);
+    writeCase(dir, "bad.json", {
+      id: "ok",
+      prompt: "hi",
+      checks: [{ agentComponent: "X", noButtonAction: true }],
+    });
+    assert.throws(() => loadCases(dir), /exactly one key/);
+  });
+
   it("refuses extra case field", () => {
     const dir = caseDir();
     writeCase(dir, "bad.json", {

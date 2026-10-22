@@ -15,6 +15,8 @@ const CHECK_KEYS = [
   "uiComponent",
   "uiButtonAction",
   "uiNamedInput",
+  "agentComponent",
+  "noButtonAction",
 ] as const;
 
 const ENDED_BY: ReadonlySet<string> = new Set([
@@ -66,12 +68,18 @@ function parseCheck(raw: unknown, context: string): EvalCheck {
         throw new Error(`${context}: noError must be true`);
       }
       return { noError: true };
+    case "noButtonAction":
+      if (obj.noButtonAction !== true) {
+        throw new Error(`${context}: noButtonAction must be true`);
+      }
+      return { noButtonAction: true };
     case "toolCalled":
     case "toolNotCalled":
     case "toolSucceeded":
     case "uiComponent":
     case "uiButtonAction":
-    case "uiNamedInput": {
+    case "uiNamedInput":
+    case "agentComponent": {
       const value = obj[key];
       if (typeof value !== "string" || value.length === 0) {
         throw new Error(`${context}: ${key} must be a non-empty string`);
