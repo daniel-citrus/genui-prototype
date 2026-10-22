@@ -8,7 +8,7 @@ import {
   MAX_TOOL_CALLS_PER_TURN,
   MAX_TURN_TOKENS,
 } from "./guardrails";
-import { parseToolArguments } from "./openaiTools";
+import { jsonObjectArguments, parseToolArguments } from "./openaiTools";
 import { handleToolCall, type AgentRun } from "./run";
 import type {
   AgentTrace,
@@ -191,7 +191,14 @@ async function runTurn(
         uiForCurrentTool = undefined;
 
         let content: string;
-        if (toolsOff !== undefined || toolCalls > MAX_TOOL_CALLS_PER_TURN) {
+        if (turn.truncated && jsonObjectArguments(tc.arguments) === undefined) {
+          content = skipCall(
+            run,
+            call,
+            "Call was cut off",
+            "This call was cut off before its arguments finished. Call it again with a smaller tree.",
+          );
+        } else if (toolsOff !== undefined || toolCalls > MAX_TOOL_CALLS_PER_TURN) {
           content = skipCall(
             run,
             call,

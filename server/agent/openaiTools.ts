@@ -35,18 +35,21 @@ export function toOpenAITools(specs: ToolSpec[]): OpenAIFunctionTool[] {
   }));
 }
 
-export function parseToolArguments(raw: string): Record<string, unknown> {
-  const trimmed = raw.trim();
-  if (!trimmed) return {};
+/** The arguments as a JSON object, or undefined when they are not a finished one. */
+export function jsonObjectArguments(raw: string): Record<string, unknown> | undefined {
   try {
-    const parsed: unknown = JSON.parse(trimmed);
+    const parsed: unknown = JSON.parse(raw.trim());
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>;
     }
-    return {};
   } catch {
-    return {};
+    // Not JSON: fall through.
   }
+  return undefined;
+}
+
+export function parseToolArguments(raw: string): Record<string, unknown> {
+  return jsonObjectArguments(raw) ?? {};
 }
 
 /** Coalesces streamed Chat Completions deltas into one assistant turn. */

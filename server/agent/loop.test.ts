@@ -565,6 +565,49 @@ describe("runAgent", () => {
       ]);
     });
 
+    it("skips a tool call whose arguments were cut off, and runs finished ones", async () => {
+      const conversationId = "limit-truncated-call";
+      const tools = stubTools();
+      const { run, events } = makeRun(tools);
+      const llm = scriptedLlm([
+        {
+          content: null,
+          truncated: true,
+          toolCalls: [
+            { id: "ok", name: "list_components", arguments: '{"tree":{"component":"Divider"}}' },
+            { id: "cut", name: "list_components", arguments: "{" },
+          ],
+        },
+        { content: null, toolCalls: [{ id: "again", name: "list_components", arguments: "" }] },
+        { content: "ok", toolCalls: [] },
+      ]);
+
+      await runAgent("go", conversationId, run, llm);
+      const history = getHistory(conversationId);
+      const trace = (await run.traces.listByConversation(conversationId))[0];
+      resetConversation(conversationId);
+
+      assert.equal(tools.ran.length, 2);
+      assert.deepEqual(tools.ran[0].args, { tree: { component: "Divider" } });
+      assert.deepEqual(tools.ran[1].args, {});
+      assert.ok(events.some((e) => e.type === "notice" && e.message === TRUNCATED_NOTICE));
+      const cut = events.find((e) => e.type === "tool_result" && e.call.id === "cut");
+      assert.deepEqual(cut?.type === "tool_result" && cut.result, {
+        ok: false,
+        summary: "Call was cut off",
+      });
+      const row = history.find((m) => m.role === "tool" && m.tool_call_id === "cut");
+      assert.ok(row && row.role === "tool");
+      assert.equal(
+        row.content,
+        "This call was cut off before its arguments finished. Call it again with a smaller tree.",
+      );
+      const traced = trace.completions[0].toolCalls.find((t) => t.call.id === "cut");
+      assert.equal(traced?.result?.summary, "Call was cut off");
+      assert.equal(traced?.skipped, undefined);
+      assertHistoryValid(history);
+    });
+
     it("logs the turn as stopped when the user stops it", async () => {
       const conversationId = "limit-stopped";
       const controller = new AbortController();
