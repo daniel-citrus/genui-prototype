@@ -1,0 +1,11 @@
+{
+  "id": "define-and-use-custom",
+  "prompt": "Define a reusable custom component named PromoBanner: a Card whose children are a Heading and a Text. Then show PromoBanner.",
+  "checks": [
+    { "endedBy": "reply" },
+    { "noError": true },
+    { "toolSucceeded": "define_component" },
+    { "toolSucceeded": "render_ui" },
+    { "uiComponent": "PromoBanner" }
+  ]
+}
