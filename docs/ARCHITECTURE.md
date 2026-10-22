@@ -328,7 +328,7 @@ Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, `pg`, an
 - The session menu is a placeholder.
 - The `components` catalog table is not exposed over HTTP; custom components are exposed only through `/api/custom-components` for the panel, not for editing definitions.
 - There is no authentication.
-- **`npm run eval`** (§9) runs two committed live cases against OpenAI and scores each turn's saved `AgentTrace` with deterministic checks: `simple-heading` (a heading) and `echo-form` (a form whose button runs `demo_echo`). The runner uses in-memory ports and does not write `genui_traces`.
+- **`npm run eval`** (§9) runs nine committed live cases against OpenAI and scores each turn's saved `AgentTrace` with deterministic checks: `simple-heading` (catalog heading via `render_ui`); `echo-form` (form with `demo_echo` action); `catalog-layout` (stacked card with catalog components); `menu-create-item` (café menu create form); `menu-delete-category` (menu category delete with confirm); `define-and-use-custom` (define then show custom component); `delete-custom` (define then delete custom component); `mockup-no-action` (mockup must not call `list_actions`); `off-topic-refusal` (non-UI question, no design tools). The runner uses in-memory ports and does not write `genui_traces`.
 
 **Planned**
 
