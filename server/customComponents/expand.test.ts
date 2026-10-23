@@ -215,6 +215,22 @@ describe("expandTree", () => {
     assert.equal((used.tree?.children?.[1] as { component: string }).component, "Card");
   });
 
+  it("expands a stored component that declares a prop its template doesn't use", async () => {
+    await repo.save({
+      ...withTemplate("Unused", text("static")),
+      propsSchema: {
+        type: "object",
+        properties: { label: { type: "string", description: "Never read." } },
+        additionalProperties: false,
+      },
+      exampleProps: { label: "x" },
+    });
+
+    const result = await expand({ component: "Unused", props: { label: "Hi" } });
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(result.tree, text("static"));
+  });
+
   it("stops with an error on a loop that appears through an update", async () => {
     await repo.save(withTemplate("Inner", text("inner")));
     await repo.save(withTemplate("Outer", { component: "Stack", children: [{ component: "Inner" }] }));
