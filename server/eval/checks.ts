@@ -29,6 +29,35 @@ function treeHasComponent(tree: unknown, name: string): boolean {
   return tree.children.some((child) => treeHasComponent(child, name));
 }
 
+function stringsIn(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(stringsIn);
+  if (isObject(value)) return Object.values(value).flatMap(stringsIn);
+  return [];
+}
+
+function treeStrings(tree: unknown): string[] {
+  if (!isObject(tree)) return [];
+  const children = Array.isArray(tree.children) ? tree.children : [];
+  return [...stringsIn(tree.props), ...children.flatMap(treeStrings)];
+}
+
+function elementHasTag(element: unknown, tag: string): boolean {
+  if (!isObject(element)) return false;
+  if (element.tag === tag) return true;
+  if (!Array.isArray(element.children)) return false;
+  return element.children.some((child) => elementHasTag(child, tag));
+}
+
+function treeHasMarkupTag(tree: unknown, tag: string): boolean {
+  if (!isObject(tree)) return false;
+  if (tree.component === "Markup" && isObject(tree.props) && elementHasTag(tree.props.root, tag)) {
+    return true;
+  }
+  if (!Array.isArray(tree.children)) return false;
+  return tree.children.some((child) => treeHasMarkupTag(child, tag));
+}
+
 function checkLabel(check: EvalCheck): string {
   if ("endedBy" in check) return `endedBy "${check.endedBy}"`;
   if ("noError" in check) return "noError";
@@ -37,6 +66,8 @@ function checkLabel(check: EvalCheck): string {
   if ("toolSucceeded" in check) return `toolSucceeded "${check.toolSucceeded}"`;
   if ("uiComponent" in check) return `uiComponent "${check.uiComponent}"`;
   if ("uiButtonAction" in check) return `uiButtonAction "${check.uiButtonAction}"`;
+  if ("uiText" in check) return `uiText "${check.uiText}"`;
+  if ("uiMarkupTag" in check) return `uiMarkupTag "${check.uiMarkupTag}"`;
   if ("agentComponent" in check) return `agentComponent "${check.agentComponent}"`;
   if ("noButtonAction" in check) return "noButtonAction";
   return `uiNamedInput "${check.uiNamedInput}"`;
@@ -104,6 +135,16 @@ function evaluateCheck(trace: AgentTrace, check: EvalCheck): CheckFailure | unde
   if ("uiComponent" in check) {
     if (treeHasComponent(tree, check.uiComponent)) return undefined;
     return { check, reason: `${label}: component not found in last render_ui tree` };
+  }
+
+  if ("uiText" in check) {
+    if (treeStrings(tree).some((text) => text.includes(check.uiText))) return undefined;
+    return { check, reason: `${label}: text not found in last render_ui tree` };
+  }
+
+  if ("uiMarkupTag" in check) {
+    if (treeHasMarkupTag(tree, check.uiMarkupTag)) return undefined;
+    return { check, reason: `${label}: Markup tag not found in last render_ui tree` };
   }
 
   const bindings = collectBindings(tree);

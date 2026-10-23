@@ -9,6 +9,8 @@ export type EvalCheck =
   | { uiComponent: string }
   | { uiButtonAction: string }
   | { uiNamedInput: string }
+  | { uiText: string }
+  | { uiMarkupTag: string }
   | { agentComponent: string }
   | { noButtonAction: true };
 
