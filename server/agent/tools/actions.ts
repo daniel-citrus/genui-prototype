@@ -13,6 +13,9 @@ const ANY = "any";
 /** What a spec without an area or operation counts as. */
 const OTHER = "other";
 const CHOICES_ERROR = "Couldn't load these choices.";
+/** Added to an area fallback, whose actions do something other than the operation asked for. */
+export const AREA_FALLBACK_NOTE =
+  "No action fits both this area and operation, so these are the area's other actions. Use one only if its description does what the button should do; otherwise render the button without an action.";
 
 interface ListedChoices {
   values: string[];
@@ -69,6 +72,7 @@ export function listActionsTool(
 
       const data: Record<string, unknown> = {
         match,
+        ...(match === "area" ? { note: AREA_FALLBACK_NOTE } : {}),
         actions: listed.map((spec) => ({
           name: spec.name,
           description: spec.description,

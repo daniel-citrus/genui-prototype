@@ -55,7 +55,7 @@ export function defineComponentTool(
         template: {
           type: "object",
           description:
-            'The tree one use draws: {"component", "props", "children"} of catalog and custom components, where Markup may draw what nothing else can. A prop value {"$prop": "<name>"} takes that prop from the use; {"$children": true} in a children array marks where the use\'s children go. Every props_schema prop must be used through {"$prop": "<name>"}; text such as {{name}} is shown as written, never filled in.',
+            'The tree one use draws: {"component", "props", "children"} of catalog and custom components, where Markup may draw what nothing else can. A prop value {"$prop": "<name>"} takes that prop from the use; {"$children": true} in a children array marks where the use\'s children go. Every props_schema prop must be used through {"$prop": "<name>"}; text such as {{name}} is shown as written, never filled in. Markup takes one prop, root: a JSON element {"tag", "attrs"?, "style"?, "text"?, "children"?}, never an HTML string. Its text, attribute and style values may be {"$prop": "<name>"}. Style keys are kebab-case CSS properties, such as font-weight, and go in style, not attrs. Example: {"component": "Markup", "props": {"root": {"tag": "span", "children": [{"tag": "strong", "text": {"$prop": "label"}}]}}}.',
         },
       },
       required: ["name", "description", "category", "children", "props_schema", "example_props", "template"],
