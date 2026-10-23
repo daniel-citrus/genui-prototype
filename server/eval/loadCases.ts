@@ -15,6 +15,8 @@ const CHECK_KEYS = [
   "uiComponent",
   "uiButtonAction",
   "uiNamedInput",
+  "uiText",
+  "uiMarkupTag",
   "agentComponent",
   "noButtonAction",
 ] as const;
@@ -79,6 +81,8 @@ function parseCheck(raw: unknown, context: string): EvalCheck {
     case "uiComponent":
     case "uiButtonAction":
     case "uiNamedInput":
+    case "uiText":
+    case "uiMarkupTag":
     case "agentComponent": {
       const value = obj[key];
       if (typeof value !== "string" || value.length === 0) {

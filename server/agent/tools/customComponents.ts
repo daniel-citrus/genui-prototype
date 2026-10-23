@@ -25,7 +25,7 @@ export function defineComponentTool(
   return {
     name: "define_component",
     description:
-      "Save a custom component built from existing components, so designs can use it by name in this and later chats. Saving a name that exists adds its next version. Template buttons may only use actions list_actions returned. If it reports problems, nothing is saved: fix them and call it again.",
+      "Save a custom component built from existing components, so designs can use it by name in this and later chats. Saving a name that exists adds its next version. Every prop in props_schema must be used in the template through {\"$prop\": \"<name>\"}; text such as {{name}} is shown as written, never filled in. Template buttons may only use actions list_actions returned. If it reports problems, nothing is saved: fix them and call it again.",
     input_schema: {
       type: "object",
       properties: {
@@ -55,7 +55,7 @@ export function defineComponentTool(
         template: {
           type: "object",
           description:
-            'The tree one use draws: {"component", "props", "children"} of catalog and custom components, where Markup may draw what nothing else can. A prop value {"$prop": "<name>"} takes that prop from the use; {"$children": true} in a children array marks where the use\'s children go.',
+            'The tree one use draws: {"component", "props", "children"} of catalog and custom components, where Markup may draw what nothing else can. A prop value {"$prop": "<name>"} takes that prop from the use; {"$children": true} in a children array marks where the use\'s children go. Every props_schema prop must be used through {"$prop": "<name>"}; text such as {{name}} is shown as written, never filled in.',
         },
       },
       required: ["name", "description", "category", "children", "props_schema", "example_props", "template"],

@@ -8,7 +8,7 @@ import type { AgentTrace } from "../agent/trace";
 import { config } from "../config";
 import type { EvalCase, EvalCaseResult } from "./types";
 import { loadCases } from "./loadCases";
-import { main } from "./cli";
+import { main, parseCliArgs } from "./cli";
 import { evalLogDirName } from "./writeLog";
 
 const committedCasesDir = join(dirname(fileURLToPath(import.meta.url)), "cases");
@@ -58,6 +58,21 @@ const committedCases: EvalCase[] = [
     ],
   },
   {
+    id: "custom-props-shown",
+    prompt:
+      "Define a reusable custom component named ContactCard: a Card with a Heading showing a name prop and a Text showing an email prop. Then show ContactCard for Ada Lovelace, ada@example.com.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolSucceeded: "define_component" },
+      { toolSucceeded: "render_ui" },
+      { agentComponent: "ContactCard" },
+      { uiComponent: "Card" },
+      { uiText: "Ada Lovelace" },
+      { uiText: "ada@example.com" },
+    ],
+  },
+  {
     id: "define-and-use-custom",
     prompt:
       "Define a reusable custom component named PromoBanner: a Card whose children are a Heading and a Text. Then show PromoBanner.",
@@ -99,7 +114,7 @@ const committedCases: EvalCase[] = [
   {
     id: "export-pdf",
     prompt:
-      "Show a button labeled Export PDF. It should run a server action, but only if one of the registered actions actually exports a PDF.",
+      "Show a button labeled Export PDF that exports this page as a PDF.",
     checks: [
       { endedBy: "reply" },
       { noError: true },
@@ -125,8 +140,50 @@ const committedCases: EvalCase[] = [
     ],
   },
   {
+    id: "invented-action-name",
+    prompt:
+      "Show a Download CSV button that runs the export_csv action.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolCalled: "list_actions" },
+      { toolSucceeded: "render_ui" },
+      { uiComponent: "Button" },
+      { noButtonAction: true },
+    ],
+  },
+  {
+    id: "markup-bold-tag",
+    prompt:
+      "Define a custom component named SaleLabel that uses Markup to draw the word SALE in a b tag inside a span. Then show SaleLabel.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolSucceeded: "define_component" },
+      { toolSucceeded: "render_ui" },
+      { agentComponent: "SaleLabel" },
+      { uiMarkupTag: "strong" },
+      { uiText: "SALE" },
+    ],
+  },
+  {
+    id: "markup-prop-text",
+    prompt:
+      "Define a custom component named StatusDot that uses Markup: an svg with a small green circle, then a span whose text is a label prop. Then show StatusDot with the label Online.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolSucceeded: "define_component" },
+      { toolSucceeded: "render_ui" },
+      { agentComponent: "StatusDot" },
+      { uiMarkupTag: "circle" },
+      { uiText: "Online" },
+    ],
+  },
+  {
     id: "menu-create-item",
-    prompt: "Show a form to add a new drink to the café menu.",
+    prompt:
+      "Show a form to add a new drink to the café menu.",
     checks: [
       { endedBy: "reply" },
       { noError: true },
@@ -165,8 +222,23 @@ const committedCases: EvalCase[] = [
     ],
   },
   {
+    id: "newsletter-no-action",
+    prompt:
+      "Show a newsletter signup: an email field and a Subscribe button that adds the person to our mailing list.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolCalled: "list_actions" },
+      { toolSucceeded: "render_ui" },
+      { uiComponent: "TextInput" },
+      { uiComponent: "Button" },
+      { noButtonAction: true },
+    ],
+  },
+  {
     id: "off-topic-refusal",
-    prompt: "What's the weather in Paris tomorrow?",
+    prompt:
+      "What's the weather in Paris tomorrow?",
     checks: [
       { endedBy: "reply" },
       { noError: true },
@@ -178,7 +250,7 @@ const committedCases: EvalCase[] = [
   {
     id: "price-tag",
     prompt:
-      "Define a custom component named PriceTag that uses Markup to draw a label no catalog component can: a span whose text is the price in bold. Then show PriceTag. Use Markup in the template.",
+      "Define a custom component named PriceTag that uses Markup to draw a label no catalog component can: a span whose text is the price prop in bold. Then show PriceTag with the price $12.99. Use Markup in the template.",
     checks: [
       { endedBy: "reply" },
       { noError: true },
@@ -186,16 +258,31 @@ const committedCases: EvalCase[] = [
       { toolSucceeded: "render_ui" },
       { agentComponent: "PriceTag" },
       { uiComponent: "Markup" },
+      { uiText: "$12.99" },
     ],
   },
   {
     id: "simple-heading",
-    prompt: "Show a heading that says Hello",
+    prompt:
+      "Show a heading that says Hello",
     checks: [
       { endedBy: "reply" },
       { noError: true },
       { toolSucceeded: "render_ui" },
       { uiComponent: "Heading" },
+    ],
+  },
+  {
+    id: "sms-no-action",
+    prompt:
+      "Add a button labeled Send SMS that texts the customer their order status.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolCalled: "list_actions" },
+      { toolSucceeded: "render_ui" },
+      { uiComponent: "Button" },
+      { noButtonAction: true },
     ],
   },
 ];
@@ -672,6 +759,7 @@ describe("eval cli main", () => {
 
     try {
       const code = await main({
+        argv: ["--repeat", "2"],
         agentAvailable: true,
         logRoot,
         now: () => fixedNow,
@@ -693,14 +781,15 @@ describe("eval cli main", () => {
 
       assert.equal(capturedKey, secretKey);
       assert.equal(code, 0);
-      const json = readFileSync(
-        join(logRoot, evalLogDirName(fixedNow), "key-case.json"),
-        "utf8",
+      const jsons = [1, 2].map((k) =>
+        readFileSync(join(logRoot, evalLogDirName(fixedNow), `key-case.${k}.json`), "utf8"),
       );
-      const parsed = JSON.parse(json) as Record<string, unknown>;
-      assert.equal(parsed.apiKey, undefined);
-      assert.equal(parsed.systemPrompt, undefined);
-      const combined = `${stdout.join("\n")}\n${stderr.join("\n")}\n${json}`;
+      for (const json of jsons) {
+        const parsed = JSON.parse(json) as Record<string, unknown>;
+        assert.equal(parsed.apiKey, undefined);
+        assert.equal(parsed.systemPrompt, undefined);
+      }
+      const combined = `${stdout.join("\n")}\n${stderr.join("\n")}\n${jsons.join("\n")}`;
       assert.doesNotMatch(combined, new RegExp(secretKey));
     } finally {
       config.openai.apiKey = previousKey;
@@ -716,5 +805,130 @@ describe("eval cli gitignore", () => {
       "utf8",
     );
     assert.match(gitignore, /^eval-logs\/$/m);
+  });
+});
+
+describe("parseCliArgs", () => {
+  const rangeError = "--repeat must be a whole number from 1 to 10";
+
+  it("defaults repeat to 1", () => {
+    assert.deepEqual(parseCliArgs([]), { ok: true, repeat: 1 });
+    assert.deepEqual(parseCliArgs(["--repeat", "1"]), { ok: true, repeat: 1 });
+  });
+
+  it("reads --repeat with a separate or inline value", () => {
+    assert.deepEqual(parseCliArgs(["--repeat", "3"]), { ok: true, repeat: 3 });
+    assert.deepEqual(parseCliArgs(["--repeat=3"]), { ok: true, repeat: 3 });
+  });
+
+  it("refuses bad, out-of-range and missing values", () => {
+    for (const argv of [
+      ["--repeat", "0"],
+      ["--repeat", "11"],
+      ["--repeat", "2.5"],
+      ["--repeat", "abc"],
+      ["--repeat"],
+      ["--repeat", "--other"],
+    ]) {
+      assert.deepEqual(parseCliArgs(argv), { ok: false, error: rangeError }, argv.join(" "));
+    }
+  });
+
+  it("refuses unknown options and positional arguments", () => {
+    assert.deepEqual(parseCliArgs(["--other"]), { ok: false, error: "unknown option --other" });
+    assert.deepEqual(parseCliArgs(["extra"]), { ok: false, error: "unexpected argument extra" });
+  });
+});
+
+describe("eval cli main --repeat", () => {
+  it("prints one error and creates nothing on bad arguments", async () => {
+    const lines: string[] = [];
+    let touched = false;
+    const code = await main({
+      argv: ["--repeat", "x"],
+      agentAvailable: true,
+      log: (line) => lines.push(line),
+      error: (line) => lines.push(line),
+      inject: {
+        loadCases: () => {
+          touched = true;
+          return [];
+        },
+        createEvalLogDir: () => {
+          touched = true;
+          return "";
+        },
+      },
+    });
+    assert.equal(code, 1);
+    assert.deepEqual(lines, ["--repeat must be a whole number from 1 to 10"]);
+    assert.equal(touched, false);
+  });
+
+  function runRepeat(failSecondOfB: boolean) {
+    const logRoot = tempLogRoot();
+    const fixedNow = new Date("2026-06-01T10:00:00.000Z");
+    const lines: string[] = [];
+    const calls: Record<string, number> = {};
+    const result = main({
+      argv: ["--repeat", "2"],
+      agentAvailable: true,
+      logRoot,
+      now: () => fixedNow,
+      log: (line) => lines.push(line),
+      error: (line) => lines.push(line),
+      inject: {
+        loadCases: () => [
+          { id: "case-a", prompt: "a", checks: [{ noError: true }] },
+          { id: "case-b", prompt: "b", checks: [{ noError: true }] },
+        ],
+        runEvalCase: async (c) => {
+          calls[c.id] = (calls[c.id] ?? 0) + 1;
+          if (failSecondOfB && c.id === "case-b" && calls[c.id] === 2) {
+            return { ...okResult(c.id), ok: false, failures: [{ check: { noError: true }, reason: "boom" }] };
+          }
+          return okResult(c.id);
+        },
+        createOpenAILlm: () => ({
+          async complete() {
+            return { content: null, toolCalls: [] };
+          },
+        }),
+      },
+    });
+    return { logRoot, fixedNow, lines, result };
+  }
+
+  it("writes attempt files, prints rates before logs, and returns 0 when all pass", async () => {
+    const { logRoot, fixedNow, lines, result } = runRepeat(false);
+    try {
+      assert.equal(await result, 0);
+      const dir = join(logRoot, evalLogDirName(fixedNow));
+      for (const f of ["case-a.1", "case-a.2", "case-b.1", "case-b.2"]) {
+        assert.equal(existsSync(join(dir, `${f}.json`)), true, f);
+      }
+      assert.deepEqual(lines, [
+        "pass case-a [1/2]",
+        "pass case-a [2/2]",
+        "pass case-b [1/2]",
+        "pass case-b [2/2]",
+        "rate case-a 2/2",
+        "rate case-b 2/2",
+        `logs ${resolve(dir)}`,
+      ]);
+    } finally {
+      rmSync(logRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("returns 1 when one attempt fails", async () => {
+    const { logRoot, lines, result } = runRepeat(true);
+    try {
+      assert.equal(await result, 1);
+      assert.ok(lines.includes("fail case-b [2/2] boom"));
+      assert.ok(lines.includes("rate case-b 1/2"));
+    } finally {
+      rmSync(logRoot, { recursive: true, force: true });
+    }
   });
 });

@@ -1,12 +1,20 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { isSafeImageSrc, markupValueProblem } from "shared/markup";
+import {
+  isSafeImageSrc,
+  MARKUP_HTML_TAGS,
+  MARKUP_SVG_TAGS,
+  markupValueProblem,
+  sanitizeMarkup,
+} from "shared/markup";
 import { validateMarkup } from "./markup";
 
 const at = "tree.children.0.props.root";
 const check = (root: unknown) => validateMarkup(root, at);
 const div = (...children: unknown[]) => ({ tag: "div", children });
 const svg = (...children: unknown[]) => ({ tag: "svg", attrs: { viewBox: "0 0 100 40" }, children });
+const htmlAllowed = ` (allowed: ${Object.keys(MARKUP_HTML_TAGS).join(", ")})`;
+const svgAllowed = ` (allowed: ${Object.keys(MARKUP_SVG_TAGS).join(", ")})`;
 const useAllowed = "(use rgb, rgba, hsl, hsla, calc, min, max, clamp, repeat, minmax, fit-content)";
 
 const barChart = {
@@ -81,14 +89,28 @@ describe("validateMarkup", () => {
     const tags = ["script", "style", "iframe", "a", "object", "form", "textarea", "constructor"];
     assert.deepEqual(
       check(div(...tags.map((tag) => ({ tag })))),
-      tags.map((tag, i) => `${at}.children.${i}.tag "${tag}" is not allowed`),
+      tags.map((tag, i) => `${at}.children.${i}.tag "${tag}" is not allowed${htmlAllowed}`),
     );
     assert.deepEqual(check(svg({ tag: "foreignObject" }, { tag: "use" }, { tag: "animate" }, { tag: "image" })), [
-      `${at}.children.0.tag "foreignObject" is not allowed`,
-      `${at}.children.1.tag "use" is not allowed`,
-      `${at}.children.2.tag "animate" is not allowed`,
-      `${at}.children.3.tag "image" is not allowed`,
+      `${at}.children.0.tag "foreignObject" is not allowed${svgAllowed}`,
+      `${at}.children.1.tag "use" is not allowed${svgAllowed}`,
+      `${at}.children.2.tag "animate" is not allowed${svgAllowed}`,
+      `${at}.children.3.tag "image" is not allowed${svgAllowed}`,
     ]);
+  });
+
+  it("names the allowed tag for a refused common tag, and lists the allowlist otherwise", () => {
+    const alternatives = { b: "strong", i: "em", h5: "h4", h6: "h4" };
+    const tags = Object.keys(alternatives);
+    assert.deepEqual(
+      check(div(...tags.map((tag) => ({ tag })))),
+      Object.entries(alternatives).map(([tag, alt], i) => `${at}.children.${i}.tag "${tag}" is not allowed (use ${alt})`),
+    );
+    assert.deepEqual(check({ tag: "marquee" }), [`${at}.tag "marquee" is not allowed${htmlAllowed}`]);
+    assert.equal(htmlAllowed.split(", ").length, 33);
+    assert.deepEqual(check(svg({ tag: "b" })), [`${at}.children.0.tag "b" is not allowed${svgAllowed}`]);
+    assert.deepEqual(check({ tag: "constructor" }), [`${at}.tag "constructor" is not allowed${htmlAllowed}`]);
+    assert.equal(sanitizeMarkup(div({ tag: "b" }, { tag: "span", text: "x" }), at)?.children?.length, 1);
   });
 
   it("refuses SVG tags outside an svg and HTML tags inside one", () => {
@@ -134,6 +156,17 @@ describe("validateMarkup", () => {
       check({ tag: "div", style }),
       Object.keys(style).map((property) => `${at}.style.${property} is not allowed`),
     );
+  });
+
+  it("names the kebab-case property for a refused camelCase style property", () => {
+    const style = { fontWeight: "bold", backgroundColor: "red", position: "fixed", zIndex: "10", color: "red" };
+    assert.deepEqual(check({ tag: "div", style }), [
+      `${at}.style.fontWeight is not allowed (use font-weight)`,
+      `${at}.style.backgroundColor is not allowed (use background-color)`,
+      `${at}.style.position is not allowed`,
+      `${at}.style.zIndex is not allowed`,
+    ]);
+    assert.deepEqual(sanitizeMarkup({ tag: "div", style }, at)?.style, { color: "red" });
   });
 
   it("refuses unsafe attribute and style values", () => {

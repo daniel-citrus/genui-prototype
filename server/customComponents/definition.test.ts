@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import type { Component } from "shared/components";
 import type { CustomComponentDefinition } from "shared/customComponents";
+import { MARKUP_HTML_TAGS } from "shared/markup";
 import type { ActionSpec } from "../actions/types";
 import { catalog as entries } from "../catalog/components";
 import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
@@ -9,11 +10,16 @@ import { InMemoryCustomComponentRepository } from "../ports/fakes/InMemoryCustom
 import { validateDefinition } from "./definition";
 import { barChart, menuItemCard, panel, specials, withTemplate } from "./testDefinitions";
 
+const htmlAllowed = ` (allowed: ${Object.keys(MARKUP_HTML_TAGS).join(", ")})`;
+
 const addToCart: ActionSpec = {
   name: "add_to_cart",
   description: "Adds the item to the cart.",
   input_schema: { type: "object", properties: {}, additionalProperties: false },
 };
+
+/** No props, for tests whose template doesn't use `menuItemCard`'s. */
+const noProps = { propsSchema: { type: "object", properties: {}, additionalProperties: false }, exampleProps: {} };
 
 const text = (value: unknown) => ({ component: "Text", props: { text: value } });
 
@@ -50,7 +56,7 @@ describe("validateDefinition", () => {
 
   it("stores the template without an empty children array on a leaf and leaves the input alone", async () => {
     const template = { component: "Stack", children: [{ component: "Heading", props: { text: "Hi" }, children: [] }] };
-    const definition = { ...menuItemCard, children: "none", template };
+    const definition = { ...menuItemCard, ...noProps, children: "none", template };
     const result = await validate(definition);
     assert.equal(result.ok, true);
     assert.deepEqual(result.ok && result.definition.template, {
@@ -126,10 +132,10 @@ describe("validateDefinition", () => {
 
   it("refuses templates over 40 nodes or 6 levels", async () => {
     const wide = { component: "Stack", children: Array.from({ length: 40 }, () => text("x")) };
-    assert.deepEqual(await problems({ template: wide }), ["template has 41 nodes (max 40)"]);
+    assert.deepEqual(await problems({ ...noProps, template: wide }), ["template has 41 nodes (max 40)"]);
     let deep: CustomComponentDefinition["template"] = text("x");
     for (let i = 0; i < 6; i++) deep = { component: "Stack", children: [deep] };
-    assert.deepEqual(await problems({ template: deep }), ["template is 7 levels deep (max 6)"]);
+    assert.deepEqual(await problems({ ...noProps, template: deep }), ["template is 7 levels deep (max 6)"]);
   });
 
   it("refuses malformed template nodes", async () => {
@@ -163,7 +169,8 @@ describe("validateDefinition", () => {
     assert.deepEqual(await problems({ children: "any", template: withChild({ ...text("x"), props: { text: slot } }) }), [
       'template.children.3.props.text {"$children": true} is only allowed in a children array',
     ]);
-    assert.deepEqual(await problems({ children: "any", template: { component: "Stack", children: [slot, slot] } }), [
+    const twoSlots = { component: "Stack", children: [slot, slot] };
+    assert.deepEqual(await problems({ ...noProps, children: "any", template: twoSlots }), [
       'template.children.1 is a second {"$children": true} slot (template.children.0 is the first; only one is allowed)',
     ]);
     assert.deepEqual(await problems({ template: withChild(slot) }), [
@@ -235,7 +242,7 @@ describe("validateDefinition", () => {
     ]);
     const script = { tag: "div", children: [{ tag: "script", text: "alert(1)" }] };
     assert.deepEqual(await problems({ template: withChild({ component: "Markup", props: { root: script } }) }), [
-      'template.children.3.props.root.children.0.tag "script" is not allowed',
+      `template.children.3.props.root.children.0.tag "script" is not allowed${htmlAllowed}`,
     ]);
   });
 
@@ -257,6 +264,8 @@ describe("validateDefinition", () => {
     assert.deepEqual(await validate(priceTag), {
       ok: false,
       errors: [
+        'template.props.markup "<span><strong>{{price}}</strong></span>" looks like a {{...}} placeholder, which is shown as written; use {"$prop": "price"}',
+        'propsSchema.properties.price is not used by the template; use it with {"$prop": "price"} or remove it',
         "template.props.root is required (call get_component Markup for its props)",
         "template.props.markup is not allowed",
       ],
@@ -266,6 +275,7 @@ describe("validateDefinition", () => {
   it("reports every problem together, at most 20", async () => {
     const result = await validate({
       ...menuItemCard,
+      ...noProps,
       name: "menu",
       description: "",
       template: { component: "Stack", children: Array.from({ length: 30 }, (_, i) => text({ $prop: `p${i}` })) },
@@ -275,5 +285,86 @@ describe("validateDefinition", () => {
     assert.equal(errors.length, 20);
     assert.deepEqual(errors.slice(0, 2), ["name must match ^[A-Z][A-Za-z0-9]*$", "description must not be empty"]);
     assert.equal(errors[19], "…and 13 more");
+  });
+
+  describe("{{...}} placeholders and unused props", () => {
+    const declare = (...names: string[]) => ({
+      propsSchema: {
+        type: "object",
+        properties: Object.fromEntries(names.map((n) => [n, { type: "string", description: n }])),
+        additionalProperties: false,
+      },
+      exampleProps: Object.fromEntries(names.map((n) => [n, "x"])),
+    });
+    const priceTag = (template: CustomComponentDefinition["template"], ...names: string[]) => ({
+      ...withTemplate("PriceTag", template),
+      ...declare(...names),
+    });
+    const PRICE = { $prop: "price" };
+    const unused = (prop: string) =>
+      `propsSchema.properties.${prop} is not used by the template; use it with {"$prop": "${prop}"} or remove it`;
+    const braces = (path: string, shown: string, name: string) =>
+      `${path} "${shown}" looks like a {{...}} placeholder, which is shown as written; use {"$prop": "${name}"}`;
+    const errorsOf = async (definition: unknown) => {
+      const result = await validate(definition);
+      return result.ok ? [] : result.errors;
+    };
+
+    it("refuses a {{...}} in Markup text or a prop and names the declared prop", async () => {
+      const markup = { component: "Markup", props: { root: { tag: "span", text: "{{props.price}}" } } };
+      assert.deepEqual(await errorsOf(priceTag(markup, "price")), [
+        braces("template.props.root.text", "{{props.price}}", "price"),
+        unused("price"),
+      ]);
+      const heading = { component: "Heading", props: { text: "Hello {{name}}" } };
+      assert.deepEqual(await errorsOf(priceTag(heading, "name")), [
+        braces("template.props.text", "Hello {{name}}", "name"),
+        unused("name"),
+      ]);
+    });
+
+    it("uses <name> for an undeclared name and quotes at most 60 characters", async () => {
+      const [first] = await errorsOf(priceTag(text("{{ unknown.thing }}")));
+      assert.equal(first, braces("template.props.text", "{{ unknown.thing }}", "<name>"));
+      const long = `${"a".repeat(55)} {{price}} and more text`;
+      const [second] = await errorsOf(priceTag(text(long), "price"));
+      assert.equal(second, braces("template.props.text", long.slice(0, 60), "price"));
+    });
+
+    it("accepts single braces and an unclosed {{", async () => {
+      for (const value of ["a { b } c", "{x}", "{{ nope", "}} {{"]) {
+        const template = { component: "Stack", children: [text(value), text(PRICE)] };
+        assert.deepEqual(await errorsOf(priceTag(template, "price")), [], value);
+      }
+    });
+
+    it("refuses a declared prop the template doesn't use, in key order", async () => {
+      assert.deepEqual(await errorsOf(priceTag(text(PRICE), "price", "label", "tone")), [
+        unused("label"),
+        unused("tone"),
+      ]);
+    });
+
+    it("counts uses in nested custom nodes, Markup attributes and style, and a placeholder root", async () => {
+      await repo.save(panel);
+      const nested = { component: "Panel", props: { title: { $prop: "a" } }, children: [text("x")] };
+      assert.deepEqual(await errorsOf(priceTag(nested, "a")), []);
+      const root = { tag: "div", attrs: { title: { $prop: "a" } }, style: { color: { $prop: "b" } } };
+      assert.deepEqual(await errorsOf(priceTag({ component: "Markup", props: { root } }, "a", "b")), []);
+      const placeholderRoot = priceTag({ component: "Markup", props: { root: { $prop: "a" } } }, "a");
+      const propsSchema = {
+        type: "object",
+        properties: { a: { type: "object", description: "The root." } },
+        additionalProperties: false,
+      };
+      const exampleProps = { a: { tag: "span", text: "x" } };
+      assert.deepEqual(await errorsOf({ ...placeholderRoot, propsSchema, exampleProps }), []);
+    });
+
+    it("gives no unused-prop problem without properties", async () => {
+      const bare = { ...withTemplate("Bare", text("x")), propsSchema: { type: "object", additionalProperties: false } };
+      assert.deepEqual(await errorsOf(withTemplate("Plain", text("x"))), []);
+      assert.deepEqual(await errorsOf(bare), []);
+    });
   });
 });
