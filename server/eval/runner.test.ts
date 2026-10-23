@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
+import type { CustomComponentDefinition } from "shared/customComponents";
 import type { AgentLlm, LlmTurn } from "../ports/AgentLlm";
 import type { ToolSpec } from "../agent/tools";
 import { hasConversation } from "../agent/conversations";
@@ -90,5 +91,63 @@ describe("runEvalCase", () => {
     } finally {
       evalRunnerTestHooks.uuid = randomUUID;
     }
+  });
+
+  describe("customComponents seeds", () => {
+    const seed: CustomComponentDefinition = {
+      name: "SeedCard",
+      description: "A card with a heading.",
+      category: "display",
+      children: "none",
+      propsSchema: {
+        type: "object",
+        properties: { title: { type: "string", description: "Heading text." } },
+        required: ["title"],
+        additionalProperties: false,
+      },
+      exampleProps: { title: "Hi" },
+      template: {
+        component: "Card",
+        props: {},
+        children: [{ component: "Heading", props: { text: { $prop: "title" } } }],
+      },
+    };
+    const seeded: EvalCase = {
+      id: "seeded",
+      prompt: "Show it",
+      checks: [{ toolSucceeded: "render_ui" }, { agentComponent: "SeedCard" }, { uiText: "Hello" }],
+      customComponents: [seed],
+    };
+
+    it("lists and renders a seeded component", async () => {
+      const tree = { component: "SeedCard", props: { title: "Hello" } };
+      const llm = scriptedLlm([
+        { content: null, toolCalls: [{ id: "l", name: "list_components", arguments: "{}" }] },
+        {
+          content: null,
+          toolCalls: [{ id: "u", name: "render_ui", arguments: JSON.stringify({ tree }) }],
+        },
+        { content: "Done.", toolCalls: [] },
+      ]);
+
+      const result = await runEvalCase(seeded, { llm });
+
+      const listed = result.trace.completions
+        .flatMap((c) => c.toolCalls)
+        .find((tc) => tc.call.name === "list_components");
+      assert.match(JSON.stringify(listed), /SeedCard/);
+      assert.equal(result.ok, true, JSON.stringify(result.failures));
+    });
+
+    it("fails an invalid seed without running the model", async () => {
+      const llm = scriptedLlm([{ content: "never", toolCalls: [] }]);
+      const bad = { ...seed, description: "" };
+
+      const result = await runEvalCase({ ...seeded, customComponents: [bad] }, { llm });
+
+      assert.equal(result.ok, false);
+      assert.equal(result.error, "seed SeedCard: description must not be empty");
+      assert.equal(llm.calls.length, 0);
+    });
   });
 });

@@ -1,11 +1,12 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { MAX_MESSAGE_CHARS } from "shared/api";
+import type { CustomComponentDefinition } from "shared/customComponents";
 import type { EndedBy } from "../agent/trace";
 import type { EvalCase, EvalCheck } from "./types";
 
 const KEBAB_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const CASE_KEYS = ["id", "prompt", "checks"] as const;
+const CASE_KEYS = ["id", "prompt", "checks", "customComponents"] as const;
 const CHECK_KEYS = [
   "endedBy",
   "noError",
@@ -19,6 +20,8 @@ const CHECK_KEYS = [
   "uiMarkupTag",
   "agentComponent",
   "noButtonAction",
+  "definedWithKey",
+  "noUiComponent",
 ] as const;
 
 const ENDED_BY: ReadonlySet<string> = new Set([
@@ -83,7 +86,9 @@ function parseCheck(raw: unknown, context: string): EvalCheck {
     case "uiNamedInput":
     case "uiText":
     case "uiMarkupTag":
-    case "agentComponent": {
+    case "agentComponent":
+    case "definedWithKey":
+    case "noUiComponent": {
       const value = obj[key];
       if (typeof value !== "string" || value.length === 0) {
         throw new Error(`${context}: ${key} must be a non-empty string`);
@@ -125,7 +130,14 @@ function parseCase(raw: unknown, fileLabel: string): EvalCase {
 
   const checks = obj.checks.map((check, i) => parseCheck(check, `${fileLabel} checks[${i}]`));
 
-  return { id: obj.id, prompt: obj.prompt, checks };
+  const evalCase: EvalCase = { id: obj.id, prompt: obj.prompt, checks };
+  if (obj.customComponents !== undefined) {
+    if (!Array.isArray(obj.customComponents)) {
+      throw new Error(`${fileLabel}: customComponents must be an array`);
+    }
+    evalCase.customComponents = obj.customComponents as CustomComponentDefinition[];
+  }
+  return evalCase;
 }
 
 export function loadCases(dir: string): EvalCase[] {

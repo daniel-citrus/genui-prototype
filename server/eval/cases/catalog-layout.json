@@ -9,6 +9,8 @@
     { "uiComponent": "Stack" },
     { "uiComponent": "Card" },
     { "uiComponent": "Heading" },
-    { "uiComponent": "Text" }
+    { "uiComponent": "Text" },
+    { "noUiComponent": "Markup" },
+    { "toolNotCalled": "define_component" }
   ]
 }

@@ -7,6 +7,8 @@
     { "toolCalled": "list_actions" },
     { "toolSucceeded": "render_ui" },
     { "uiButtonAction": "demo_echo" },
-    { "uiNamedInput": "text" }
+    { "uiNamedInput": "text" },
+    { "noUiComponent": "Markup" },
+    { "toolNotCalled": "define_component" }
   ]
 }

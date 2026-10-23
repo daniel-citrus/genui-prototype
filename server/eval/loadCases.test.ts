@@ -228,4 +228,29 @@ describe("loadCases", () => {
     writeCase(dir, "ok.json", { id: "ok", prompt: "hi", checks: [{ uiMarkupTag: 3 }] });
     assert.throws(() => loadCases(dir), /uiMarkupTag must be a non-empty string/);
   });
+
+  it("loads definedWithKey, noUiComponent and customComponents, and refuses bad values", () => {
+    const dir = caseDir();
+    const seed = { name: "Seeded" };
+    writeCase(dir, "ok.json", {
+      id: "ok",
+      prompt: "hi",
+      checks: [{ definedWithKey: "$each" }, { noUiComponent: "Markup" }],
+      customComponents: [seed],
+    });
+    const [loaded] = loadCases(dir);
+    assert.deepEqual(loaded!.checks, [{ definedWithKey: "$each" }, { noUiComponent: "Markup" }]);
+    assert.deepEqual(loaded!.customComponents, [seed]);
+    writeCase(dir, "ok.json", { id: "ok", prompt: "hi", checks: [{ definedWithKey: 3 }] });
+    assert.throws(() => loadCases(dir), /definedWithKey must be a non-empty string/);
+    writeCase(dir, "ok.json", { id: "ok", prompt: "hi", checks: [{ noUiComponent: 3 }] });
+    assert.throws(() => loadCases(dir), /noUiComponent must be a non-empty string/);
+    writeCase(dir, "ok.json", {
+      id: "ok",
+      prompt: "hi",
+      checks: [{ noError: true }],
+      customComponents: {},
+    });
+    assert.throws(() => loadCases(dir), /customComponents must be an array/);
+  });
 });
