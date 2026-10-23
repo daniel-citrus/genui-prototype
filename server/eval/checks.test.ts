@@ -314,4 +314,45 @@ describe("checkTrace", () => {
     assert.doesNotMatch(blob, /secretArg/);
     assert.doesNotMatch(blob, /"component"/);
   });
+
+  describe("uiText and uiMarkupTag", () => {
+    const heading = { component: "Heading", props: { text: "Hello Ada" } };
+    const markup = {
+      component: "Markup",
+      props: {
+        root: { tag: "span", children: [{ tag: "strong", text: "$12.99" }] },
+      },
+    };
+    const nested = traceWithToolCalls(
+      renderUiTree({ component: "Card", props: {}, children: [heading, markup] }),
+    );
+
+    it("uiText passes on props text and Markup text, and is case-sensitive", () => {
+      assert.deepEqual(checkTrace(nested, [{ uiText: "Ada" }, { uiText: "$12.99" }]), []);
+      const failures = checkTrace(nested, [{ uiText: "ada" }]);
+      assert.equal(failures.length, 1);
+      assert.equal(
+        failures[0]!.reason,
+        'uiText "ada": text not found in last render_ui tree',
+      );
+    });
+
+    it("uiMarkupTag passes for nested Markup and fails otherwise", () => {
+      assert.deepEqual(checkTrace(nested, [{ uiMarkupTag: "strong" }, { uiMarkupTag: "span" }]), []);
+      const failures = checkTrace(nested, [{ uiMarkupTag: "em" }]);
+      assert.equal(
+        failures[0]!.reason,
+        'uiMarkupTag "em": Markup tag not found in last render_ui tree',
+      );
+      const noMarkup = traceWithToolCalls(renderUiTree(heading));
+      assert.equal(checkTrace(noMarkup, [{ uiMarkupTag: "strong" }]).length, 1);
+    });
+
+    it("both fail without a successful render_ui", () => {
+      const failures = checkTrace(emptyTrace(), [{ uiText: "x" }, { uiMarkupTag: "strong" }]);
+      assert.equal(failures.length, 2);
+      assert.match(failures[0]!.reason, /^uiText "x": no successful render_ui tree/);
+      assert.match(failures[1]!.reason, /^uiMarkupTag "strong": no successful render_ui tree/);
+    });
+  });
 });
