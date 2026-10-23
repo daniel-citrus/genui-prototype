@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import type { Component } from "shared/components";
 import type { CustomComponentDefinition } from "shared/customComponents";
+import { MARKUP_HTML_TAGS } from "shared/markup";
 import type { ActionSpec } from "../actions/types";
 import { catalog as entries } from "../catalog/components";
 import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
 import { InMemoryCustomComponentRepository } from "../ports/fakes/InMemoryCustomComponentRepository";
 import { validateDefinition } from "./definition";
 import { barChart, menuItemCard, panel, specials, withTemplate } from "./testDefinitions";
+
+const htmlAllowed = ` (allowed: ${Object.keys(MARKUP_HTML_TAGS).join(", ")})`;
 
 const addToCart: ActionSpec = {
   name: "add_to_cart",
@@ -239,7 +242,7 @@ describe("validateDefinition", () => {
     ]);
     const script = { tag: "div", children: [{ tag: "script", text: "alert(1)" }] };
     assert.deepEqual(await problems({ template: withChild({ component: "Markup", props: { root: script } }) }), [
-      'template.children.3.props.root.children.0.tag "script" is not allowed',
+      `template.children.3.props.root.children.0.tag "script" is not allowed${htmlAllowed}`,
     ]);
   });
 
