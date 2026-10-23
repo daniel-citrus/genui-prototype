@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Component } from "shared/components";
+import { MARKUP_HTML_TAGS } from "shared/markup";
 import type { ActionSpec } from "../actions/types";
 import { catalog } from "../catalog/components";
 import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
 import { type UiTreeOptions, validateUiTree, validatorCompileCount, withPropsHint } from "./validateTree";
+
+const htmlAllowed = ` (allowed: ${Object.keys(MARKUP_HTML_TAGS).join(", ")})`;
 
 const repo = new InMemoryComponentRepository(catalog);
 const stored = () => repo.list();
@@ -123,7 +126,7 @@ describe("validateUiTree", () => {
       'tree.children.0.component "Carousel" is not in the catalog',
       "tree.children.1.props must be an object",
       "tree.children.2 Button cannot have children",
-      'tree.children.3.props.root.tag "script" is not allowed',
+      `tree.children.3.props.root.tag "script" is not allowed${htmlAllowed}`,
       'tree.children.5.props.name "dup" is already used by tree.children.4',
     ]);
     const wide = { component: "Stack", children: [button, button] };
@@ -475,7 +478,7 @@ describe("validateUiTree Markup", () => {
     const result = await check(form(markup({ tag: "div", attrs: { onclick: "x" }, children: [{ tag: "script" }] })));
     assert.deepEqual(result.errors, [
       "tree.children.0.props.root.attrs.onclick is not allowed",
-      'tree.children.0.props.root.children.0.tag "script" is not allowed',
+      `tree.children.0.props.root.children.0.tag "script" is not allowed${htmlAllowed}`,
     ]);
   });
 

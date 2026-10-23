@@ -90,6 +90,9 @@ export const MARKUP_SVG_TAGS: Record<string, readonly string[]> = {
 /** Attributes that take true or false; `false` leaves them off. */
 const BOOLEAN_ATTRIBUTES = new Set(["checked", "disabled", "selected"]);
 
+/** Allowed tags to suggest when a common HTML tag outside the allowlist is refused. */
+export const MARKUP_TAG_ALTERNATIVES: Readonly<Record<string, string>> = { b: "strong", i: "em", h5: "h4", h6: "h4" };
+
 /** No `position`, `z-index` or `transform`: nothing can move over the page. */
 export const MARKUP_STYLE_PROPERTIES: readonly string[] = [
   // text
@@ -248,8 +251,13 @@ function attributeProblem(tag: string, name: string, value: unknown, allowed: re
   return undefined;
 }
 
+const kebabCase = (name: string) => name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+
 function styleProblem(property: string, value: unknown): string | undefined {
-  if (!MARKUP_STYLE_PROPERTIES.includes(property)) return "is not allowed";
+  if (!MARKUP_STYLE_PROPERTIES.includes(property)) {
+    const kebab = kebabCase(property);
+    return kebab !== property && MARKUP_STYLE_PROPERTIES.includes(kebab) ? `is not allowed (use ${kebab})` : "is not allowed";
+  }
   if (isPlaceholder(value)) return UNFILLED;
   if (typeof value !== "string") return "must be a string";
   const problem = markupValueProblem(value);
@@ -325,7 +333,14 @@ export function sanitizeMarkup(
       let where = "";
       if (inSvg && Object.hasOwn(MARKUP_HTML_TAGS, tag)) where = " inside an svg";
       if (!inSvg && Object.hasOwn(MARKUP_SVG_TAGS, tag)) where = " outside an svg";
-      report(`${at}.tag "${tag}" is not allowed${where}`);
+      let hint = "";
+      if (!where) {
+        hint =
+          !inSvg && Object.hasOwn(MARKUP_TAG_ALTERNATIVES, tag)
+            ? ` (use ${MARKUP_TAG_ALTERNATIVES[tag]})`
+            : ` (allowed: ${Object.keys(tags).join(", ")})`;
+      }
+      report(`${at}.tag "${tag}" is not allowed${where}${hint}`);
       return null;
     }
     const allowed = tags[tag];
