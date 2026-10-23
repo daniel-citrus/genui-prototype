@@ -58,6 +58,21 @@ const committedCases: EvalCase[] = [
     ],
   },
   {
+    id: "custom-props-shown",
+    prompt:
+      "Define a reusable custom component named ContactCard: a Card with a Heading showing a name prop and a Text showing an email prop. Then show ContactCard for Ada Lovelace, ada@example.com.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolSucceeded: "define_component" },
+      { toolSucceeded: "render_ui" },
+      { agentComponent: "ContactCard" },
+      { uiComponent: "Card" },
+      { uiText: "Ada Lovelace" },
+      { uiText: "ada@example.com" },
+    ],
+  },
+  {
     id: "define-and-use-custom",
     prompt:
       "Define a reusable custom component named PromoBanner: a Card whose children are a Heading and a Text. Then show PromoBanner.",
@@ -99,7 +114,7 @@ const committedCases: EvalCase[] = [
   {
     id: "export-pdf",
     prompt:
-      "Show a button labeled Export PDF. It should run a server action, but only if one of the registered actions actually exports a PDF.",
+      "Show a button labeled Export PDF that exports this page as a PDF.",
     checks: [
       { endedBy: "reply" },
       { noError: true },
@@ -125,8 +140,50 @@ const committedCases: EvalCase[] = [
     ],
   },
   {
+    id: "invented-action-name",
+    prompt:
+      "Show a Download CSV button that runs the export_csv action.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolCalled: "list_actions" },
+      { toolSucceeded: "render_ui" },
+      { uiComponent: "Button" },
+      { noButtonAction: true },
+    ],
+  },
+  {
+    id: "markup-bold-tag",
+    prompt:
+      "Define a custom component named SaleLabel that uses Markup to draw the word SALE in a b tag inside a span. Then show SaleLabel.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolSucceeded: "define_component" },
+      { toolSucceeded: "render_ui" },
+      { agentComponent: "SaleLabel" },
+      { uiMarkupTag: "strong" },
+      { uiText: "SALE" },
+    ],
+  },
+  {
+    id: "markup-prop-text",
+    prompt:
+      "Define a custom component named StatusDot that uses Markup: an svg with a small green circle, then a span whose text is a label prop. Then show StatusDot with the label Online.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolSucceeded: "define_component" },
+      { toolSucceeded: "render_ui" },
+      { agentComponent: "StatusDot" },
+      { uiMarkupTag: "circle" },
+      { uiText: "Online" },
+    ],
+  },
+  {
     id: "menu-create-item",
-    prompt: "Show a form to add a new drink to the café menu.",
+    prompt:
+      "Show a form to add a new drink to the café menu.",
     checks: [
       { endedBy: "reply" },
       { noError: true },
@@ -165,8 +222,23 @@ const committedCases: EvalCase[] = [
     ],
   },
   {
+    id: "newsletter-no-action",
+    prompt:
+      "Show a newsletter signup: an email field and a Subscribe button that adds the person to our mailing list.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolCalled: "list_actions" },
+      { toolSucceeded: "render_ui" },
+      { uiComponent: "TextInput" },
+      { uiComponent: "Button" },
+      { noButtonAction: true },
+    ],
+  },
+  {
     id: "off-topic-refusal",
-    prompt: "What's the weather in Paris tomorrow?",
+    prompt:
+      "What's the weather in Paris tomorrow?",
     checks: [
       { endedBy: "reply" },
       { noError: true },
@@ -178,7 +250,7 @@ const committedCases: EvalCase[] = [
   {
     id: "price-tag",
     prompt:
-      "Define a custom component named PriceTag that uses Markup to draw a label no catalog component can: a span whose text is the price in bold. Then show PriceTag. Use Markup in the template.",
+      "Define a custom component named PriceTag that uses Markup to draw a label no catalog component can: a span whose text is the price prop in bold. Then show PriceTag with the price $12.99. Use Markup in the template.",
     checks: [
       { endedBy: "reply" },
       { noError: true },
@@ -186,16 +258,31 @@ const committedCases: EvalCase[] = [
       { toolSucceeded: "render_ui" },
       { agentComponent: "PriceTag" },
       { uiComponent: "Markup" },
+      { uiText: "$12.99" },
     ],
   },
   {
     id: "simple-heading",
-    prompt: "Show a heading that says Hello",
+    prompt:
+      "Show a heading that says Hello",
     checks: [
       { endedBy: "reply" },
       { noError: true },
       { toolSucceeded: "render_ui" },
       { uiComponent: "Heading" },
+    ],
+  },
+  {
+    id: "sms-no-action",
+    prompt:
+      "Add a button labeled Send SMS that texts the customer their order status.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolCalled: "list_actions" },
+      { toolSucceeded: "render_ui" },
+      { uiComponent: "Button" },
+      { noButtonAction: true },
     ],
   },
 ];

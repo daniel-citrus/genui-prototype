@@ -1,0 +1,12 @@
+{
+  "id": "invented-action-name",
+  "prompt": "Show a Download CSV button that runs the export_csv action.",
+  "checks": [
+    { "endedBy": "reply" },
+    { "noError": true },
+    { "toolCalled": "list_actions" },
+    { "toolSucceeded": "render_ui" },
+    { "uiComponent": "Button" },
+    { "noButtonAction": true }
+  ]
+}
