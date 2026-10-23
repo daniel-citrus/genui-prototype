@@ -45,12 +45,17 @@ function buildLogRecord(log: EvalCaseLog): Record<string, unknown> {
   return record;
 }
 
-export function writeEvalCaseLog(dir: string, log: EvalCaseLog): void {
+export function writeEvalCaseLog(dir: string, log: EvalCaseLog, attempt?: number): void {
   if (!KEBAB_ID.test(log.id)) {
     throw new Error("eval log id must be kebab-case");
   }
 
-  const filePath = join(dir, `${log.id}.json`);
+  if (attempt !== undefined && !(Number.isInteger(attempt) && attempt >= 1 && attempt <= 10)) {
+    throw new Error("eval log attempt must be a whole number from 1 to 10");
+  }
+
+  const fileName = attempt === undefined ? `${log.id}.json` : `${log.id}.${attempt}.json`;
+  const filePath = join(dir, fileName);
   const resolvedDir = resolve(dir);
   const resolvedFile = resolve(filePath);
   const rel = relative(resolvedDir, resolvedFile);
