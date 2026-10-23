@@ -493,4 +493,41 @@ describe("render_ui with custom components", () => {
     assert.equal(shown.length, 1);
     assert.equal(errors.length, 1);
   });
+
+  describe("$each", () => {
+    const bulletList = {
+      ...withTemplate("BulletList", {
+        component: "Markup",
+        props: {
+          root: { tag: "ul", children: [{ $each: "items", as: { tag: "li", text: { $item: true } } }] },
+        },
+      }),
+      propsSchema: {
+        type: "object" as const,
+        properties: { items: { type: "array", items: { type: "string" }, description: "The items." } },
+        additionalProperties: false as const,
+      },
+      exampleProps: { items: ["A"] },
+    };
+
+    it("shows a saved list with one li per item", async () => {
+      const { registry, repo, ctx, shown } = await setupCustom();
+      await repo.save(bulletList);
+      const tree = stack({ component: "BulletList", props: { items: ["A", "B", "C"] } });
+      assert.equal((await registry.run("render_ui", { tree }, ctx)).ok, true);
+      const root = shown[0].children?.[0].props?.root as { children: { tag: string; text: string }[] };
+      assert.deepEqual(
+        root.children.map((c) => [c.tag, c.text]),
+        [["li", "A"], ["li", "B"], ["li", "C"]],
+      );
+    });
+
+    it("refuses $each in the agent's own tree", async () => {
+      const { registry, ctx, shown } = await setupCustom();
+      const each = { $each: "items", as: { component: "Divider" } };
+      const result = await registry.run("render_ui", { tree: stack(each) }, ctx);
+      assert.equal(result.ok, false);
+      assert.equal(shown.length, 0);
+    });
+  });
 });
