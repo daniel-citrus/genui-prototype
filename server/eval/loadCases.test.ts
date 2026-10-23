@@ -214,4 +214,18 @@ describe("loadCases", () => {
     writeCase(dir, "bad.json", { id: "", prompt: "hi", checks: [{ noError: true }] });
     assert.throws(() => loadCases(dir), /id must be kebab-case/);
   });
+
+  it("loads uiText and uiMarkupTag and refuses empty or non-string values", () => {
+    const dir = caseDir();
+    writeCase(dir, "ok.json", {
+      id: "ok",
+      prompt: "hi",
+      checks: [{ uiText: "x" }, { uiMarkupTag: "strong" }],
+    });
+    assert.deepEqual(loadCases(dir)[0]!.checks, [{ uiText: "x" }, { uiMarkupTag: "strong" }]);
+    writeCase(dir, "ok.json", { id: "ok", prompt: "hi", checks: [{ uiText: "" }] });
+    assert.throws(() => loadCases(dir), /uiText must be a non-empty string/);
+    writeCase(dir, "ok.json", { id: "ok", prompt: "hi", checks: [{ uiMarkupTag: 3 }] });
+    assert.throws(() => loadCases(dir), /uiMarkupTag must be a non-empty string/);
+  });
 });
