@@ -368,3 +368,35 @@ describe("validateDefinition", () => {
     });
   });
 });
+
+describe("validateDefinition Card forms", () => {
+  let catalog: Component[];
+
+  beforeEach(async () => {
+    catalog = await new InMemoryComponentRepository(entries).list();
+  });
+
+  const form = () => ({
+    component: "Card",
+    children: [
+      { component: "TextInput", props: { label: "Name", name: "name" } },
+      { component: "Button", props: { label: "Add", action: "add_to_cart" } },
+    ],
+  });
+  const validate = (children: unknown[]) =>
+    validateDefinition(
+      { ...menuItemCard, ...noProps, children: "none", template: { component: "Stack", children } },
+      { catalog, resolve: async () => undefined, actions: [addToCart] },
+    );
+
+  it("accepts a template with two Card forms that reuse input names", async () => {
+    assert.equal((await validate([form(), form()])).ok, true);
+  });
+
+  it("refuses two Card forms that one button outside both would send", async () => {
+    const outer = { component: "Button", props: { label: "All", action: "add_to_cart" } };
+    const result = await validate([form(), form(), outer]);
+    assert.equal(result.ok, false);
+    assert.match(result.ok ? "" : result.errors[0], /would send both; put each form in its own Card/);
+  });
+});
