@@ -8,3 +8,4 @@ One markdown file per implementation plan, or product outcome we want, for work 
 - [Live CapheVietPOS adapter](live-capheviet-pos-adapter.md)
 - [Real, side-effecting actions](real-side-effecting-actions.md)
 - [A simpler chat for non-technical users, with a New chat button](plain-chat-and-new-chat.md)
+- [Reliable component generation: lists, charts and per-item forms](data-driven-components-and-card-forms.md)
