@@ -119,6 +119,30 @@ describe("define_component", () => {
     assert.equal(result.summary, "Saved OrderForm v1");
   });
 
+  it("describes Markup's root format in template, and its example saves", async () => {
+    const { registry, ctx } = setup();
+    const spec = registry.specs.find((s) => s.name === "define_component")!;
+    const properties = spec.input_schema.properties as Record<string, { description: string }>;
+    const description = properties.template.description;
+    for (const text of ["never an HTML string", '{"$prop": "<name>"}', "kebab-case"]) {
+      assert.ok(description.includes(text), text);
+    }
+
+    const template = JSON.parse(description.slice(description.indexOf("Example: ") + "Example: ".length, -1));
+    const definition: CustomComponentDefinition = {
+      ...withTemplate("NewBadge", template),
+      propsSchema: {
+        type: "object",
+        properties: { label: { type: "string", description: "The badge text." } },
+        required: ["label"],
+        additionalProperties: false,
+      },
+      exampleProps: { label: "New" },
+    };
+    const result = await registry.run("define_component", args(definition), ctx);
+    assert.equal(result.summary, "Saved NewBadge v1");
+  });
+
   it("returns every problem validateDefinition finds and saves nothing", async () => {
     const { registry, components, repo, ctx } = setup();
     await repo.save(panel);
