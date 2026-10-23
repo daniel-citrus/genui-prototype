@@ -200,3 +200,19 @@ describe("writeEvalCaseLog", () => {
     assert.equal(after, before);
   });
 });
+
+describe("writeEvalCaseLog attempt", () => {
+  it("writes <id>.<attempt>.json", () => {
+    const dir = tempRoot();
+    writeEvalCaseLog(dir, baseLog(), 1);
+    assert.deepEqual(readdirSync(dir), ["simple-heading.1.json"]);
+  });
+
+  it("refuses attempts outside 1 to 10 before writing", () => {
+    const dir = tempRoot();
+    for (const attempt of [0, 11, 1.5]) {
+      assert.throws(() => writeEvalCaseLog(dir, baseLog(), attempt), /attempt/);
+    }
+    assert.deepEqual(readdirSync(dir), []);
+  });
+});

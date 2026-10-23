@@ -23,6 +23,8 @@ const CATEGORIES: readonly ComponentCategory[] = ["layout", "text", "input", "di
 const CHILDREN: readonly ComponentChildren[] = ["none", "any"];
 const NODE_KEYS = ["component", "props", "children"];
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
+const BRACES_PLACEHOLDER = /\{\{\s*([^{}]+?)\s*\}\}/;
+const EXCERPT_CHARS = 60;
 
 /** Paths of every `key` key in `value`, at any depth below `path`. */
 function keyPaths(value: unknown, key: string, path: string): string[] {
@@ -36,13 +38,16 @@ function keyPaths(value: unknown, key: string, path: string): string[] {
 
 interface TemplateCheck {
   problems: string[];
+  /** Whether any problem makes the template unfit to expand (the {{...}} and unused-prop ones don't). */
+  blocking: boolean;
   /** Every node whose component isn't a catalog name. */
   references: { path: string; name: string }[];
 }
 
 /**
  * The template's shape: nodes, size, where placeholders and the slot may go,
- * and that each placeholder names a declared prop. Custom nodes count as one
+ * that each placeholder names a declared prop, and that every declared prop
+ * is used and no string looks like a {{...}} placeholder. Custom nodes count as one
  * node; what they expand to isn't looked at here.
  */
 function checkTemplate(
@@ -53,6 +58,8 @@ function checkTemplate(
 ): TemplateCheck {
   const problems: string[] = [];
   const references: TemplateCheck["references"] = [];
+  const advisory = new Set<string>();
+  const used = new Set<string>();
   let firstSlot: string | undefined;
   let slotSeen = false;
   let nodes = 0;
@@ -64,6 +71,8 @@ function checkTemplate(
       problems.push(`${path} must be exactly {"$prop": "<name>"}`);
     } else if (!Object.hasOwn(declared, prop)) {
       problems.push(`${path} uses $prop "${prop}", which propsSchema.properties doesn't declare`);
+    } else {
+      used.add(prop);
     }
   };
 
@@ -76,6 +85,16 @@ function checkTemplate(
     } else if (isSlot(value)) {
       slotSeen = true;
       problems.push(`${path} {"$children": true} is only allowed in a children array`);
+    } else if (typeof value === "string") {
+      const match = BRACES_PLACEHOLDER.exec(value);
+      if (match) {
+        const last = match[1].split(".").pop()!.trim();
+        const name = Object.hasOwn(declared, last) ? last : "<name>";
+        const excerpt = value.slice(0, EXCERPT_CHARS);
+        const problem = `${path} "${excerpt}" looks like a {{...}} placeholder, which is shown as written; use {"$prop": "${name}"}`;
+        problems.push(problem);
+        advisory.add(problem);
+      }
     } else if (Array.isArray(value)) {
       value.forEach((v, i) => misplaced(v, `${path}.${i}`));
     } else if (isObject(value)) {
@@ -149,12 +168,19 @@ function checkTemplate(
   if (isSlot(template)) misplaced(template, "template");
   else node(template, "template", 1);
 
+  for (const prop of Object.keys(declared)) {
+    if (used.has(prop)) continue;
+    const problem = `propsSchema.properties.${prop} is not used by the template; use it with {"$prop": "${prop}"} or remove it`;
+    problems.push(problem);
+    advisory.add(problem);
+  }
+
   if (nodes > MAX_TEMPLATE_NODES) problems.push(`template has ${nodes} nodes (max ${MAX_TEMPLATE_NODES})`);
   if (depth > MAX_TEMPLATE_DEPTH) problems.push(`template is ${depth} levels deep (max ${MAX_TEMPLATE_DEPTH})`);
   if (children === "any" && !slotSeen) {
     problems.push('template needs a {"$children": true} slot in a children array, since children is "any"');
   }
-  return { problems, references };
+  return { problems, blocking: problems.some((p) => !advisory.has(p)), references };
 }
 
 /**
@@ -222,7 +248,7 @@ export async function validateDefinition(
   const properties = isObject(propsSchema) && isObject(propsSchema.properties) ? propsSchema.properties : {};
   const shape = checkTemplate(template, properties, children, catalog);
   problems.push(...shape.problems);
-  if (shape.problems.length > 0) expandable = false;
+  if (shape.blocking) expandable = false;
 
   // The definition stands in for its own name, so references back to it show up as loops.
   const candidate = {

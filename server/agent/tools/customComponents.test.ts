@@ -96,7 +96,9 @@ describe("define_component", () => {
   it("saves the template without an empty children array on a leaf and refuses a real child", async () => {
     const { registry, repo, ctx } = setup();
     const heading: TemplateNode = { component: "Heading", props: { text: "Hi" }, children: [] };
-    const definition = { ...menuItemCard, template: { component: "Stack", children: [heading] } };
+    const propsSchema = { type: "object" as const, properties: {}, additionalProperties: false as const };
+    const template = { component: "Stack", children: [heading] };
+    const definition = { ...menuItemCard, propsSchema, exampleProps: {}, template };
 
     const result = await registry.run("define_component", args(definition), ctx);
     assert.equal(result.ok, true);
