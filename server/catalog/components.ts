@@ -314,7 +314,7 @@ export const catalog: CatalogComponent[] = [
         root: {
           type: "object",
           description:
-            'The root element: { "tag", "attrs"?, "style"?, "text"?, "action"?, "children"? }, with allowlisted tags, attributes and inline style properties; no scripts, classes or event handlers. Only used inside custom component templates.',
+            'The root element: { "tag", "attrs"?, "style"?, "text"?, "action"?, "children"? }, a JSON tree, never an HTML string, with allowlisted tags, attributes and inline style properties; no scripts, classes or event handlers. Style keys are kebab-case CSS properties, such as font-weight, and go in style, not attrs. In a template, text, attribute and style values may be {"$prop": "<name>"}. Only used inside custom component templates.',
         },
       },
       required: ["root"],
