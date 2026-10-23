@@ -361,18 +361,41 @@ describe("render_ui with custom components", () => {
     assert.deepEqual(shown, [stack({ component: "Heading", props: { text: "Hi" } })]);
   });
 
-  it("refuses Markup in the agent's own tree, even when it is valid", async () => {
+  it("renders Markup in the agent's own tree", async () => {
     const { registry, ctx, shown } = await setupCustom();
-    const markup = { component: "Markup", props: { root: { tag: "p", text: "Hi" } } };
+    const markup = {
+      component: "Markup",
+      props: { root: { tag: "ul", children: [{ tag: "li", text: "A" }] } },
+    };
     const result = await registry.run("render_ui", { tree: stack(markup) }, ctx);
 
-    assert.deepEqual(result, {
-      ok: false,
-      summary: "UI has 1 problem",
-      data: {
-        errors: ["tree.children.0 Markup can only be used inside a custom component; define one with define_component"],
-      },
-    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(shown, [stack(markup)]);
+  });
+
+  it("refuses Markup in the agent's own tree that breaks the allowlist", async () => {
+    const { registry, ctx, shown } = await setupCustom();
+    const draw = (root: unknown) => registry.run("render_ui", { tree: stack({ component: "Markup", props: { root } }) }, ctx);
+
+    const script = await draw({ tag: "script", text: "x" });
+    assert.equal(script.ok, false);
+    assert.match((script.data as { errors: string[] }).errors[0], /^tree\.children\.0\.props\.root\.tag "script" is not allowed/);
+    const onclick = await draw({ tag: "p", attrs: { onclick: "x()" } });
+    assert.equal(onclick.ok, false);
+    assert.match((onclick.data as { errors: string[] }).errors[0], /onclick/);
+    assert.equal(shown.length, 0);
+  });
+
+  it("refuses Markup input, select and button at any depth in the agent's own tree", async () => {
+    const { registry, ctx, shown } = await setupCustom();
+    for (const tag of ["input", "select", "button"]) {
+      const root = { tag: "div", children: [{ tag: "p", children: [{ tag }] }] };
+      const result = await registry.run("render_ui", { tree: stack({ component: "Markup", props: { root } }) }, ctx);
+      assert.equal(result.ok, false);
+      assert.deepEqual((result.data as { errors: string[] }).errors, [
+        `tree.children.0 Markup ${tag} can't be used directly in a design; use TextInput, Checkbox, Select or Button, or put it in a custom component template`,
+      ]);
+    }
     assert.equal(shown.length, 0);
   });
 
@@ -447,7 +470,11 @@ describe("render_ui with custom components", () => {
     const many = (count: number, component: string) => stack(...Array.from({ length: count }, () => ({ component })));
 
     const tooMany = await registry.run("render_ui", { tree: many(100, "Divider") }, ctx);
-    assert.deepEqual(tooMany.data, { errors: ["tree has 101 nodes (max 100)"] });
+    assert.deepEqual(tooMany.data, {
+      errors: [
+        "tree has 101 nodes (max 100); put the repeated part in a custom component, where each use counts as one node",
+      ],
+    });
 
     const wide = await registry.run("render_ui", { tree: many(57, "SixDividers") }, ctx);
     assert.equal(wide.summary, "Rendered 400 components");
