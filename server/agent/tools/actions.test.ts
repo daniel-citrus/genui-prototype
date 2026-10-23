@@ -5,7 +5,7 @@ import { catalog } from "../../catalog/components";
 import { InMemoryComponentRepository } from "../../ports/fakes/InMemoryComponentRepository";
 import { createToolRegistry } from "../registry";
 import type { ToolContext, ToolDefinition } from "../tools";
-import { MAX_CHOICES, MAX_LISTED_ACTIONS, listActionsTool } from "./actions";
+import { AREA_FALLBACK_NOTE, MAX_CHOICES, MAX_LISTED_ACTIONS, listActionsTool } from "./actions";
 import { createAgentTools } from "./index";
 
 const ctx: ToolContext = {
@@ -151,6 +151,7 @@ describe("list_actions", () => {
       },
     ]);
     assert.ok(!("choices" in data), "no choices without listChoices");
+    assert.ok(!("note" in data), "no note on an exact match");
   });
 
   it("finds one action by area and operation", async () => {
@@ -188,8 +189,11 @@ describe("list_actions", () => {
     const result = await list({ area: "items", operation: "delete" });
     assert.equal(result.ok, true);
     assert.equal(result.summary, "Listed 4 actions (no exact match)");
-    assert.equal((result.data as { match: string }).match, "area");
-    assert.deepEqual(listedNames(result.data), [
+    const data = result.data as { match: string; note: string };
+    assert.equal(data.match, "area");
+    assert.equal(data.note, AREA_FALLBACK_NOTE);
+    assert.deepEqual(Object.keys(data).slice(0, 2), ["match", "note"], "note comes before the list");
+    assert.deepEqual(listedNames(data), [
       "menu_create_item",
       "menu_update_item",
       "menu_set_item_archived",
