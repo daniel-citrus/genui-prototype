@@ -256,7 +256,7 @@ flowchart LR
 |---|---|---|
 | `OPENAI_API_KEY` | none (the agent is off without it) | API |
 | `AGENT_MODEL` | `gpt-4.1` | API |
-| `AGENT_MAX_OUTPUT_TOKENS` | `2048` (output tokens allowed per model call) | API |
+| `AGENT_MAX_OUTPUT_TOKENS` | `4096` (output tokens allowed per model call) | API |
 | `DATABASE_URL` | `postgres://genui:genui@localhost:5432/genui` | API, catalog migrations |
 | `TRACE_DATABASE_URL` | `postgres://genui:genui@localhost:5432/genui_traces` | API, traces migrations; must name a different database than `DATABASE_URL` |
 | `AGENT_RATE_LIMIT_PER_MINUTE` | `20` (chat requests per IP per minute, and separately action requests) | API |
