@@ -71,7 +71,7 @@ describe("SYSTEM_PROMPT", () => {
     assert.ok(SYSTEM_PROMPT.includes(`\n${bullet}\n`), "prompt is missing the no-action bullet");
     assert.ok(
       SYSTEM_PROMPT.includes(
-        "If the request is unclear in a way that changes the design, ask one short question.",
+        "If the request is unclear in a way that changes the design, ask one short question in everyday words.",
       ),
     );
     assert.doesNotMatch(SYSTEM_PROMPT, /demo_echo/);
@@ -110,7 +110,7 @@ describe("SYSTEM_PROMPT", () => {
 
   it("says when to report and delete custom components", () => {
     for (const sentence of [
-      "Say in your reply when you created or updated a custom component.",
+      "Say in your reply when you saved or updated a custom component, by its name, and that it appears under Components.",
       "Use delete_component only when the person asks to delete a custom component.",
     ]) {
       assert.ok(SYSTEM_PROMPT.includes(sentence), `prompt is missing: ${sentence}`);
@@ -124,6 +124,23 @@ describe("SYSTEM_PROMPT", () => {
       "- If a tool fails for any other reason, say what you couldn't do instead of guessing. If you can no longer call tools in this turn, answer with what you have and say what is missing.";
     assert.ok(SYSTEM_PROMPT.endsWith(`\n${fix}\n${fail}`), "prompt does not end with the retry and failure rules");
     assert.ok(!SYSTEM_PROMPT.includes("If a tool fails, say what you couldn't do instead of guessing."));
+  });
+
+  it("keeps replies brief, plain and free of narration", () => {
+    const rules = [
+      "The people chatting with you are not technical: they don't know the component names, props or tools behind the app.",
+      "reply in one short sentence, two at most, about what you made and any choice the person should know about. Don't repeat the design; the person can see it.",
+      "- Keep replies short and in everyday words. Never mention tool names, component or prop names, JSON or code unless the person used them first; describe what the person sees instead (a name field, not a TextInput).",
+      "- Write nothing before or between tool calls; reply once, after your last tool call.",
+      "For anything unrelated to UI design, say in one sentence that you can only help with UI design here.",
+    ];
+    for (const sentence of rules) {
+      assert.ok(SYSTEM_PROMPT.includes(sentence), `prompt is missing: ${sentence}`);
+    }
+    const fix = SYSTEM_PROMPT.indexOf("- Problems that render_ui or define_component reports");
+    for (const sentence of rules.slice(2, 4)) {
+      assert.ok(SYSTEM_PROMPT.indexOf(sentence) < fix, `rule comes after the retry rules: ${sentence}`);
+    }
   });
 
   it("says how to read components and fill booleans", () => {
