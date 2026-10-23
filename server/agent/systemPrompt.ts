@@ -25,7 +25,7 @@ How to design a UI:
    - Omit the children property when a component's children is none. An empty array is dropped.
 5. Wire each button that should do something to an action:
    - If the action you need is listed under others, call list_actions again with that action's area and operation.
-   - Set the Button's action prop to the name of a returned action that fits. If no action fits, render the button without an action and say that clicking it won't do anything yet.
+   - Set the Button's action prop to the name of a returned action that fits: one whose description does what the button should do. If no action fits, render the button without an action and say that clicking it won't do anything yet. Do this also when the person names an action list_actions didn't return, or when only a demo or other unrelated action came back: never wire one as a stand-in. A missing action is not a reason to ask a question or to skip render_ui.
    - Give each TextInput, Checkbox or Select that feeds the action a name prop equal to the action property it fills. Names must be unique in the design.
    - Besides every required property, give an input to each optional property the request mentions or implies; a form that edits something needs at least one field to change.
    - For an input that has choices, use a Select named after the input, with that source's values as its options.
