@@ -3,7 +3,7 @@ import { MAX_MESSAGE_CHARS, type ActionResult, type ActionRunRequest, type Agent
 import { sendsInput } from "shared/formScope";
 import type { UiNode } from "shared/ui";
 import { runAction } from "./actionsClient";
-import { streamChat } from "./agentClient";
+import { forgetChat, streamChat } from "./agentClient";
 import { threadEffect, thinkingAfter } from "./chatEvents";
 import { createCustomComponentsPanel } from "./customComponentsPanel";
 import { actionValues, type FieldReading } from "./sandbox/actionValues";
@@ -29,8 +29,8 @@ const confirmButtonClass = {
   cancel: "rounded-md border border-zinc-300 bg-white px-3 py-1 text-sm font-medium text-zinc-700 hover:bg-zinc-50",
 };
 
-/** One conversation per page load; the server keeps its history. */
-const conversationId = crypto.randomUUID();
+/** One conversation per page load or New chat; the server keeps its history. */
+let conversationId = crypto.randomUUID();
 
 app.innerHTML = `
   <div class="grid h-full min-h-0 grid-cols-2 bg-zinc-50 text-zinc-900">
@@ -49,6 +49,12 @@ app.innerHTML = `
           aria-expanded="false"
         >
           Components
+        </button>
+        <button
+          type="button"
+          class="new-chat shrink-0 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 shadow-sm hover:bg-zinc-50"
+        >
+          New chat
         </button>
       </header>
       <div class="chat-body relative flex min-h-0 flex-1 flex-col">
@@ -100,6 +106,8 @@ const componentsToggle = app.querySelector<HTMLButtonElement>(".components-toggl
 componentsToggle?.addEventListener("click", () => {
   componentsToggle.setAttribute("aria-expanded", String(componentsPanel.toggle()));
 });
+
+app.querySelector(".new-chat")?.addEventListener("click", startNewChat);
 
 /** Set while a turn streams; aborting it closes the stream. */
 let activeTurn: AbortController | null = null;
@@ -284,6 +292,25 @@ async function sendTurn(message: string) {
       setStreaming(false);
     }
   }
+}
+
+/** Stops any turn, clears the thread, composer, sandbox and status area, and starts a new conversation id. */
+function startNewChat() {
+  // sendTurn's finally and its event handler both ignore a turn that is no longer active or is aborted.
+  activeTurn?.abort();
+  activeTurn = null;
+  hideThinking();
+  thread?.replaceChildren();
+  if (textarea) {
+    textarea.value = "";
+    textarea.focus();
+  }
+  if (sandbox) renderEmpty(sandbox);
+  shownUiId = null;
+  showStatus(null);
+  void forgetChat(conversationId);
+  conversationId = crypto.randomUUID();
+  setStreaming(false);
 }
 
 /** Reads every named field of the shown design. */

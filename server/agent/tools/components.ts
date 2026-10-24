@@ -1,5 +1,6 @@
 import type { Component, ComponentCategory } from "shared/components";
 import type { StoredCustomComponent } from "shared/customComponents";
+import { markupRules } from "shared/markup";
 import type { ComponentRepository } from "../../ports/ComponentRepository";
 import type { CustomComponentRepository } from "../../ports/CustomComponentRepository";
 import type { ToolDefinition } from "../tools";
@@ -106,7 +107,7 @@ export function listComponentsTool(
 }
 
 /**
- * Reads one component's props schema and example props by exact name,
+ * Reads one component's props schema and example props by exact name (Markup also returns its rules),
  * looking in the catalog first. With `customComponents`, also reads a custom
  * component that isn't deleted, with its version and template.
  */
@@ -134,7 +135,15 @@ export function getComponentTool(
         return {
           ok: true,
           summary: `Read ${component.name}`,
-          data: { name: component.name, category, description, children, propsSchema, exampleProps },
+          data: {
+            name: component.name,
+            category,
+            description,
+            children,
+            propsSchema,
+            exampleProps,
+            ...(component.name === "Markup" && { rules: markupRules() }),
+          },
         };
       }
       const catalog = await components.list();
