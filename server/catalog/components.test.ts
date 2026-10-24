@@ -22,4 +22,27 @@ describe("catalog", () => {
     assert.equal(properties.value.type, "string");
     assert.equal(properties.disabled.type, "boolean");
   });
+
+  it("scopes input names to the Card and explains the Select lock", () => {
+    for (const name of ["TextInput", "Checkbox", "Select"]) {
+      const c = catalog.find((x) => x.name === name)!;
+      const props = c.propsSchema.properties as Record<string, { description: string }>;
+      assert.ok(props.name.description.includes("Unique within its Card."), name);
+      assert.ok(!props.name.description.includes("Unique in the design"), name);
+    }
+    const card = catalog.find((c) => c.name === "Card")!;
+    assert.match(card.description, /Button sends the inputs inside its Card/);
+    const select = catalog.find((c) => c.name === "Select")!.propsSchema.properties as Record<string, { description: string }>;
+    assert.match(select.value.description, /locks a form to one existing item/);
+    assert.match(select.disabled.description, /lock the item a form edits/);
+  });
+
+  it("no longer limits Markup to templates and points to its rules", () => {
+    const markup = catalog.find((c) => c.name === "Markup")!;
+    const root = (markup.propsSchema.properties as Record<string, { description: string }>).root;
+    for (const text of [markup.description, root.description]) {
+      assert.ok(!text.includes("Only used inside custom component templates"));
+    }
+    assert.match(markup.description, /get_component/);
+  });
 });

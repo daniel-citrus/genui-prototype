@@ -87,13 +87,17 @@ describe("SYSTEM_PROMPT", () => {
   it("prefers existing components and says when to define one", () => {
     for (const sentence of [
       "in this order of preference: catalog components, then existing custom components (from list_components), then a new custom component composed of those, defined with define_component.",
-      "Only for what nothing existing can draw, define a custom component whose template uses Markup.",
+      "Use Markup, which draws a visual from a JSON tree, only when the person asks for a look the components can't produce, such as a chart, a rating or a specific style;",
+      "For a one-off, put Markup directly in the design; define a component only for something reused or repeated.",
       "read a custom component with get_component like any other.",
       "Define one with define_component when the person asks to save or reuse part of a design, or when the request needs something no existing component draws.",
       "Never define one for a single use that existing components already cover.",
     ]) {
       assert.ok(SYSTEM_PROMPT.includes(sentence), `prompt is missing: ${sentence}`);
     }
+    assert.doesNotMatch(SYSTEM_PROMPT, /nothing existing can draw/);
+    assert.doesNotMatch(SYSTEM_PROMPT, /Markup may only be used inside a template/);
+    assert.doesNotMatch(SYSTEM_PROMPT, /unique in the design/i);
     assert.doesNotMatch(SYSTEM_PROMPT, /using only catalog components/);
     assert.doesNotMatch(SYSTEM_PROMPT, /nothing in the catalog fits/);
   });
@@ -148,6 +152,19 @@ describe("SYSTEM_PROMPT", () => {
       "all in the same turn",
       "Omit the children property when a component's children is none. An empty array is dropped.",
       "Use a Checkbox for a boolean property.",
+    ]) {
+      assert.ok(SYSTEM_PROMPT.includes(sentence), `prompt is missing: ${sentence}`);
+    }
+  });
+
+  it("teaches forms in Cards, locked item Selects, large lists and $each", () => {
+    for (const sentence of [
+      "Names must be unique within their Card, so put each form in its own Card",
+      "a Button sends only the inputs in its nearest Card",
+      "A form that edits one existing item has a Select, named after the input that identifies the item, with value set to that item and disabled.",
+      "For many repeated forms, define a reusable item card component, or use one form with an item dropdown.",
+      "Markup input, select and button belong only in a component's template, never directly in a design.",
+      'use {"$each": "<prop>", "as": <node>} in a template\'s children',
     ]) {
       assert.ok(SYSTEM_PROMPT.includes(sentence), `prompt is missing: ${sentence}`);
     }
