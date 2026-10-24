@@ -56,9 +56,8 @@ export const MAX_FIELD_CHARS = 1000;
 
 /** `POST /api/actions/run` request body: a click on a Button with an action. */
 export interface ActionRunRequest {
-  conversationId: string;
-  /** The `id` of the `ui` event that drew the design. */
-  uiId: string;
+  /** The `id` of the design: from `POST /api/generate` or a `ui` event. */
+  designId: string;
   action: string;
   /** Named input values; password fields never included. */
   values: Record<string, string | boolean>;

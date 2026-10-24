@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { MAX_MESSAGE_CHARS, type AgentChatRequest, type AgentEvent } from "shared/api";
+import type { DesignStore } from "../designs";
 import type { AgentLlm } from "../ports/AgentLlm";
 import type { TraceRepository } from "../ports/TraceRepository";
 import type { ToolRegistry } from "../agent/tools";
@@ -14,6 +15,7 @@ export interface AgentRouterOptions {
   /** The model behind the agent. Without it, `/chat` reports it isn't configured. */
   llm?: AgentLlm;
   tools: ToolRegistry;
+  designs: DesignStore;
   traces: TraceRepository;
 }
 
@@ -70,6 +72,7 @@ export const agentRouter: FastifyPluginAsync<AgentRouterOptions> = async (app, o
       const run: AgentRun = {
         emit,
         conversationId,
+        designs: opts.designs,
         signal: controller.signal,
         tools: opts.tools,
         log: req.log,
@@ -90,7 +93,7 @@ export const agentRouter: FastifyPluginAsync<AgentRouterOptions> = async (app, o
     }
   });
 
-  /** Forget a conversation's history and designs, whether or not it exists. */
+  /** Forget a conversation's history, whether or not it exists. */
   app.delete<{ Params: { conversationId: string } }>(
     "/conversations/:conversationId",
     { config: { rateLimit: {} } },

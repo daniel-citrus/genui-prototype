@@ -5,7 +5,8 @@ import { MAX_MESSAGE_CHARS, type AgentEvent } from "shared/api";
 import { emptyToolRegistry } from "../agent/tools";
 import { InMemoryTraceRepository } from "../ports/fakes/InMemoryTraceRepository";
 import type { AgentLlm } from "../ports/AgentLlm";
-import { getHistory, hasConversation, rememberDesign } from "../agent/conversations";
+import { createDesignStore } from "../designs";
+import { getHistory, hasConversation } from "../agent/conversations";
 import { agentRouter } from "./agent";
 
 function buildApp(llm?: AgentLlm) {
@@ -14,6 +15,7 @@ function buildApp(llm?: AgentLlm) {
     prefix: "/api/agent",
     llm,
     tools: emptyToolRegistry,
+    designs: createDesignStore({ max: 5 }),
     traces: new InMemoryTraceRepository(),
   });
   return app;
@@ -180,7 +182,6 @@ describe("DELETE /api/agent/conversations/:conversationId", () => {
         payload: { conversationId: "route-forget", message: "hi" },
       });
     await chat();
-    rememberDesign("route-forget", "ui-1", { component: "Card", props: {} });
     assert.ok(getHistory("route-forget").length > 0);
 
     const known = await app.inject({ method: "DELETE", url: "/api/agent/conversations/route-forget" });

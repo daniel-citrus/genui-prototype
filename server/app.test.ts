@@ -29,6 +29,7 @@ describe("buildApp", () => {
     assert.equal(body.ok, true);
     assert.equal(body.db, true);
     assert.equal(typeof body.agent, "boolean");
+    assert.equal(typeof body.traces, "boolean");
     await app.close();
   });
 

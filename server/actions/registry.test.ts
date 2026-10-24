@@ -20,7 +20,7 @@ function recordingLogger(): ToolLogger & { errors: Record<string, unknown>[] } {
 
 function makeCtx(signal = new AbortController().signal) {
   const log = recordingLogger();
-  const ctx: ActionContext = { conversationId: "conv-1", signal, log };
+  const ctx: ActionContext = { designId: "design-1", signal, log };
   return { ctx, log };
 }
 
@@ -271,10 +271,10 @@ describe("createActionRegistry listChoices", () => {
 
 describe("createActionRegistry run", () => {
   it("passes valid values and the context to the handler", async () => {
-    let received: { values: unknown; conversationId: string } | undefined;
+    let received: { values: unknown; designId: string } | undefined;
     const registry = createActionRegistry([
       action({}, async (values, ctx) => {
-        received = { values, conversationId: ctx.conversationId };
+        received = { values, designId: ctx.designId };
         return { ok: true, message: "sent" };
       }),
     ]);
@@ -283,7 +283,7 @@ describe("createActionRegistry run", () => {
     const result = await registry.run("send_note", { note: "hi", urgent: true }, ctx);
 
     assert.deepEqual(result, { ok: true, message: "sent" });
-    assert.deepEqual(received, { values: { note: "hi", urgent: true }, conversationId: "conv-1" });
+    assert.deepEqual(received, { values: { note: "hi", urgent: true }, designId: "design-1" });
   });
 
   it("refuses an unknown action without calling a handler", async () => {

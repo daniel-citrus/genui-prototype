@@ -2,7 +2,9 @@ import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import { createActionRegistry } from "./actions/registry";
 import type { ActionRegistry } from "./actions/types";
 import type { ToolRegistry } from "./agent/tools";
+import { createDesignStore, type DesignStore } from "./designs";
 import type { AgentLlm } from "./ports/AgentLlm";
+import type { ComponentLlm } from "./ports/ComponentLlm";
 import type { ComponentRepository } from "./ports/ComponentRepository";
 import type { CustomComponentRepository } from "./ports/CustomComponentRepository";
 import type { TraceRepository } from "./ports/TraceRepository";
@@ -10,12 +12,22 @@ import { registerRateLimit, type ChatRateLimitOptions } from "./rateLimit";
 import { actionsRouter } from "./routes/actions";
 import { agentRouter } from "./routes/agent";
 import { customComponentsRouter } from "./routes/customComponents";
+import { generateRouter } from "./routes/generate";
 import { healthRouter } from "./routes/health";
+
+/** Designs kept for actions to look up; the oldest is dropped past this. */
+export const MAX_DESIGNS = 500;
 
 export interface AppDeps {
   /** Pino level; omit to disable logging (tests). */
   logLevel?: string;
   llm?: AgentLlm;
+  /** The model behind `POST /api/generate`; omit and it answers 503. */
+  componentLlm?: ComponentLlm;
+  /** How long a generation may take; default `GENERATE_TIMEOUT_MS`. */
+  generateTimeoutMs?: number;
+  /** Where generated and shown designs are remembered; default holds `MAX_DESIGNS`. */
+  designs?: DesignStore;
   tools: ToolRegistry;
   /** What a Button click may run; omit for none. */
   actions?: ActionRegistry;
@@ -24,7 +36,6 @@ export interface AppDeps {
   /** Number of proxy hops to trust for the client IP; default false. */
   trustProxy?: number | false;
   rateLimit: ChatRateLimitOptions;
-  /** Shared rate-limit store; closed with the app. Omit to count in memory. */
   /** Where log lines go when `logLevel` is set; default stdout. Tests capture them here. */
   logStream?: { write(line: string): void };
   /** Custom components for the Components panel; its route needs `components` too. */
@@ -81,6 +92,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   await registerRateLimit(app, deps.rateLimit);
 
+  const designs = deps.designs ?? createDesignStore({ max: MAX_DESIGNS });
+  const actions = deps.actions ?? createActionRegistry([]);
+
   app.register(healthRouter, {
     prefix: "/api/health",
     pingDb: deps.pingDb,
@@ -90,11 +104,22 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     prefix: "/api/agent",
     llm: deps.llm,
     tools: deps.tools,
+    designs,
     traces: deps.traces,
   });
   app.register(actionsRouter, {
     prefix: "/api/actions",
-    actions: deps.actions ?? createActionRegistry([]),
+    actions,
+    designs,
+  });
+  app.register(generateRouter, {
+    prefix: "/api/generate",
+    llm: deps.componentLlm,
+    components: deps.components,
+    customComponents: deps.customComponents,
+    actions,
+    designs,
+    timeoutMs: deps.generateTimeoutMs,
   });
   if (deps.customComponents && deps.components) {
     app.register(customComponentsRouter, {

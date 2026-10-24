@@ -3,7 +3,8 @@ import type { Logger } from "../log";
 
 /** What an action handler gets besides its values. */
 export interface ActionContext {
-  conversationId: string;
+  /** The design the click came from. */
+  designId: string;
   /** The request's logger. */
   log: Logger;
   /** Aborted when the request goes away; the registry also aborts it on timeout. */

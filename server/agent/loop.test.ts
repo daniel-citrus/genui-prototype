@@ -7,7 +7,8 @@ import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRep
 import { InMemoryCustomComponentRepository } from "../ports/fakes/InMemoryCustomComponentRepository";
 import type { TraceRepository } from "../ports/TraceRepository";
 import { InMemoryTraceRepository } from "../ports/fakes/InMemoryTraceRepository";
-import { getDesign, getHistory, resetConversation } from "./conversations";
+import { createDesignStore, type DesignStore } from "../designs";
+import { getHistory, resetConversation } from "./conversations";
 import { MAX_TOOL_CALLS_PER_TURN, MAX_TURN_TOKENS } from "./guardrails";
 import {
   FORGOTTEN_NOTICE,
@@ -73,6 +74,7 @@ function makeRun(
   tools: ToolRegistry,
   opts: {
     conversationId?: string;
+    designs?: DesignStore;
     signal?: AbortSignal;
     resume?: boolean;
     log?: ToolLogger;
@@ -85,6 +87,7 @@ function makeRun(
       events.push(event);
     },
     conversationId: opts.conversationId ?? "loop-test",
+    designs: opts.designs ?? createDesignStore({ max: 5 }),
     signal: opts.signal ?? new AbortController().signal,
     tools,
     log: opts.log ?? noopLogger,
@@ -180,7 +183,8 @@ describe("runAgent", () => {
     const tools = createToolRegistry(
       createAgentTools({ components: new InMemoryComponentRepository(catalog) }),
     );
-    const { run, events } = makeRun(tools, { conversationId });
+    const designs = createDesignStore({ max: 5 });
+    const { run, events } = makeRun(tools, { conversationId, designs });
     const tree = { component: "Card", props: { title: "Hi" } };
     const llm = scriptedLlm([
       {
@@ -192,7 +196,7 @@ describe("runAgent", () => {
 
     await runAgent("draw a card", conversationId, run, llm);
     const ui = events.find((e) => e.type === "ui");
-    const remembered = ui?.type === "ui" ? getDesign(conversationId, ui.id) : undefined;
+    const remembered = ui?.type === "ui" ? designs.get(ui.id) : undefined;
     resetConversation(conversationId);
 
     assert.ok(ui?.type === "ui");

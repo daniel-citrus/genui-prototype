@@ -3,7 +3,7 @@ import type { ActionResult, ActionRunRequest } from "shared/api";
 import { fillConfirm } from "../actions/confirm";
 import { MAX_ACTION_MESSAGE_CHARS } from "../actions/registry";
 import type { ActionRegistry, ActionSpec } from "../actions/types";
-import { getDesign } from "../agent/conversations";
+import type { DesignStore } from "../designs";
 import { isObject } from "../ui/bindings";
 import { checkActionRequest } from "../ui/checkAction";
 import { MAX_NODES } from "../ui/validateTree";
@@ -12,10 +12,11 @@ import { MAX_NODES } from "../ui/validateTree";
 const ACTIONS_BODY_LIMIT_BYTES = 32 * 1024;
 
 export const DESIGN_GONE_MESSAGE =
-  "This design is no longer available. Ask the agent to show it again.";
+  "This design is no longer available. Generate it again.";
 
 export interface ActionsRouterOptions {
   actions: ActionRegistry;
+  designs: DesignStore;
 }
 
 type Refusal = { status: 400 | 409; message: string };
@@ -26,9 +27,9 @@ const isNonEmptyString = (value: unknown): value is string =>
 /** A body field that isn't what `ActionRunRequest` says, or `undefined` if it fits. */
 function bodyProblem(body: unknown): string | undefined {
   if (!isObject(body)) return "Expected a JSON object body.";
-  const { conversationId, uiId, action, values, confirmed } = body;
-  if (!isNonEmptyString(conversationId) || !isNonEmptyString(uiId) || !isNonEmptyString(action)) {
-    return "conversationId, uiId and action must be non-empty strings.";
+  const { designId, action, values, confirmed } = body;
+  if (!isNonEmptyString(designId) || !isNonEmptyString(action)) {
+    return "designId and action must be non-empty strings.";
   }
   if (!isObject(values)) return "values must be an object.";
   const entries = Object.values(values);
@@ -62,7 +63,7 @@ export const actionsRouter: FastifyPluginAsync<ActionsRouterOptions> = async (ap
     if (problem) return reply.status(400).send({ error: { message: problem } });
 
     const started = performance.now();
-    const { conversationId, uiId, action, values, confirmed } = req.body as ActionRunRequest;
+    const { designId, action, values, confirmed } = req.body as ActionRunRequest;
 
     const controller = new AbortController();
     // The response closing before it was sent means the client went away.
@@ -73,7 +74,7 @@ export const actionsRouter: FastifyPluginAsync<ActionsRouterOptions> = async (ap
     let outcome: ActionResult | Refusal;
     // Set only for an action with a `confirm` question that got past the checks.
     let confirmation: "asked" | "given" | undefined;
-    const design = getDesign(conversationId, uiId);
+    const design = opts.designs.get(designId);
     if (!design) {
       outcome = { status: 409, message: DESIGN_GONE_MESSAGE };
     } else {
@@ -88,7 +89,7 @@ export const actionsRouter: FastifyPluginAsync<ActionsRouterOptions> = async (ap
       } else {
         if (spec?.confirm !== undefined) confirmation = "given";
         outcome = await opts.actions.run(action, schemaValues(spec, values), {
-          conversationId,
+          designId,
           log: req.log,
           signal: controller.signal,
         });
@@ -97,7 +98,7 @@ export const actionsRouter: FastifyPluginAsync<ActionsRouterOptions> = async (ap
 
     const ok = "status" in outcome ? false : outcome.ok;
     req.log.info(
-      { conversationId, action, ok, confirmation, durationMs: Math.round(performance.now() - started) },
+      { designId, action, ok, confirmation, durationMs: Math.round(performance.now() - started) },
       "action request",
     );
     if ("status" in outcome) {

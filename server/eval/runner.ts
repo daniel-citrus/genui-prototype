@@ -10,6 +10,7 @@ import type { AgentRun } from "../agent/run";
 import type { ToolLogger } from "../agent/tools";
 import { createAgentTools } from "../agent/tools/index";
 import type { AgentTrace } from "../agent/trace";
+import { createDesignStore } from "../designs";
 import { catalog } from "../catalog/components";
 import type { AgentLlm } from "../ports/AgentLlm";
 import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
@@ -111,6 +112,7 @@ export async function runEvalCase(
   const run: AgentRun = {
     emit: () => {},
     conversationId,
+    designs: createDesignStore({ max: 1 }),
     signal,
     tools: createEvalTools(repository),
     log: noopLogger,

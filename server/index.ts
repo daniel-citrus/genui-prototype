@@ -8,6 +8,7 @@ import { DrizzleComponentRepository } from "./adapters/db/DrizzleComponentReposi
 import { DrizzleCustomComponentRepository } from "./adapters/db/DrizzleCustomComponentRepository";
 import { runMigrations } from "./adapters/db/migrate";
 import { seedComponents } from "./adapters/db/seed";
+import { createOpenAIComponentLlm } from "./adapters/openai/OpenAIComponentLlm";
 import { createOpenAILlm } from "./adapters/openai/OpenAILlm";
 import { createInMemoryPosMenu } from "./adapters/pos/InMemoryPosMenu";
 import { createActions } from "./actions/index";
@@ -51,6 +52,14 @@ const llm = agentAvailable
     })
   : undefined;
 
+const componentLlm = agentAvailable
+  ? createOpenAIComponentLlm({
+      apiKey: config.openai.apiKey,
+      model: config.openai.model,
+      maxOutputTokens: config.openai.maxOutputTokens,
+    })
+  : undefined;
+
 // The demo café menu: in memory, reset on every start, shared by every conversation.
 const menu = createInMemoryPosMenu();
 
@@ -65,6 +74,7 @@ const tools = createToolRegistry(
 const app = await buildApp({
   logLevel: config.logLevel,
   llm,
+  componentLlm,
   tools,
   actions,
   pingDb: database.ping,

@@ -1,14 +1,16 @@
 import { randomUUID } from "node:crypto";
 import type { AgentEvent, ToolCall } from "shared/api";
+import type { DesignStore } from "../designs";
 import type { TraceRepository } from "../ports/TraceRepository";
-import { rememberDesign } from "./conversations";
 import type { ToolLogger, ToolRegistry } from "./tools";
 
 /** Everything a turn needs, wired up by the `/api/agent/chat` route. */
 export interface AgentRun {
   emit(event: AgentEvent): void;
-  /** The conversation this turn belongs to; its designs are remembered there. */
+  /** The conversation this turn belongs to. */
   conversationId: string;
+  /** Where the designs shown to the person are remembered, for the actions they run. */
+  designs: DesignStore;
   signal: AbortSignal;
   tools: ToolRegistry;
   /** The request's logger, handed to tools. */
@@ -54,7 +56,7 @@ export async function handleToolCall(
     log: run.log,
     showUi: (tree) => {
       const id = randomUUID();
-      rememberDesign(run.conversationId, id, tree);
+      run.designs.remember(id, tree);
       run.emit({ type: "ui", id, tree });
     },
   });
