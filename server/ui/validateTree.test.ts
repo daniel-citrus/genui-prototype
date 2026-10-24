@@ -655,7 +655,7 @@ describe("validateUiTree Card-scoped checks", () => {
   it("requires each button's own Card to hold the action's inputs", async () => {
     const noItem = { component: "Card", children: [nameInput, actionButton("menu_update_item")] };
     assert.deepEqual(await errors(form(itemCard(), noItem)), [
-      'tree.children.1.children.1 action "menu_update_item" needs an input named "item" in its Card, and none has that name',
+      'tree.children.1.children.1 action "menu_update_item" needs a Select named "item" in its Card, with the menu_items values as its options, and none has that name',
     ]);
   });
 
@@ -669,7 +669,26 @@ describe("validateUiTree Card-scoped checks", () => {
   it("keeps the whole-design message for a button outside every Card", async () => {
     const tree = form(nameInput, actionButton("menu_update_item"));
     assert.deepEqual(await errors(tree), [
-      'tree.children.1 action "menu_update_item" needs an input named "item", and none has that name',
+      'tree.children.1 action "menu_update_item" needs a Select named "item", with the menu_items values as its options, and none has that name',
+    ]);
+  });
+
+  it("asks for a Select when a choice input is missing, even without choiceValues", async () => {
+    const noItem = { component: "Card", children: [nameInput, actionButton("menu_update_item")] };
+    const errorsWithoutValues = async (tree: unknown) => (await check(tree, menuActions)).errors;
+    assert.deepEqual(await errorsWithoutValues(form(itemCard(), noItem)), [
+      'tree.children.1.children.1 action "menu_update_item" needs a Select named "item" in its Card, with the menu_items values as its options, and none has that name',
+    ]);
+    const tree = form(nameInput, actionButton("menu_update_item"));
+    assert.deepEqual(await errorsWithoutValues(tree), [
+      'tree.children.1 action "menu_update_item" needs a Select named "item", with the menu_items values as its options, and none has that name',
+    ]);
+  });
+
+  it("includes in its Card when sign_up is missing email inside a Card", async () => {
+    const cardSubmit = { component: "Card", children: [submit] };
+    assert.deepEqual((await check(form(cardSubmit), actions)).errors, [
+      'tree.children.0.children.0 action "sign_up" needs an input named "email" in its Card, and none has that name',
     ]);
   });
 });
