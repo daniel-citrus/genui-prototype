@@ -82,3 +82,18 @@ describe("parseTrustProxy", () => {
     assert.equal(parseTrustProxy("1"), 1);
   });
 });
+
+describe("forget conversation rate limit", () => {
+  it("answers 429 past the limit without using up chat", async () => {
+    const app = await build(2);
+    const forget = () =>
+      app.inject({ method: "DELETE", url: "/api/agent/conversations/c1", remoteAddress: "10.0.0.1" });
+    assert.equal((await forget()).statusCode, 204);
+    assert.equal((await forget()).statusCode, 204);
+    const res = await forget();
+    assert.equal(res.statusCode, 429);
+    assert.match(res.json().error.message, /^Too many messages\. Try again in \d+ seconds?\.$/);
+    assert.equal((await chat(app, "10.0.0.1")).statusCode, 400);
+    await app.close();
+  });
+});
