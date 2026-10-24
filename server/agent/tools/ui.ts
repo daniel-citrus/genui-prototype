@@ -7,7 +7,7 @@ import type { ComponentRepository } from "../../ports/ComponentRepository";
 import type { CustomComponentRepository } from "../../ports/CustomComponentRepository";
 import { collectBindings, isObject } from "../../ui/bindings";
 import { omitEmptyChildren } from "../../ui/omitEmptyChildren";
-import { limitErrors, sizeProblems, type UiTreeCheck, type UiTreeOptions, validateUiTree } from "../../ui/validateTree";
+import { limitErrors, MAX_NODES, sizeProblems, type UiTreeCheck, type UiTreeOptions, validateUiTree } from "../../ui/validateTree";
 import type { ToolContext, ToolDefinition } from "../tools";
 
 /** The dropdown sources of the inputs in `tree` that fill a property of an action some Button names. */
@@ -55,26 +55,46 @@ interface Design {
   options: UiTreeOptions;
 }
 
+const FORM_TAGS = new Set(["input", "select", "button"]);
+
+/** The form-control tags in a Markup element and its descendants, in order. */
+function markupControls(element: unknown): string[] {
+  if (!isObject(element)) return [];
+  const own = typeof element.tag === "string" && FORM_TAGS.has(element.tag) ? [element.tag] : [];
+  const children = Array.isArray(element.children) ? element.children : [];
+  return [...own, ...children.flatMap(markupControls)];
+}
+
 /**
  * Problems with the agent's own tree that expanding it would hide: Markup
- * nodes, which belong in templates, and the size limits, with a custom node
- * counting as one.
+ * form controls, which designs build from catalog components, and the size
+ * limits, with a custom node counting as one.
  */
 function ownTreeProblems(tree: unknown): string[] {
-  const markup: string[] = [];
+  const controls: string[] = [];
   const stats = { nodes: 0, depth: 0 };
   const visit = (node: unknown, path: string, level: number): void => {
     if (!isObject(node)) return;
     stats.nodes += 1;
     stats.depth = Math.max(stats.depth, level);
-    if (node.component === "Markup") {
-      markup.push(`${path} Markup can only be used inside a custom component; define one with define_component`);
+    if (node.component === "Markup" && isObject(node.props)) {
+      for (const tag of new Set(markupControls(node.props.root))) {
+        controls.push(
+          `${path} Markup ${tag} can't be used directly in a design; use TextInput, Checkbox, Select or Button, or put it in a custom component template`,
+        );
+      }
     }
     if (!Array.isArray(node.children)) return;
     node.children.forEach((child, i) => visit(child, `${path}.children.${i}`, level + 1));
   };
   visit(tree, "tree", 1);
-  return [...sizeProblems(stats), ...markup];
+  const tooMany =
+    stats.nodes > MAX_NODES
+      ? [
+          `tree has ${stats.nodes} nodes (max ${MAX_NODES}); put the repeated part in a custom component, where each use counts as one node`,
+        ]
+      : [];
+  return [...sizeProblems(stats, Infinity), ...tooMany, ...controls];
 }
 
 /**

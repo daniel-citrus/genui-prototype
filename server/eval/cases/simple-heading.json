@@ -5,6 +5,7 @@
     { "endedBy": "reply" },
     { "noError": true },
     { "toolSucceeded": "render_ui" },
-    { "uiComponent": "Heading" }
+    { "uiComponent": "Heading" },
+    { "replyMaxWords": 40 }
   ]
 }

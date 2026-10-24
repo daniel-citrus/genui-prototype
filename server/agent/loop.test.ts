@@ -58,6 +58,7 @@ function stubTools(): ToolRegistry & {
       contexts.push(ctx);
       return { ok: true, summary: `ran ${name}`, data: args };
     },
+    writes: (name) => name === "define_component",
   };
 }
 
@@ -502,6 +503,104 @@ describe("runAgent", () => {
         "You already called `list_components` with these arguments in this turn; use that result.",
       );
       assertHistoryValid(history);
+    });
+
+    describe("identical calls around a write", () => {
+      const titled = (title: Record<string, unknown>) => ({
+        name: "Titled",
+        description: "A heading from its title.",
+        category: "display",
+        children: "none",
+        props_schema: {
+          type: "object",
+          properties: { title: { type: "string", description: "Heading text.", ...title } },
+          additionalProperties: false,
+        },
+        example_props: { title: "Hi" },
+        template: { component: "Heading", props: { text: { $prop: "title" }, level: 2 } },
+      });
+      const step = (id: string, name: string, args: unknown) => ({
+        content: null,
+        toolCalls: [{ id, name, arguments: JSON.stringify(args) }],
+      });
+      const render = { tree: { component: "Titled", props: {} } };
+
+      function realTools() {
+        const customComponents = new InMemoryCustomComponentRepository();
+        const tools = createToolRegistry(
+          createAgentTools({ components: new InMemoryComponentRepository(catalog), customComponents }),
+        );
+        return { tools, customComponents };
+      }
+
+      async function play(conversationId: string, tools: ToolRegistry, turns: LlmTurn[]) {
+        const { run, events } = makeRun(tools);
+        const llm = scriptedLlm([...turns, { content: "done", toolCalls: [] }]);
+        await runAgent("go", conversationId, run, llm);
+        resetConversation(conversationId);
+        const results = events.flatMap((e) => (e.type === "tool_result" ? [e.result] : []));
+        return { results, llm };
+      }
+
+      it("runs an identical render again once the component is fixed", async () => {
+        const { tools } = realTools();
+        const { results } = await play("retry-after-fix", tools, [
+          step("d1", "define_component", titled({})),
+          step("r1", "render_ui", render),
+          step("d2", "define_component", titled({ default: "Untitled" })),
+          step("r2", "render_ui", render),
+        ]);
+
+        assert.deepEqual(
+          results.map((r) => r.ok),
+          [true, false, true, true],
+        );
+      });
+
+      it("runs an identical read again after a write, but not before", async () => {
+        const { tools } = realTools();
+        const { results } = await play("reread-after-write", tools, [
+          step("l1", "list_components", {}),
+          step("l2", "list_components", {}),
+          step("d1", "define_component", titled({})),
+          step("l3", "list_components", {}),
+        ]);
+
+        assert.deepEqual(
+          results.map((r) => r.summary),
+          [
+            `Listed ${catalog.length} components`,
+            "Already called with these arguments",
+            "Saved Titled v1",
+            `Listed ${catalog.length + 1} components`,
+          ],
+        );
+      });
+
+      it("still skips an identical failed call when nothing was written", async () => {
+        const { tools } = realTools();
+        const { results } = await play("failed-repeat", tools, [
+          step("r1", "render_ui", render),
+          step("r2", "render_ui", render),
+        ]);
+
+        assert.equal(results[0].ok, false);
+        assert.deepEqual(results[1], { ok: false, summary: "Already called with these arguments" });
+      });
+
+      it("skips a repeated successful define, even after another write", async () => {
+        const { tools, customComponents } = realTools();
+        const { results } = await play("define-twice", tools, [
+          step("d1", "define_component", titled({})),
+          step("x1", "delete_component", { name: "Missing" }),
+          step("d2", "define_component", titled({})),
+          step("l1", "list_components", {}),
+        ]);
+
+        assert.equal(results[0].summary, "Saved Titled v1");
+        assert.deepEqual(results[2], { ok: false, summary: "Already called with these arguments" });
+        assert.equal((await customComponents.getByName("Titled"))?.versions, 1);
+      });
     });
 
     it("counts repeats toward the tool-call budget", async () => {

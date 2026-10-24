@@ -95,3 +95,8 @@ export async function oneTurnAtATime(
     if (turns.get(conversationId) === settled) turns.delete(conversationId);
   }
 }
+
+/** Deletes a conversation's history and designs once any turn queued on it has ended. */
+export function forgetConversation(conversationId: string): Promise<void> {
+  return oneTurnAtATime(conversationId, async () => resetConversation(conversationId));
+}

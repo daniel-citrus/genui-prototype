@@ -5,6 +5,7 @@ import { MAX_MESSAGE_CHARS, type AgentEvent } from "shared/api";
 import { emptyToolRegistry } from "../agent/tools";
 import { InMemoryTraceRepository } from "../ports/fakes/InMemoryTraceRepository";
 import type { AgentLlm } from "../ports/AgentLlm";
+import { getHistory, hasConversation, rememberDesign } from "../agent/conversations";
 import { agentRouter } from "./agent";
 
 function buildApp(llm?: AgentLlm) {
@@ -159,5 +160,39 @@ describe("POST /api/agent/chat", () => {
       assert.equal(res.json().error.message, "Message is too long (max 4000 characters).");
       assert.equal(calls, 0);
     });
+  });
+});
+
+describe("DELETE /api/agent/conversations/:conversationId", () => {
+  it("answers 204 for known and unknown ids and forgets the conversation", async () => {
+    const seen: number[] = [];
+    const llm: AgentLlm = {
+      async complete({ messages }) {
+        seen.push(messages.length);
+        return { content: "ok", toolCalls: [] };
+      },
+    };
+    const app = buildApp(llm);
+    const chat = () =>
+      app.inject({
+        method: "POST",
+        url: "/api/agent/chat",
+        payload: { conversationId: "route-forget", message: "hi" },
+      });
+    await chat();
+    rememberDesign("route-forget", "ui-1", { component: "Card", props: {} });
+    assert.ok(getHistory("route-forget").length > 0);
+
+    const known = await app.inject({ method: "DELETE", url: "/api/agent/conversations/route-forget" });
+    assert.equal(known.statusCode, 204);
+    assert.equal(known.body, "");
+    assert.equal(hasConversation("route-forget"), false);
+
+    const unknown = await app.inject({ method: "DELETE", url: "/api/agent/conversations/route-never" });
+    assert.equal(unknown.statusCode, 204);
+
+    await chat();
+    await app.close();
+    assert.equal(seen[1], seen[0], "the next chat sends only the new message");
   });
 });

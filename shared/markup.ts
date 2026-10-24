@@ -228,6 +228,16 @@ export function isPlaceholder(value: unknown): value is Record<string, unknown> 
   return isObject(value) && "$prop" in value;
 }
 
+/** A `{ "$item": … }` object: the current item of a `$each`, or one field of it. */
+export function isItemPlaceholder(value: unknown): value is Record<string, unknown> {
+  return isObject(value) && "$item" in value;
+}
+
+/** A `{ "$each": … }` object: a children entry repeated once per item of a list prop. */
+export function isEachEntry(value: unknown): value is Record<string, unknown> {
+  return isObject(value) && "$each" in value;
+}
+
 const UNFILLED = 'is a {"$prop"} placeholder that was not filled';
 
 function attributeProblem(tag: string, name: string, value: unknown, allowed: readonly string[]): string | undefined {

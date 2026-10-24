@@ -1,7 +1,12 @@
 import type { ValidateFunction } from "ajv";
 import type { Component } from "shared/components";
-import { MAX_CUSTOM_NESTING, MAX_EXPANDED_NODES, type StoredCustomComponent } from "shared/customComponents";
-import { isPlaceholder } from "shared/markup";
+import {
+  MAX_CUSTOM_NESTING,
+  MAX_EACH_ITEMS,
+  MAX_EXPANDED_NODES,
+  type StoredCustomComponent,
+} from "shared/customComponents";
+import { isEachEntry, isItemPlaceholder, isPlaceholder } from "shared/markup";
 import type { UiNode } from "shared/ui";
 import { isObject } from "../ui/bindings";
 import { propsErrors, withPropsHint } from "../ui/validateTree";
@@ -79,13 +84,40 @@ class SlotChild {
   }
 }
 
+/** Fills a `$prop` or `$item` placeholder. */
 type PropValue = (placeholder: Record<string, unknown>) => unknown;
+
+const isFill = (value: unknown): value is Record<string, unknown> => isPlaceholder(value) || isItemPlaceholder(value);
+
+/** `value` that also fills `$item` placeholders from `item`. */
+function withItem(value: PropValue, item: unknown): PropValue {
+  return (placeholder) => {
+    if (!isItemPlaceholder(placeholder)) return value(placeholder);
+    const field = placeholder.$item;
+    if (field === true) return item;
+    return typeof field === "string" && isObject(item) && Object.hasOwn(item, field) ? item[field] : undefined;
+  };
+}
+
+/** The items a `$each` entry repeats over: none when its prop is missing. */
+function eachItems(entry: Record<string, unknown>, value: PropValue): unknown[] {
+  const items = value({ $prop: entry.$each });
+  return Array.isArray(items) ? items : [];
+}
+
+/** Every prop name a `$each` entry in `template` repeats over. */
+function eachProps(template: unknown): string[] {
+  if (Array.isArray(template)) return template.flatMap(eachProps);
+  if (!isObject(template)) return [];
+  const own = isEachEntry(template) && typeof template.$each === "string" ? [template.$each] : [];
+  return [...own, ...Object.values(template).flatMap(eachProps)];
+}
 
 /** `values` with each placeholder filled; one that fills to undefined is left out. */
 function fillValues(values: Record<string, unknown>, value: PropValue): Record<string, unknown> {
   const filled: Record<string, unknown> = {};
   for (const [key, v] of Object.entries(values)) {
-    const result = isPlaceholder(v) ? value(v) : v;
+    const result = isFill(v) ? value(v) : v;
     if (result !== undefined) filled[key] = result;
   }
   return filled;
@@ -95,14 +127,19 @@ function fillValues(values: Record<string, unknown>, value: PropValue): Record<s
 function fillMarkup(element: unknown, value: PropValue): unknown {
   if (!isObject(element)) return element;
   const filled: Record<string, unknown> = { ...element };
-  if (isPlaceholder(element.text)) {
+  if (isFill(element.text)) {
     const text = value(element.text);
     if (text === undefined) delete filled.text;
     else filled.text = text;
   }
   if (isObject(element.attrs)) filled.attrs = fillValues(element.attrs, value);
   if (isObject(element.style)) filled.style = fillValues(element.style, value);
-  if (Array.isArray(element.children)) filled.children = element.children.map((child) => fillMarkup(child, value));
+  if (Array.isArray(element.children))
+    filled.children = element.children.flatMap((child) =>
+      isEachEntry(child)
+        ? eachItems(child, value).map((item) => fillMarkup(child.as, withItem(value, item)))
+        : [fillMarkup(child, value)],
+    );
   return filled;
 }
 
@@ -113,11 +150,15 @@ function fillTemplate(node: unknown, value: PropValue, slot: SlotChild[]): unkno
   if (isObject(node.props)) {
     const props = fillValues(node.props, value);
     const { root } = node.props;
-    if (node.component === "Markup" && isObject(root) && !isPlaceholder(root)) props.root = fillMarkup(root, value);
+    if (node.component === "Markup" && isObject(root) && !isFill(root)) props.root = fillMarkup(root, value);
     filled.props = props;
   }
   if (Array.isArray(node.children)) {
-    filled.children = node.children.flatMap((child) => (isSlot(child) ? slot : [fillTemplate(child, value, slot)]));
+    filled.children = node.children.flatMap((child) => {
+      if (isSlot(child)) return slot;
+      if (!isEachEntry(child)) return [fillTemplate(child, value, slot)];
+      return eachItems(child, value).map((item) => fillTemplate(child.as, withItem(value, item), slot));
+    });
   }
   return filled;
 }
@@ -222,6 +263,17 @@ export async function expandTree(tree: unknown, ctx: ExpandContext): Promise<Exp
       const schema = Object.hasOwn(declared, prop) ? declared[prop] : undefined;
       return isObject(schema) ? schema.default : undefined;
     };
+    const tooLong = [...new Set(eachProps(custom.template))].flatMap((prop) => {
+      const items = value({ $prop: prop });
+      const count = Array.isArray(items) ? items.length : 0;
+      return count > MAX_EACH_ITEMS
+        ? [`${where}.props.${prop} has ${count} items; $each repeats at most ${MAX_EACH_ITEMS}`]
+        : [];
+    });
+    if (tooLong.length > 0) {
+      errors.push(...tooLong);
+      return undefined;
+    }
     const slot = Array.isArray(node.children)
       ? node.children.map((child, i) => new SlotChild(child, `${where}.children.${i}`, stack))
       : [];

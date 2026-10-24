@@ -12,7 +12,9 @@ export type EvalCheck =
   | { uiText: string }
   | { uiMarkupTag: string }
   | { agentComponent: string }
-  | { noButtonAction: true };
+  | { noButtonAction: true }
+  | { replyMaxWords: number }
+  | { replyExcludes: string };
 
 export interface EvalCase {
   id: string;
