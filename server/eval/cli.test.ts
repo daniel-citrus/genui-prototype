@@ -267,6 +267,19 @@ const committedCases: EvalCase[] = [
     ],
   },
   {
+    id: "per-item-edit-cards",
+    prompt:
+      "Show each menu item in its own card with a form to rename it.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolSucceeded: "render_ui" },
+      { uiComponent: "Card" },
+      { uiButtonAction: "menu_update_item" },
+      { uiNamedInput: "item" },
+    ],
+  },
+  {
     id: "plain-short-reply",
     prompt:
       "Make a welcome card with a title and a short greeting",
@@ -280,19 +293,6 @@ const committedCases: EvalCase[] = [
       { replyExcludes: "get_component" },
       { replyExcludes: "props" },
       { replyExcludes: "Stack" },
-    ],
-  },
-  {
-    id: "per-item-edit-cards",
-    prompt:
-      "Show each menu item in its own card with a form to rename it.",
-    checks: [
-      { endedBy: "reply" },
-      { noError: true },
-      { toolSucceeded: "render_ui" },
-      { uiComponent: "Card" },
-      { uiButtonAction: "menu_update_item" },
-      { uiNamedInput: "item" },
     ],
   },
   {
