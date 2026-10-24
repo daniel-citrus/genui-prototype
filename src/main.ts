@@ -1,7 +1,9 @@
 import "./style.css";
 import { MAX_MESSAGE_CHARS, type ActionResult, type ActionRunRequest, type AgentEvent } from "shared/api";
+import { sendsInput } from "shared/formScope";
+import type { UiNode } from "shared/ui";
 import { runAction } from "./actionsClient";
-import { streamChat } from "./agentClient";
+import { forgetChat, streamChat } from "./agentClient";
 import { threadEffect, thinkingAfter } from "./chatEvents";
 import { createCustomComponentsPanel } from "./customComponentsPanel";
 import { actionValues, type FieldReading } from "./sandbox/actionValues";
@@ -27,8 +29,8 @@ const confirmButtonClass = {
   cancel: "rounded-md border border-zinc-300 bg-white px-3 py-1 text-sm font-medium text-zinc-700 hover:bg-zinc-50",
 };
 
-/** One conversation per page load; the server keeps its history. */
-const conversationId = crypto.randomUUID();
+/** One conversation per page load or New chat; the server keeps its history. */
+let conversationId = crypto.randomUUID();
 
 app.innerHTML = `
   <div class="grid h-full min-h-0 grid-cols-2 bg-zinc-50 text-zinc-900">
@@ -47,6 +49,12 @@ app.innerHTML = `
           aria-expanded="false"
         >
           Components
+        </button>
+        <button
+          type="button"
+          class="new-chat shrink-0 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 shadow-sm hover:bg-zinc-50"
+        >
+          New chat
         </button>
       </header>
       <div class="chat-body relative flex min-h-0 flex-1 flex-col">
@@ -99,10 +107,13 @@ componentsToggle?.addEventListener("click", () => {
   componentsToggle.setAttribute("aria-expanded", String(componentsPanel.toggle()));
 });
 
+app.querySelector(".new-chat")?.addEventListener("click", startNewChat);
+
 /** Set while a turn streams; aborting it closes the stream. */
 let activeTurn: AbortController | null = null;
 /** The `id` of the `ui` event that drew the shown design; actions name it. */
 let shownUiId: string | null = null;
+let shownTree: UiNode | null = null;
 let actionInFlight = false;
 /** Set while the status area asks an action's confirm question. */
 let confirmShown = false;
@@ -224,6 +235,7 @@ function renderEvent(event: AgentEvent, view: TurnView) {
     if (event.type === "ui") {
       if (sandbox) renderUi(event.tree, sandbox);
       shownUiId = event.id;
+      shownTree = event.tree;
       showStatus(null);
       syncActionButtons();
     }
@@ -282,6 +294,25 @@ async function sendTurn(message: string) {
   }
 }
 
+/** Stops any turn, clears the thread, composer, sandbox and status area, and starts a new conversation id. */
+function startNewChat() {
+  // sendTurn's finally and its event handler both ignore a turn that is no longer active or is aborted.
+  activeTurn?.abort();
+  activeTurn = null;
+  hideThinking();
+  thread?.replaceChildren();
+  if (textarea) {
+    textarea.value = "";
+    textarea.focus();
+  }
+  if (sandbox) renderEmpty(sandbox);
+  shownUiId = null;
+  showStatus(null);
+  void forgetChat(conversationId);
+  conversationId = crypto.randomUUID();
+  setStreaming(false);
+}
+
 /** Reads every named field of the shown design. */
 function readFields(controls: Array<HTMLInputElement | HTMLSelectElement>): FieldReading[] {
   return controls
@@ -303,9 +334,12 @@ function isHidden(control: Element): boolean {
   );
 }
 
-async function sendAction(action: string) {
+async function sendAction(button: HTMLButtonElement, action: string) {
   if (!sandbox || !shownUiId) return;
-  const controls = [...sandbox.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select")];
+  // Only the fields the server will accept from this button: those in its nearest Card, or all without one.
+  const controls = [...sandbox.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select")].filter(
+    (control) => sendsInput(shownTree, button.dataset.path ?? "", control.dataset.path ?? ""),
+  );
   // Markup styles can put a field out of sight; the server and filterMarkup refuse the known ways.
   if (controls.some((control) => control.name && isHidden(control))) {
     showStatus({ ok: false, message: "This design has a hidden field, so the action was not sent." });
@@ -343,7 +377,7 @@ async function postAction(request: ActionRunRequest) {
 sandbox?.addEventListener("click", (e) => {
   const button = (e.target as Element).closest<HTMLButtonElement>("button[data-action]");
   if (!button?.dataset.action || button.disabled) return;
-  void sendAction(button.dataset.action);
+  void sendAction(button, button.dataset.action);
 });
 
 form?.addEventListener("submit", (e) => {
