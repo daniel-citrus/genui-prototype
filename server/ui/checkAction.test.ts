@@ -135,3 +135,50 @@ describe("checkActionRequest", () => {
     });
   });
 });
+
+describe("checkActionRequest with Cards", () => {
+  const card = () => ({
+    component: "Card",
+    children: [
+      { component: "Select", props: { label: "Item", name: "item", options: ["A", "B"] } },
+      { component: "TextInput", props: { label: "Name", name: "name" } },
+      { component: "Button", props: { label: "Save", action: "menu_update_item" } },
+    ],
+  });
+  const lone = { component: "TextInput", props: { label: "Other", name: "other" } };
+  const cards: UiNode = { component: "Stack", children: [card(), card(), lone] };
+  const msg = (values: Record<string, string | boolean>, tree: UiNode = cards) => {
+    const check = checkActionRequest(tree, "menu_update_item", values);
+    return check.ok ? "" : check.message;
+  };
+
+  it("accepts values from one Card, whichever Card", () => {
+    assert.deepEqual(checkActionRequest(cards, "menu_update_item", { item: "B", name: "x" }), { ok: true });
+  });
+
+  it("refuses a name that no scope of the action has", () => {
+    assert.equal(msg({ other: "x" }), 'This design has no input named "other" next to a "menu_update_item" button.');
+  });
+
+  it("refuses values from inputs found only in different Cards", () => {
+    const tree: UiNode = {
+      component: "Stack",
+      children: [
+        { component: "Card", children: [{ component: "TextInput", props: { label: "A", name: "a" } }, card().children[2]] },
+        { component: "Card", children: [{ component: "TextInput", props: { label: "B", name: "b" } }, card().children[2]] },
+      ],
+    };
+    assert.deepEqual(checkActionRequest(tree, "menu_update_item", { a: "1" }), { ok: true });
+    assert.equal(msg({ a: "1", b: "2" }, tree), 'This design has no input named "b" next to a "menu_update_item" button.');
+  });
+
+  it("still checks that a value fits its input", () => {
+    assert.equal(msg({ item: "Z" }), 'The value for "item" doesn\'t fit its input.');
+  });
+
+  it("keeps the old message when the button is outside every Card", () => {
+    const tree: UiNode = { component: "Stack", children: [lone, { component: "Button", props: { label: "Go", action: "menu_update_item" } }] };
+    assert.deepEqual(checkActionRequest(tree, "menu_update_item", { other: "x" }), { ok: true });
+    assert.equal(msg({ nope: "x" }, tree), 'This design has no input named "nope".');
+  });
+});

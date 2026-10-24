@@ -22,6 +22,8 @@ const CHECK_KEYS = [
   "noButtonAction",
   "definedWithKey",
   "noUiComponent",
+  "replyMaxWords",
+  "replyExcludes",
 ] as const;
 
 const ENDED_BY: ReadonlySet<string> = new Set([
@@ -78,6 +80,13 @@ function parseCheck(raw: unknown, context: string): EvalCheck {
         throw new Error(`${context}: noButtonAction must be true`);
       }
       return { noButtonAction: true };
+    case "replyMaxWords": {
+      const value = obj.replyMaxWords;
+      if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 500) {
+        throw new Error(`${context}: replyMaxWords must be an integer from 1 to 500`);
+      }
+      return { replyMaxWords: value };
+    }
     case "toolCalled":
     case "toolNotCalled":
     case "toolSucceeded":
@@ -88,7 +97,8 @@ function parseCheck(raw: unknown, context: string): EvalCheck {
     case "uiMarkupTag":
     case "agentComponent":
     case "definedWithKey":
-    case "noUiComponent": {
+    case "noUiComponent":
+    case "replyExcludes": {
       const value = obj[key];
       if (typeof value !== "string" || value.length === 0) {
         throw new Error(`${context}: ${key} must be a non-empty string`);

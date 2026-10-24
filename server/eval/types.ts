@@ -15,7 +15,9 @@ export type EvalCheck =
   | { agentComponent: string }
   | { noButtonAction: true }
   | { definedWithKey: string }
-  | { noUiComponent: string };
+  | { noUiComponent: string }
+  | { replyMaxWords: number }
+  | { replyExcludes: string };
 
 export interface EvalCase {
   id: string;

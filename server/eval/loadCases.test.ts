@@ -180,6 +180,32 @@ describe("loadCases", () => {
     assert.throws(() => loadCases(dir), /exactly one key/);
   });
 
+  it("loads replyMaxWords and replyExcludes", () => {
+    const dir = caseDir();
+    writeCase(dir, "a.json", {
+      id: "ok",
+      prompt: "hi",
+      checks: [{ replyMaxWords: 500 }, { replyMaxWords: 1 }, { replyExcludes: "Stack" }],
+    });
+    assert.deepEqual(loadCases(dir)[0]!.checks, [
+      { replyMaxWords: 500 },
+      { replyMaxWords: 1 },
+      { replyExcludes: "Stack" },
+    ]);
+  });
+
+  it("refuses bad replyMaxWords and replyExcludes values", () => {
+    const dir = caseDir();
+    for (const value of [0, 501, 1.5, "40"]) {
+      writeCase(dir, "bad.json", { id: "ok", prompt: "hi", checks: [{ replyMaxWords: value }] });
+      assert.throws(() => loadCases(dir), /bad\.json.*replyMaxWords must be an integer from 1 to 500/);
+    }
+    for (const value of ["", 5]) {
+      writeCase(dir, "bad.json", { id: "ok", prompt: "hi", checks: [{ replyExcludes: value }] });
+      assert.throws(() => loadCases(dir), /bad\.json.*replyExcludes must be a non-empty string/);
+    }
+  });
+
   it("refuses extra case field", () => {
     const dir = caseDir();
     writeCase(dir, "bad.json", {

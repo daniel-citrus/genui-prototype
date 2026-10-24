@@ -6,6 +6,7 @@
     { "noError": true },
     { "toolNotCalled": "list_components" },
     { "toolNotCalled": "list_actions" },
-    { "toolNotCalled": "render_ui" }
+    { "toolNotCalled": "render_ui" },
+    { "replyMaxWords": 40 }
   ]
 }
