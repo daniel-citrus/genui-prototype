@@ -75,7 +75,6 @@ flowchart LR
   OpenAI["OpenAI<br/>Chat Completions"]
   DB[("Postgres genui<br/>components,<br/>custom_components,<br/>custom_component_versions")]
   TracesDB[("Postgres genui_traces<br/>agent_traces")]
-  Redis[("Redis<br/>optional, rate-limit counters")]
 
   Client -- "POST /api/agent/chat<br/>POST /api/actions/run<br/>/api/custom-components" --> Edge
   Edge -- "proxies /api" --> Routes
@@ -83,7 +82,6 @@ flowchart LR
   OpenAIAdapter -- "streaming HTTPS" --> OpenAI
   DbAdapter --> DB
   TracesAdapter --> TracesDB
-  Limits -. "optional" .-> Redis
   Routes -. "health check" .-> DB
   Routes -. "health check" .-> TracesDB
 
@@ -139,7 +137,7 @@ flowchart LR
 
 | Part | Role |
 |---|---|
-| **Routes** ([server/routes/](../server/routes/)) | `GET /api/health` returns `{ ok, db, agent, redis, traces }`: whether the catalog Postgres answers, whether an OpenAI key is set, whether Redis answers (`null` when `REDIS_URL` is not set), and whether the traces Postgres answers (`traces` is `false` when the ping is omitted, fails, or throws). `POST /api/agent/chat` runs one agent turn and streams it back as SSE. `DELETE /api/agent/conversations/:conversationId` forgets a conversation's history and designs (after any turn queued on it ends) and answers 204 whether or not it existed; saved traces stay. `POST /api/actions/run` runs the action a sandbox button click names, with no model call (below). `/api/custom-components` serves the Components panel (below): list every custom component, read one with a preview, soft-delete, restore and revert to an earlier version |
+| **Routes** ([server/routes/](../server/routes/)) | `GET /api/health` returns `{ ok, db, agent, traces }`: whether the catalog Postgres answers, whether an OpenAI key is set, and whether the traces Postgres answers (`traces` is `false` when the ping is omitted, fails, or throws). `POST /api/agent/chat` runs one agent turn and streams it back as SSE. `DELETE /api/agent/conversations/:conversationId` forgets a conversation's history and designs (after any turn queued on it ends) and answers 204 whether or not it existed; saved traces stay. `POST /api/actions/run` runs the action a sandbox button click names, with no model call (below). `/api/custom-components` serves the Components panel (below): list every custom component, read one with a preview, soft-delete, restore and revert to an earlier version |
 | **Agent** ([server/agent/](../server/agent/)) | The tool-use loop (§4), the in-memory conversation store (history and remembered designs only), the tool registry, and the agent's tools (`tools/`): `list_components` lists the catalog by name, category, description and children, then up to 40 custom components (`custom: true`, optional `search` on name or description); `get_component` returns one catalog or custom component's props schema and example props (`Markup` also returns `rules`: the allowlisted tags, attributes, style properties, display values, input types and functions, the forbidden value parts, boolean attributes, tags without text, the limits, notes on `$prop`, `$each` and `$item`, and a valid example, all built from the constants `sanitizeMarkup` uses; a custom one also returns its `version` and `template`); `list_actions` finds registered actions by area and operation (below); `define_component` checks a definition and saves the next version; `delete_component` soft-deletes one; `render_ui` expands custom components, then checks the expanded tree against the catalog, the registered actions and the current dropdown values and, if valid, sends only that expanded tree to the browser as a `ui` event (§4) |
 | **Custom components** ([server/customComponents/](../server/customComponents/)) | `definition.ts`: `validateDefinition` checks a definition's shape, template, Markup and action names before save. `expand.ts`: `expandTree` substitutes custom components for their current version's template (with instance props and a `{$children: true}` slot), repeats a `{$each: <array prop>, as}` entry once per item (at most 100; `{$item}` inside `as` is the item or one of its fields, allowed in a children array of a template node or Markup element, one level only), reports deleted components, loops and nesting limits, and rewrites validator paths so errors name the custom component and version (§4) |
 | **Custom components route** ([server/routes/customComponents.ts](../server/routes/customComponents.ts)) | `GET /api/custom-components` lists every component (deleted included), up to 500. `GET /api/custom-components/:name` returns the current version, every version's metadata, and a preview (`preview` is the expanded example tree, or `previewErrors` lists why it wouldn't expand). `DELETE /api/custom-components/:name` soft-deletes; `POST .../restore` undoes that; `POST .../revert` with `{ version }` saves a copy of that version as the new current one. Names must match `^[A-Z][A-Za-z0-9]*$`. A repository failure answers 503 with a fixed message; refusals (limit, deleted, and the like) use 404 or 409 with the repository's message |
@@ -157,7 +155,7 @@ flowchart LR
 - **Message length (chat):** `MAX_MESSAGE_CHARS` (4000, in [shared/api.ts](../shared/api.ts)) is both the chat textarea's `maxlength` and the route's check; a longer message gets a 400 ("Message is too long (max 4000 characters)."). Malformed JSON gets a 400 on both routes.
 - **Body size:** a 32 KB `bodyLimit` on each chat and action route; a larger body gets a 413. Custom component routes allow 1 KB (enough for `{ "version": n }` on revert).
 - **Rate limit:** `@fastify/rate-limit` allows `AGENT_RATE_LIMIT_PER_MINUTE` requests per client IP per minute on each route (fixed window; IPv6 addresses are grouped by /64). The two routes share the limiter and its settings but are counted separately, so clicking actions does not use up chat requests. Past it the route answers 429 with a `Retry-After` header and "Too many messages. Try again in N seconds." It runs before the body is read.
-- **Store:** counters are in memory by default. With `REDIS_URL` set they live in Redis (`ioredis`, keys prefixed `genui-rate-limit:`), so several API instances share them. The limiter fails open: while Redis is not connected or is down, requests pass, with one warning logged per outage.
+- **Store:** counters live in process memory, so each API instance counts on its own.
 - **Trust proxy:** the client IP comes from the socket unless `TRUST_PROXY` (number of proxy hops) is set, in which case Fastify reads `X-Forwarded-For`. nginx sets that header and the production `api` uses `TRUST_PROXY=1`, which is safe only because the API's port is not published. Where clients can reach the API directly, leave it off: they could spoof the header and dodge the limit.
 
 **`list_actions`.** It takes two required arguments, each from a fixed list built from the registered actions when the tools are created: `area` (every action's area, `other` for those without one, plus `any`) and `operation` (the operations in use, plus `any`). It returns, as `actions`, up to 10 actions that fit both, in full: name, description, `input_schema`, area, operation, and their `confirm` question and `choices` (input → source) when they have them. When none fit both, it returns the area's actions instead and says so (`match: "area"` rather than `"exact"`), with a fixed `note` (`AREA_FALLBACK_NOTE`, placed before the lists) telling the model to use one only if its description does what the button should do and otherwise to render the button without an action. Every other action gets one line in `others` (name, area, operation, and the description cut to 120 characters), so a wrong guess never hides an action. `choices` holds the first 50 current values of each source the returned actions name (with `truncated` when there are more); a source that fails to load is logged and listed empty with an error.
@@ -243,13 +241,12 @@ flowchart LR
   User["Browser"] -- ":8080" --> Web["web<br/>nginx + built app"]
   Web -- "/api, unbuffered" --> Api["api<br/>Node, bundled server"]
   Api --> Db[("db<br/>Postgres 17")]
-  Api -. "rate-limit counters (optional)" .-> Redis[("redis<br/>Redis 8, no persistence")]
   Api -- "HTTPS" --> OpenAI["OpenAI"]
 ```
 
 - **Images:** the web image builds the app and serves it with nginx. The API image bundles the server with esbuild and ships only production dependencies and the migrations.
 - **SSE through nginx:** buffering is off for `/api/` and reads time out after 300 seconds, so events reach the browser as they are written.
-- **Ports:** `web` (8080), `db` (5432) and `redis` (6379) are published; the API is reached through nginx and uses `redis` in production. If a host port is taken, remap it in an uncommitted `docker-compose.override.yml`.
+- **Ports:** `web` (8080) and `db` (5432) are published; the API is reached through nginx. If a host port is taken, remap it in an uncommitted `docker-compose.override.yml`.
 
 ## 7. Configuration
 
@@ -262,7 +259,6 @@ flowchart LR
 | `TRACE_DATABASE_URL` | `postgres://genui:genui@localhost:5432/genui_traces` | API, traces migrations; must name a different database than `DATABASE_URL` |
 | `AGENT_RATE_LIMIT_PER_MINUTE` | `20` (chat requests per IP per minute, and separately action requests) | API |
 | `TRUST_PROXY` | off (number of proxy hops to trust; `1` in the production `api`) | API |
-| `REDIS_URL` | none (rate-limit counters stay in memory) | API |
 | `API_PORT` / `API_HOST` | `3001` / `127.0.0.1` (`0.0.0.0` in containers) | API |
 | `LOG_LEVEL` | `info` | API |
 | `API_PROXY_TARGET` | `http://localhost:3001` | Vite dev server |
@@ -314,14 +310,14 @@ Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, `pg`, an
 | `npm run eval` | Runs every committed eval case through the live agent (OpenAI, same model and system prompt as chat); writes one JSON file per case under a gitignored `eval-logs` directory (prompt, checks, result, and full turn trace) and prints one result line per case plus the log directory path; add `-- --repeat N` (1 to 10) to run each case N times, with `<id>.<k>.json` logs, `[k/N]` result lines, and a `rate <id> <passes>/<N>` line per case (a plain run is unchanged); needs `OPENAI_API_KEY`, does not write `genui_traces`, and is not run in CI |
 
 - **Tests** use a fake model, so they need no OpenAI key. Catalog database tests run only when `DATABASE_URL` is set; traces database tests run only when `TRACE_DATABASE_URL` is set. They share one database each, so `npm test` runs test files one at a time.
-- **CI** ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs on every pull request and on pushes to `main`: it starts Postgres (creating database `genui_traces` on the same instance) and Redis (so the Redis store tests run), sets `TRACE_DATABASE_URL`, runs catalog and traces migrations, then install, typecheck, tests (including the database tests), and both builds on Node 24. It does not run `npm run eval`. `main` accepts changes only through pull requests that pass it.
+- **CI** ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs on every pull request and on pushes to `main`: it starts Postgres (creating database `genui_traces` on the same instance), sets `TRACE_DATABASE_URL`, runs catalog and traces migrations, then install, typecheck, tests (including the database tests), and both builds on Node 24. It does not run `npm run eval`. `main` accepts changes only through pull requests that pass it.
 
 ## 10. Current limits and what's next
 
 **Today**
 
 - Each turn is capped at 10 model calls, 20 tool calls and 150,000 tokens.
-- Messages are capped at 4000 characters and request bodies at 32 KB, and the chat and action routes each allow 20 requests per IP per minute by default (§3). The rate limit is per IP, not per user, and it is in memory unless Redis is configured.
+- Messages are capped at 4000 characters and request bodies at 32 KB, and the chat and action routes each allow 20 requests per IP per minute by default (§3). The rate limit is per IP, not per user,; it is in memory.
 - The agent can look up catalog and custom components and render UI trees (`render_ui`), and the sandbox draws the latest expanded tree. A Button or Markup `button` in it can run a registered backend action with the values of the design's named inputs (§2, §3); clicks and typed values never reach the agent. The agent can define and delete custom components with `define_component` and `delete_component`; the Components panel lists them, previews each version, and can delete, restore or revert, but not edit definitions.
 - Custom components are global: at most 200 active, 500 including deleted, and 20 versions per name; a definition's name, description (300 characters), serialized size (8,000 characters), template (40 nodes, 6 levels, three levels of custom nesting), and each Markup root (200 elements, 12 levels) are capped, and an expanded design is capped at 400 nodes and 24 levels (§4, §5).
 - The registered actions are `demo_echo`, which has no side effects, and the fourteen menu actions. Menu actions change only the in-memory demo menu (§5): nothing reaches a real POS, and every change is gone when the API restarts. The agent finds actions with `list_actions` by area and operation, and the three deletes ask in the sandbox before they run.
