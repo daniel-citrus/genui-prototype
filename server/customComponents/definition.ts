@@ -10,7 +10,7 @@ import {
   type CustomComponentDefinition,
   type StoredCustomComponent,
 } from "shared/customComponents";
-import { isPlaceholder } from "shared/markup";
+import { isEachEntry, isItemPlaceholder, isPlaceholder } from "shared/markup";
 import type { ActionSpec } from "../actions/types";
 import { propsSchemaProblems } from "../catalog/validate";
 import { isObject } from "../ui/bindings";
@@ -55,6 +55,7 @@ function checkTemplate(
   declared: Record<string, unknown>,
   children: unknown,
   catalog: Set<string>,
+  exampleProps: unknown,
 ): TemplateCheck {
   const problems: string[] = [];
   const references: TemplateCheck["references"] = [];
@@ -64,8 +65,23 @@ function checkTemplate(
   let slotSeen = false;
   let nodes = 0;
   let depth = 0;
+  // The `as` of the $each entry being checked: the declared items schema of its prop.
+  let inEach: { items: unknown } | undefined;
 
-  const placeholder = (value: Record<string, unknown>, path: string) => {
+  const isList = (prop: unknown): prop is string =>
+    typeof prop === "string" &&
+    Object.hasOwn(declared, prop) &&
+    isObject(declared[prop]) &&
+    declared[prop].type === "array";
+
+  const repeatHint = (prop: unknown, path: string) => {
+    if (isList(prop))
+      problems.push(
+        `${path} ${prop} is a list; to repeat over it use {"$each": "${prop}", "as": …} in a children array`,
+      );
+  };
+
+  const placeholder = (value: Record<string, unknown>, path: string, markupValue = false) => {
     const prop = value.$prop;
     if (Object.keys(value).length !== 1 || typeof prop !== "string") {
       problems.push(`${path} must be exactly {"$prop": "<name>"}`);
@@ -73,6 +89,24 @@ function checkTemplate(
       problems.push(`${path} uses $prop "${prop}", which propsSchema.properties doesn't declare`);
     } else {
       used.add(prop);
+      if (markupValue) repeatHint(prop, path);
+    }
+  };
+
+  const item = (value: Record<string, unknown>, path: string) => {
+    const field = value.$item;
+    if (Object.keys(value).length !== 1 || (field !== true && typeof field !== "string")) {
+      problems.push(`${path} must be exactly {"$item": true} or {"$item": "<field>"}`);
+    } else if (!inEach) {
+      problems.push(`${path} {"$item"} is only allowed inside the "as" of a {"$each"} entry`);
+    } else if (typeof field === "string") {
+      const schema = isObject(inEach.items) ? inEach.items : {};
+      const fields = isObject(schema.properties) ? schema.properties : undefined;
+      if (!fields && schema.type !== undefined && schema.type !== "object") {
+        problems.push(`${path} uses $item field "${field}", but the items are not objects`);
+      } else if (fields && !Object.hasOwn(fields, field)) {
+        problems.push(`${path} uses $item field "${field}", which the items schema doesn't declare`);
+      }
     }
   };
 
@@ -81,6 +115,16 @@ function checkTemplate(
     if (isPlaceholder(value)) {
       problems.push(
         `${path} {"$prop"} is only allowed as a whole prop value or a Markup text, attribute or style value`,
+      );
+    } else if (isItemPlaceholder(value)) {
+      problems.push(
+        `${path} {"$item"} is only allowed as a whole prop value or a Markup text, attribute or style value, inside the "as" of a {"$each"} entry`,
+      );
+    } else if (isEachEntry(value)) {
+      problems.push(
+        inEach
+          ? `${path} {"$each"} can't be nested inside another {"$each"}`
+          : `${path} {"$each"} is only allowed in a children array`,
       );
     } else if (isSlot(value)) {
       slotSeen = true;
@@ -102,24 +146,78 @@ function checkTemplate(
     }
   };
 
-  const fillable = (value: unknown, path: string) =>
-    isPlaceholder(value) ? placeholder(value, path) : misplaced(value, path);
+  const fillable = (value: unknown, path: string, markupValue = false) => {
+    if (isPlaceholder(value)) placeholder(value, path, markupValue);
+    else if (isItemPlaceholder(value)) item(value, path);
+    else misplaced(value, path);
+  };
 
   const markup = (element: unknown, path: string): void => {
-    if (!isObject(element) || isPlaceholder(element) || isSlot(element)) return misplaced(element, path);
+    if (
+      !isObject(element) ||
+      isPlaceholder(element) ||
+      isItemPlaceholder(element) ||
+      isSlot(element) ||
+      isEachEntry(element)
+    ) {
+      return misplaced(element, path);
+    }
     for (const [key, value] of Object.entries(element)) {
       const at = `${path}.${key}`;
-      if (key === "text") fillable(value, at);
+      if (key === "text") fillable(value, at, true);
       else if ((key === "attrs" || key === "style") && isObject(value)) {
-        for (const [name, v] of Object.entries(value)) fillable(v, `${at}.${name}`);
-      } else if (key === "children" && Array.isArray(value)) value.forEach((child, i) => markup(child, `${at}.${i}`));
-      else misplaced(value, at);
+        for (const [name, v] of Object.entries(value)) fillable(v, `${at}.${name}`, true);
+      } else if (key === "children" && Array.isArray(value)) {
+        value.forEach((child, i) => (isEachEntry(child) ? each(child, `${at}.${i}`, 0) : markup(child, `${at}.${i}`)));
+      } else {
+        misplaced(value, at);
+        if (key === "children") repeatHint(isPlaceholder(value) ? value.$prop : undefined, at);
+      }
+    }
+  };
+
+  // A {"$each": "<prop>", "as": …} children entry; `level` is the template depth of `as`, 0 for Markup.
+  const each = (entry: Record<string, unknown>, path: string, level: number): void => {
+    for (const key of Object.keys(entry))
+      if (key !== "$each" && key !== "as") problems.push(`${path}.${key} is not allowed (use $each, as)`);
+    if (inEach) {
+      problems.push(`${path} {"$each"} can't be nested inside another {"$each"}`);
+      return;
+    }
+    const prop = entry.$each;
+    let valid = false;
+    if (typeof prop !== "string") {
+      problems.push(`${path}.$each must be the name of an array prop`);
+    } else if (!Object.hasOwn(declared, prop)) {
+      problems.push(`${path}.$each uses prop "${prop}", which propsSchema.properties doesn't declare`);
+    } else if (!isList(prop)) {
+      problems.push(`${path}.$each uses prop "${prop}", whose schema type isn't "array"`);
+    } else {
+      used.add(prop);
+      valid = true;
+      const given = isObject(exampleProps) ? exampleProps[prop] : undefined;
+      if (!Array.isArray(given) || given.length === 0) {
+        problems.push(`exampleProps.${prop} needs at least one item, so the repeated part can be checked`);
+      }
+    }
+    const as = entry.as;
+    if (as === undefined) problems.push(`${path}.as is required`);
+    else if (isSlot(as)) problems.push(`${path}.as can't be a {"$children": true} slot`);
+    else {
+      const schema =
+        valid && isObject(declared[prop as string]) ? (declared[prop as string] as Record<string, unknown>) : {};
+      inEach = { items: schema.items };
+      if (level === 0) markup(as, `${path}.as`);
+      else node(as, `${path}.as`, level);
+      inEach = undefined;
     }
   };
 
   const slot = (value: Record<string, unknown>, path: string) => {
     slotSeen = true;
-    if (Object.keys(value).length !== 1 || value.$children !== true) {
+    if (inEach) {
+      problems.push(`${path} {"$children": true} is not allowed inside the "as" of a {"$each"} entry`);
+    } else if (Object.keys(value).length !== 1 || value.$children !== true) {
       problems.push(`${path} must be exactly {"$children": true}`);
     } else if (children === "none") {
       problems.push(`${path} {"$children": true} is not allowed when children is "none"`);
@@ -148,17 +246,21 @@ function checkTemplate(
       else {
         for (const [key, prop] of Object.entries(value.props)) {
           const at = `${path}.props.${key}`;
-          if (component === "Markup" && key === "root" && !isPlaceholder(prop)) markup(prop, at);
+          if (component === "Markup" && key === "root" && !isPlaceholder(prop) && !isItemPlaceholder(prop))
+            markup(prop, at);
           else fillable(prop, at);
         }
       }
     }
     if (value.children !== undefined) {
-      if (!Array.isArray(value.children)) problems.push(`${path}.children must be an array`);
-      else {
+      if (!Array.isArray(value.children)) {
+        problems.push(`${path}.children must be an array`);
+        if (isPlaceholder(value.children)) repeatHint(value.children.$prop, `${path}.children`);
+      } else {
         value.children.forEach((child, i) => {
           const at = `${path}.children.${i}`;
           if (isSlot(child)) slot(child, at);
+          else if (isEachEntry(child)) each(child, at, level + 1);
           else node(child, at, level + 1);
         });
       }
@@ -246,7 +348,7 @@ export async function validateDefinition(
 
   const catalog = new Set(ctx.catalog.map((c) => c.name));
   const properties = isObject(propsSchema) && isObject(propsSchema.properties) ? propsSchema.properties : {};
-  const shape = checkTemplate(template, properties, children, catalog);
+  const shape = checkTemplate(template, properties, children, catalog, exampleProps);
   problems.push(...shape.problems);
   if (shape.blocking) expandable = false;
 

@@ -1,0 +1,10 @@
+{
+  "id": "reusable-name-list",
+  "prompt": "Make a list I can reuse for any set of names, then show it with Ana, Bo and Cy.",
+  "checks": [
+    { "toolSucceeded": "define_component" },
+    { "definedWithKey": "$each" },
+    { "toolSucceeded": "render_ui" },
+    { "uiText": "Cy" }
+  ]
+}

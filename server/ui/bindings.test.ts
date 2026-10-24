@@ -22,14 +22,14 @@ describe("collectBindings", () => {
     };
     assert.deepEqual(collectBindings(tree), {
       inputs: [
-        { path: "tree.children.0", component: "TextInput", name: "email", type: "text" },
-        { path: "tree.children.1", component: "TextInput", name: "code", type: "password" },
-        { path: "tree.children.2.children.0", component: "Select", name: "plan", options: ["Free", "Pro"] },
-        { path: "tree.children.2.children.1", component: "Checkbox", name: "updates" },
+        { path: "tree.children.0", component: "TextInput", name: "email", type: "text", card: "tree" },
+        { path: "tree.children.1", component: "TextInput", name: "code", type: "password", card: "tree" },
+        { path: "tree.children.2.children.0", component: "Select", name: "plan", options: ["Free", "Pro"], card: "tree" },
+        { path: "tree.children.2.children.1", component: "Checkbox", name: "updates", card: "tree" },
       ],
       buttons: [
-        { path: "tree.children.2.children.2", action: "sign_up", disabled: false },
-        { path: "tree.children.2.children.3", action: "sign_up", disabled: true },
+        { path: "tree.children.2.children.2", action: "sign_up", disabled: false, card: "tree" },
+        { path: "tree.children.2.children.3", action: "sign_up", disabled: true, card: "tree" },
       ],
     });
   });
@@ -71,14 +71,14 @@ describe("collectBindings", () => {
     assert.deepEqual(collectBindings(tree), {
       inputs: [
         { path: "tree.children.0", component: "TextInput", name: "email", type: "text" },
-        { path: `${at}.0.children.0`, component: "TextInput", name: "qty", type: "number", markup: true },
-        { path: `${at}.1`, component: "TextInput", name: "note", type: "text", markup: true },
-        { path: `${at}.2`, component: "Checkbox", name: "gift", markup: true },
-        { path: `${at}.3`, component: "Select", name: "size", options: ["s", "Large", "3"], markup: true },
+        { path: `${at}.0.children.0`, component: "TextInput", name: "qty", type: "number", markup: true, card: "tree.children.1" },
+        { path: `${at}.1`, component: "TextInput", name: "note", type: "text", markup: true, card: "tree.children.1" },
+        { path: `${at}.2`, component: "Checkbox", name: "gift", markup: true, card: "tree.children.1" },
+        { path: `${at}.3`, component: "Select", name: "size", options: ["s", "Large", "3"], markup: true, card: "tree.children.1" },
       ],
       buttons: [
-        { path: `${at}.4`, action: "order", disabled: false, markup: true },
-        { path: `${at}.5`, action: "cancel", disabled: true, markup: true },
+        { path: `${at}.4`, action: "order", disabled: false, markup: true, card: "tree.children.1" },
+        { path: `${at}.5`, action: "cancel", disabled: true, markup: true, card: "tree.children.1" },
         { path: "tree.children.2", action: "go", disabled: false },
       ],
     });

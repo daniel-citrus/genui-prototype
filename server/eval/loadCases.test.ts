@@ -36,6 +36,12 @@ describe("loadCases", () => {
     );
   });
 
+  it("accepts endedBy unresolved", () => {
+    const dir = caseDir();
+    writeCase(dir, "u.json", { id: "u", prompt: "p", checks: [{ endedBy: "unresolved" }] });
+    assert.equal(loadCases(dir).length, 1);
+  });
+
   it("refuses invalid JSON", () => {
     const dir = caseDir();
     writeFileSync(join(dir, "bad.json"), "{ not json", "utf8");
@@ -180,6 +186,32 @@ describe("loadCases", () => {
     assert.throws(() => loadCases(dir), /exactly one key/);
   });
 
+  it("loads replyMaxWords and replyExcludes", () => {
+    const dir = caseDir();
+    writeCase(dir, "a.json", {
+      id: "ok",
+      prompt: "hi",
+      checks: [{ replyMaxWords: 500 }, { replyMaxWords: 1 }, { replyExcludes: "Stack" }],
+    });
+    assert.deepEqual(loadCases(dir)[0]!.checks, [
+      { replyMaxWords: 500 },
+      { replyMaxWords: 1 },
+      { replyExcludes: "Stack" },
+    ]);
+  });
+
+  it("refuses bad replyMaxWords and replyExcludes values", () => {
+    const dir = caseDir();
+    for (const value of [0, 501, 1.5, "40"]) {
+      writeCase(dir, "bad.json", { id: "ok", prompt: "hi", checks: [{ replyMaxWords: value }] });
+      assert.throws(() => loadCases(dir), /bad\.json.*replyMaxWords must be an integer from 1 to 500/);
+    }
+    for (const value of ["", 5]) {
+      writeCase(dir, "bad.json", { id: "ok", prompt: "hi", checks: [{ replyExcludes: value }] });
+      assert.throws(() => loadCases(dir), /bad\.json.*replyExcludes must be a non-empty string/);
+    }
+  });
+
   it("refuses extra case field", () => {
     const dir = caseDir();
     writeCase(dir, "bad.json", {
@@ -227,5 +259,30 @@ describe("loadCases", () => {
     assert.throws(() => loadCases(dir), /uiText must be a non-empty string/);
     writeCase(dir, "ok.json", { id: "ok", prompt: "hi", checks: [{ uiMarkupTag: 3 }] });
     assert.throws(() => loadCases(dir), /uiMarkupTag must be a non-empty string/);
+  });
+
+  it("loads definedWithKey, noUiComponent and customComponents, and refuses bad values", () => {
+    const dir = caseDir();
+    const seed = { name: "Seeded" };
+    writeCase(dir, "ok.json", {
+      id: "ok",
+      prompt: "hi",
+      checks: [{ definedWithKey: "$each" }, { noUiComponent: "Markup" }],
+      customComponents: [seed],
+    });
+    const [loaded] = loadCases(dir);
+    assert.deepEqual(loaded!.checks, [{ definedWithKey: "$each" }, { noUiComponent: "Markup" }]);
+    assert.deepEqual(loaded!.customComponents, [seed]);
+    writeCase(dir, "ok.json", { id: "ok", prompt: "hi", checks: [{ definedWithKey: 3 }] });
+    assert.throws(() => loadCases(dir), /definedWithKey must be a non-empty string/);
+    writeCase(dir, "ok.json", { id: "ok", prompt: "hi", checks: [{ noUiComponent: 3 }] });
+    assert.throws(() => loadCases(dir), /noUiComponent must be a non-empty string/);
+    writeCase(dir, "ok.json", {
+      id: "ok",
+      prompt: "hi",
+      checks: [{ noError: true }],
+      customComponents: {},
+    });
+    assert.throws(() => loadCases(dir), /customComponents must be an array/);
   });
 });

@@ -9,7 +9,14 @@ import type { TraceRepository } from "../ports/TraceRepository";
 import { InMemoryTraceRepository } from "../ports/fakes/InMemoryTraceRepository";
 import { getDesign, getHistory, resetConversation } from "./conversations";
 import { MAX_TOOL_CALLS_PER_TURN, MAX_TURN_TOKENS } from "./guardrails";
-import { FORGOTTEN_NOTICE, MAX_STEPS, runAgent, TRUNCATED_NOTICE } from "./loop";
+import {
+  FORGOTTEN_NOTICE,
+  MAX_STEPS,
+  REPAIR_REMINDER,
+  runAgent,
+  TRUNCATED_NOTICE,
+  UNFINISHED_NOTICE,
+} from "./loop";
 import { createToolRegistry } from "./registry";
 import type { AgentRun } from "./run";
 import type { ToolContext, ToolLogger, ToolRegistry, ToolSpec } from "./tools";
@@ -58,6 +65,7 @@ function stubTools(): ToolRegistry & {
       contexts.push(ctx);
       return { ok: true, summary: `ran ${name}`, data: args };
     },
+    writes: (name) => name === "define_component",
   };
 }
 
@@ -504,6 +512,104 @@ describe("runAgent", () => {
       assertHistoryValid(history);
     });
 
+    describe("identical calls around a write", () => {
+      const titled = (title: Record<string, unknown>) => ({
+        name: "Titled",
+        description: "A heading from its title.",
+        category: "display",
+        children: "none",
+        props_schema: {
+          type: "object",
+          properties: { title: { type: "string", description: "Heading text.", ...title } },
+          additionalProperties: false,
+        },
+        example_props: { title: "Hi" },
+        template: { component: "Heading", props: { text: { $prop: "title" }, level: 2 } },
+      });
+      const step = (id: string, name: string, args: unknown) => ({
+        content: null,
+        toolCalls: [{ id, name, arguments: JSON.stringify(args) }],
+      });
+      const render = { tree: { component: "Titled", props: {} } };
+
+      function realTools() {
+        const customComponents = new InMemoryCustomComponentRepository();
+        const tools = createToolRegistry(
+          createAgentTools({ components: new InMemoryComponentRepository(catalog), customComponents }),
+        );
+        return { tools, customComponents };
+      }
+
+      async function play(conversationId: string, tools: ToolRegistry, turns: LlmTurn[]) {
+        const { run, events } = makeRun(tools);
+        const llm = scriptedLlm([...turns, { content: "done", toolCalls: [] }]);
+        await runAgent("go", conversationId, run, llm);
+        resetConversation(conversationId);
+        const results = events.flatMap((e) => (e.type === "tool_result" ? [e.result] : []));
+        return { results, llm };
+      }
+
+      it("runs an identical render again once the component is fixed", async () => {
+        const { tools } = realTools();
+        const { results } = await play("retry-after-fix", tools, [
+          step("d1", "define_component", titled({})),
+          step("r1", "render_ui", render),
+          step("d2", "define_component", titled({ default: "Untitled" })),
+          step("r2", "render_ui", render),
+        ]);
+
+        assert.deepEqual(
+          results.map((r) => r.ok),
+          [true, false, true, true],
+        );
+      });
+
+      it("runs an identical read again after a write, but not before", async () => {
+        const { tools } = realTools();
+        const { results } = await play("reread-after-write", tools, [
+          step("l1", "list_components", {}),
+          step("l2", "list_components", {}),
+          step("d1", "define_component", titled({})),
+          step("l3", "list_components", {}),
+        ]);
+
+        assert.deepEqual(
+          results.map((r) => r.summary),
+          [
+            `Listed ${catalog.length} components`,
+            "Already called with these arguments",
+            "Saved Titled v1",
+            `Listed ${catalog.length + 1} components`,
+          ],
+        );
+      });
+
+      it("still skips an identical failed call when nothing was written", async () => {
+        const { tools } = realTools();
+        const { results } = await play("failed-repeat", tools, [
+          step("r1", "render_ui", render),
+          step("r2", "render_ui", render),
+        ]);
+
+        assert.equal(results[0].ok, false);
+        assert.deepEqual(results[1], { ok: false, summary: "Already called with these arguments" });
+      });
+
+      it("skips a repeated successful define, even after another write", async () => {
+        const { tools, customComponents } = realTools();
+        const { results } = await play("define-twice", tools, [
+          step("d1", "define_component", titled({})),
+          step("x1", "delete_component", { name: "Missing" }),
+          step("d2", "define_component", titled({})),
+          step("l1", "list_components", {}),
+        ]);
+
+        assert.equal(results[0].summary, "Saved Titled v1");
+        assert.deepEqual(results[2], { ok: false, summary: "Already called with these arguments" });
+        assert.equal((await customComponents.getByName("Titled"))?.versions, 1);
+      });
+    });
+
     it("counts repeats toward the tool-call budget", async () => {
       const conversationId = "limit-repeat-budget";
       const tools = stubTools();
@@ -621,6 +727,176 @@ describe("runAgent", () => {
       assert.equal(infos.length, 1);
       assert.equal(infos[0].endedBy, "stopped");
       assert.equal(infos[0].steps, 0);
+    });
+  });
+
+  describe("build recovery", () => {
+    const bad: ToolResult = { ok: false, summary: "UI has 1 problem", retryable: true };
+    const good: ToolResult = { ok: true, summary: "Rendered 1 components" };
+    const refused: ToolResult = { ok: false, summary: "Custom components are unavailable" };
+    const badDef: ToolResult = { ok: false, summary: "Definition has 1 problem", retryable: true };
+    const goodDef: ToolResult = { ok: true, summary: "Saved X v1" };
+
+    /** `render_ui` and `define_component` answer from per-tool queues of results. */
+    function buildTools(queues: { render_ui?: ToolResult[]; define_component?: ToolResult[] }) {
+      return {
+        specs,
+        writes: (name: string) => name === "define_component",
+        async run(name: string): Promise<ToolResult> {
+          const queue = queues[name as keyof typeof queues];
+          return queue?.shift() ?? good;
+        },
+      } satisfies ToolRegistry;
+    }
+    const call = (id: string, name: "render_ui" | "define_component", n = id): LlmTurn => ({
+      content: null,
+      toolCalls: [{ id, name, arguments: JSON.stringify({ n }) }],
+    });
+    const say = (content: string): LlmTurn => ({ content, toolCalls: [] });
+    const texts = (events: AgentEvent[]) => events.flatMap((e) => (e.type === "text" ? [e.text] : []));
+    const notices = (events: AgentEvent[]) => events.flatMap((e) => (e.type === "notice" ? [e.message] : []));
+
+    async function runTurnWith(id: string, tools: ToolRegistry, turns: LlmTurn[], signal?: AbortSignal) {
+      const { run, events } = makeRun(tools, { conversationId: id, signal });
+      const llm = scriptedLlm(turns);
+      await runAgent("build", id, run, llm);
+      const history = getHistory(id);
+      const [trace] = await run.traces.listByConversation(id);
+      resetConversation(id);
+      return { events, history, trace, llm };
+    }
+
+    it("reminds once after a failed render, drops the held text, and ends on reply after the fix", async () => {
+      const { events, history, trace } = await runTurnWith(
+        "rec-fixed",
+        buildTools({ render_ui: [bad, good] }),
+        [call("c1", "render_ui"), say("I'll try again."), call("c2", "render_ui"), say("Done.")],
+      );
+      assert.deepEqual(texts(events), ["Done."]);
+      assert.deepEqual(notices(events), []);
+      assert.ok(history.some((m) => m.role === "system" && m.content === REPAIR_REMINDER("render_ui")));
+      assert.equal(trace.endedBy, "reply");
+      assert.equal(trace.repairReminders, 1);
+    });
+
+    it("emits the text and a notice when the reminder is answered with text again", async () => {
+      const { events, trace } = await runTurnWith(
+        "rec-unresolved",
+        buildTools({ render_ui: [bad] }),
+        [call("c1", "render_ui"), say("First."), say("Second.")],
+      );
+      assert.deepEqual(texts(events), ["Second."]);
+      assert.deepEqual(notices(events), [UNFINISHED_NOTICE]);
+      assert.equal(trace.endedBy, "unresolved");
+      assert.equal(trace.repairReminders, 1);
+    });
+
+    it("shows a question asked after the reminder", async () => {
+      const { events } = await runTurnWith(
+        "rec-question",
+        buildTools({ render_ui: [bad] }),
+        [call("c1", "render_ui"), say("Retrying."), say("Which size do you want?")],
+      );
+      assert.deepEqual(texts(events), ["Which size do you want?"]);
+    });
+
+    it("continues normally when the retry after the reminder fails again", async () => {
+      const { events, trace } = await runTurnWith(
+        "rec-fails-again",
+        buildTools({ render_ui: [bad, bad, good] }),
+        [call("c1", "render_ui"), say("Retrying."), call("c2", "render_ui"), call("c3", "render_ui"), say("Done.")],
+      );
+      assert.deepEqual(texts(events), ["Done."]);
+      assert.equal(trace.endedBy, "reply");
+      assert.equal(trace.repairReminders, 1);
+    });
+
+    it("sends held text that comes with tool calls", async () => {
+      const held: LlmTurn = { ...call("c2", "render_ui"), content: "Trying again." };
+      const { events } = await runTurnWith(
+        "rec-held-with-tools",
+        buildTools({ render_ui: [bad, good] }),
+        [call("c1", "render_ui"), held, say("Done.")],
+      );
+      assert.deepEqual(texts(events), ["Trying again.", "Done."]);
+    });
+
+    it("does not remind when a failed define is followed by a successful render", async () => {
+      const { events, history, trace } = await runTurnWith(
+        "rec-define-then-render",
+        buildTools({ define_component: [badDef], render_ui: [good] }),
+        [call("c1", "define_component"), call("c2", "render_ui"), say("Done.")],
+      );
+      assert.deepEqual(texts(events), ["Done."]);
+      assert.equal(history.some((m) => m.role === "system"), false);
+      assert.equal(trace.repairReminders, 0);
+    });
+
+    it("reminds after a failed define with no render since, naming that tool", async () => {
+      const { history, events } = await runTurnWith(
+        "rec-define",
+        buildTools({ define_component: [badDef, goodDef] }),
+        [call("c1", "define_component"), say("Again."), call("c2", "define_component"), say("Saved.")],
+      );
+      assert.ok(history.some((m) => m.role === "system" && m.content === REPAIR_REMINDER("define_component")));
+      assert.deepEqual(texts(events), ["Saved."]);
+    });
+
+    it("does not remind after a refusal that cannot be fixed", async () => {
+      const { events, trace } = await runTurnWith(
+        "rec-refused",
+        buildTools({ render_ui: [refused] }),
+        [call("c1", "render_ui"), say("Custom components are down.")],
+      );
+      assert.deepEqual(texts(events), ["Custom components are down."]);
+      assert.deepEqual(notices(events), []);
+      assert.equal(trace.endedBy, "reply");
+      assert.equal(trace.repairReminders, 0);
+    });
+
+    it("ends the turn at once on Stop during a held completion", async () => {
+      const controller = new AbortController();
+      const llm = scriptedLlm([call("c1", "render_ui"), say("Retrying.")]);
+      const inner = llm.complete.bind(llm);
+      llm.complete = async (input) => {
+        const turn = await inner(input);
+        if (llm.calls.length === 2) controller.abort();
+        return turn;
+      };
+      const id = "rec-stop";
+      const { run, events } = makeRun(buildTools({ render_ui: [bad] }), { conversationId: id, signal: controller.signal });
+      await runAgent("build", id, run, llm);
+      const history = getHistory(id);
+      resetConversation(id);
+      assert.equal(llm.calls.length, 2);
+      assert.deepEqual(notices(events), []);
+      assert.equal(history.some((m) => m.role === "system"), false);
+    });
+
+    it("gives no reminder when the next completion would have tools off", async () => {
+      const turns = [
+        ...Array.from({ length: MAX_STEPS - 2 }, (_, i) => call(`c${i}`, "render_ui", String(i))),
+        say("Out of steps."),
+      ];
+      const { events, history, trace } = await runTurnWith(
+        "rec-no-room",
+        buildTools({ render_ui: Array.from({ length: MAX_STEPS }, () => bad) }),
+        turns,
+      );
+      assert.equal(history.some((m) => m.role === "system"), false);
+      assert.deepEqual(texts(events), ["Out of steps."]);
+      assert.deepEqual(notices(events), [UNFINISHED_NOTICE]);
+      assert.equal(trace.endedBy, "unresolved");
+      assert.equal(trace.repairReminders, 0);
+    });
+
+    it("streams text as usual when nothing failed", async () => {
+      const { events, trace } = await runTurnWith("rec-clean", buildTools({}), [
+        call("c1", "render_ui"),
+        say("All good."),
+      ]);
+      assert.deepEqual(events.filter((e) => e.type === "text"), [{ type: "text", text: "All good." }]);
+      assert.equal(trace.repairReminders, 0);
     });
   });
 

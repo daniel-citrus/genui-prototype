@@ -174,6 +174,7 @@ describe("createToolRegistry run", () => {
         ok: false,
         summary: "Invalid arguments for get_thing",
         data: { errors },
+        retryable: true,
       });
     }
     assert.equal(ran, 0);
@@ -198,6 +199,7 @@ describe("createToolRegistry run", () => {
     const result = await registry.run("get_thing", { name: "x" }, ctx);
 
     assert.deepEqual(result, { ok: false, summary: "get_thing failed" });
+    assert.equal(result.retryable, undefined);
     assert.equal(JSON.stringify(result).includes("secret database detail"), false);
     const error = log.entries.find((e) => e.level === "error");
     assert.ok(error);
@@ -258,5 +260,17 @@ describe("createToolRegistry run", () => {
     const { ctx } = makeCtx();
     const result = await registry.run("get_thing", { name: "x" }, ctx);
     assert.equal(result.data, exact);
+  });
+});
+
+describe("createToolRegistry writes", () => {
+  it("is true only for tools defined with writes: true", () => {
+    const registry = createToolRegistry([
+      tool({ name: "save_thing", writes: true }),
+      tool({ name: "get_thing" }),
+    ]);
+    assert.equal(registry.writes("save_thing"), true);
+    assert.equal(registry.writes("get_thing"), false);
+    assert.equal(registry.writes("unknown"), false);
   });
 });

@@ -315,6 +315,48 @@ describe("checkTrace", () => {
     assert.doesNotMatch(blob, /"component"/);
   });
 
+  describe("reply checks", () => {
+    const words = (n: number) => Array.from({ length: n }, () => "w").join(" ");
+    const replyTrace = (...contents: (string | null)[]) =>
+      emptyTrace({
+        completions: contents.map((content) => ({
+          allowTools: true,
+          content,
+          truncated: false,
+          toolCalls: [],
+        })),
+      });
+
+    it("replyMaxWords passes at the limit and fails above it, across completions", () => {
+      assert.deepEqual(checkTrace(replyTrace(words(25), null, words(15)), [{ replyMaxWords: 40 }]), []);
+      const failures = checkTrace(replyTrace(words(25), null, words(16)), [{ replyMaxWords: 40 }]);
+      assert.equal(failures.length, 1);
+      assert.equal(failures[0]!.reason, "replyMaxWords 40: reply has 41 words");
+      assert.deepEqual(checkTrace(replyTrace(null), [{ replyMaxWords: 1 }]), []);
+    });
+
+    it("replyExcludes is case-sensitive", () => {
+      assert.deepEqual(checkTrace(replyTrace("a stack of cards"), [{ replyExcludes: "Stack" }]), []);
+      const failures = checkTrace(replyTrace("ok", "A Stack here"), [{ replyExcludes: "Stack" }]);
+      assert.equal(failures.length, 1);
+      assert.equal(
+        failures[0]!.reason,
+        'replyExcludes "Stack": reply contains the excluded text',
+      );
+    });
+
+    it("reasons omit reply text and user text", () => {
+      const failures = checkTrace(replyTrace(`completion-text-must-not-leak ${words(50)}`), [
+        { replyMaxWords: 40 },
+        { replyExcludes: "completion" },
+      ]);
+      assert.equal(failures.length, 2);
+      const blob = failures.map((f) => f.reason).join("\n");
+      assert.doesNotMatch(blob, /must-not-leak/);
+      assert.doesNotMatch(blob, new RegExp(DISTINCTIVE_USER_TEXT));
+    });
+  });
+
   describe("uiText and uiMarkupTag", () => {
     const heading = { component: "Heading", props: { text: "Hello Ada" } };
     const markup = {
@@ -353,6 +395,46 @@ describe("checkTrace", () => {
       assert.equal(failures.length, 2);
       assert.match(failures[0]!.reason, /^uiText "x": no successful render_ui tree/);
       assert.match(failures[1]!.reason, /^uiMarkupTag "strong": no successful render_ui tree/);
+    });
+  });
+
+  describe("definedWithKey and noUiComponent", () => {
+    const define = (args: Record<string, unknown>, extra: Partial<AgentTraceToolCall> = {}) =>
+      toolCall({
+        call: { id: "d", name: "define_component", args },
+        result: { ok: true, summary: "Saved" },
+        ...extra,
+      });
+    const nested = { template: { children: [{ $each: "items" }] } };
+
+    it("definedWithKey passes on a nested key in a successful define", () => {
+      assert.deepEqual(checkTrace(traceWithToolCalls(define(nested)), [{ definedWithKey: "$each" }]), []);
+    });
+
+    it("definedWithKey fails for failed, skipped or keyless defines without leaking arguments", () => {
+      const check = [{ definedWithKey: "$each" }];
+      const failed = define(nested, { result: { ok: false, summary: "bad" } });
+      const skipped = define(nested, { skipped: "budget" });
+      const keyless = define({ secret: "args must not appear in reasons" });
+      for (const call of [failed, skipped, keyless]) {
+        const failures = checkTrace(traceWithToolCalls(call), check);
+        assert.equal(failures.length, 1);
+        assert.match(failures[0]!.reason, /^definedWithKey "\$each": /);
+        assert.doesNotMatch(failures[0]!.reason, /secret/);
+      }
+    });
+
+    it("noUiComponent passes without the component, fails with it or without a render", () => {
+      const check = [{ noUiComponent: "Markup" }];
+      const clean = traceWithToolCalls(renderUiTree({ component: "Card", props: {} }));
+      assert.deepEqual(checkTrace(clean, check), []);
+      const markup = traceWithToolCalls(
+        renderUiTree({ component: "Card", props: {}, children: [{ component: "Markup", props: {} }] }),
+      );
+      const withMarkup = checkTrace(markup, check);
+      assert.equal(withMarkup[0]!.reason, 'noUiComponent "Markup": component found in last render_ui tree');
+      const none = checkTrace(emptyTrace(), check);
+      assert.match(none[0]!.reason, /^noUiComponent "Markup": no successful render_ui tree/);
     });
   });
 });

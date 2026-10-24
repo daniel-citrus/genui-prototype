@@ -38,7 +38,7 @@ export const catalog: CatalogComponent[] = [
   {
     name: "Card",
     description:
-      "A bordered panel that groups related content, with an optional title. Use it to set a section apart, such as a form or a summary.",
+      "A bordered panel that groups related content, with an optional title. Use it to set a section apart, such as a form or a summary. A Button sends the inputs inside its Card, or every input in the design when it has no Card.",
     category: "layout",
     children: "any",
     propsSchema: {
@@ -170,7 +170,7 @@ export const catalog: CatalogComponent[] = [
           pattern: "^[A-Za-z][A-Za-z0-9_]*$",
           maxLength: 64,
           description:
-            "Key this value is sent under when a Button runs an action: the action property it fills. Unique in the design.",
+            "Key this value is sent under when a Button runs an action: the action property it fills. Unique within its Card.",
         },
       },
       required: ["label"],
@@ -194,7 +194,7 @@ export const catalog: CatalogComponent[] = [
           pattern: "^[A-Za-z][A-Za-z0-9_]*$",
           maxLength: 64,
           description:
-            "Key this value is sent under when a Button runs an action: the action property it fills. Unique in the design.",
+            "Key this value is sent under when a Button runs an action: the action property it fills. Unique within its Card.",
         },
       },
       required: ["label"],
@@ -219,12 +219,14 @@ export const catalog: CatalogComponent[] = [
           description: "The choices, in display order.",
         },
         placeholder: { type: "string", description: "Hint shown before a choice is made." },
+        value: { type: "string", description: "The option it starts on; must be one of options. With disabled, locks a form to one existing item." },
+        disabled: { type: "boolean", default: false, description: "Shows it greyed out and fixed; its value is still sent. Use with value to lock the item a form edits." },
         name: {
           type: "string",
           pattern: "^[A-Za-z][A-Za-z0-9_]*$",
           maxLength: 64,
           description:
-            "Key this value is sent under when a Button runs an action: the action property it fills. Unique in the design.",
+            "Key this value is sent under when a Button runs an action: the action property it fills. Unique within its Card.",
         },
       },
       required: ["label", "options"],
@@ -305,7 +307,7 @@ export const catalog: CatalogComponent[] = [
   {
     name: "Markup",
     description:
-      "Draws allowlisted HTML and SVG elements from a JSON tree, for what no other component can show, such as a bar chart or a star rating. Only used inside custom component templates.",
+      "Draws allowlisted HTML and SVG elements from a JSON tree, for what no other component can show, such as a bar chart or a star rating. Call get_component for Markup's full rules.",
     category: "display",
     children: "none",
     propsSchema: {
@@ -314,7 +316,7 @@ export const catalog: CatalogComponent[] = [
         root: {
           type: "object",
           description:
-            'The root element: { "tag", "attrs"?, "style"?, "text"?, "action"?, "children"? }, a JSON tree, never an HTML string, with allowlisted tags, attributes and inline style properties; no scripts, classes or event handlers. Style keys are kebab-case CSS properties, such as font-weight, and go in style, not attrs. In a template, text, attribute and style values may be {"$prop": "<name>"}. Only used inside custom component templates.',
+            'The root element: { "tag", "attrs"?, "style"?, "text"?, "action"?, "children"? }, a JSON tree, never an HTML string, with allowlisted tags, attributes and inline style properties; no scripts, classes or event handlers. Style keys are kebab-case CSS properties, such as font-weight, and go in style, not attrs. In a template, text, attribute and style values may be {"$prop": "<name>"}.',
         },
       },
       required: ["root"],

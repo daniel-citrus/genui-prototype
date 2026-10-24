@@ -12,7 +12,8 @@ export type HistoryMessage =
         function: { name: string; arguments: string };
       }>;
     }
-  | { role: "tool"; tool_call_id: string; content: string };
+  | { role: "tool"; tool_call_id: string; content: string }
+  | { role: "system"; content: string };
 
 export interface LlmUsage {
   promptTokens: number;

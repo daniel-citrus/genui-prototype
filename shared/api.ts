@@ -18,6 +18,8 @@ export interface ToolResult {
   summary: string;
   /** Structured payload handed back to the model. */
   data?: unknown;
+  /** The model can fix this and call the tool again (problems with its input). */
+  retryable?: true;
 }
 
 /** Longest chat message, in UTF-16 code units (the unit of a textarea's `maxlength`). */

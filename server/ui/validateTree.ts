@@ -1,5 +1,6 @@
 import type { ErrorObject, ValidateFunction } from "ajv";
 import type { Component } from "shared/components";
+import { sendsInput } from "shared/formScope";
 import type { ActionSpec } from "../actions/types";
 import { compileSchema, formatSchemaErrors } from "../validation/jsonSchema";
 import { collectBindings, isObject, type ActionButton, type NamedInput } from "./bindings";
@@ -116,6 +117,15 @@ export function withPropsHint(problems: string[], name: string, hinted: Set<stri
   return [`${first} (call get_component ${name} for its props)`, ...rest];
 }
 
+/** A Select's `value` must be one of its options, and a disabled Select needs one. */
+function selectValueProblems(props: Record<string, unknown>, path: string): string[] {
+  const { value, options, disabled } = props;
+  if (typeof value === "string") {
+    return (options as string[]).includes(value) ? [] : [`${path}.props.value "${value}" is not one of its options`];
+  }
+  return disabled === true ? [`${path} a disabled Select needs a value`] : [];
+}
+
 /** Where a binding's key is set: a catalog prop, or the part of a Markup element that holds it. */
 const MARKUP_KEY_PATHS = { name: "attrs.name", action: "action", options: "children" };
 function keyPath(binding: NamedInput | ActionButton, key: keyof typeof MARKUP_KEY_PATHS): string {
@@ -138,10 +148,12 @@ function bindingMismatch(input: NamedInput, action: string, type: unknown): stri
 }
 
 /**
- * Problems with a tree's `name` and `action` props: duplicate names always;
+ * Problems with a tree's `name` and `action` props: duplicate names always (in
+ * one Card, or in different Cards that one button would send together);
  * with `actions`, also unregistered actions, required action properties no
  * input fills and `edit` actions with no input for any optional property (both
- * for Buttons that aren't disabled, and only with `designChecks`), inputs of
+ * for Buttons that aren't disabled, against the inputs each one sends, and only
+ * with `designChecks`), inputs of
  * the wrong kind for the action property they fill, and, for dropdown sources
  * in `choiceValues`, inputs that aren't a Select or list an option the source
  * doesn't have.
@@ -155,18 +167,30 @@ function bindingProblems(
   const { inputs, buttons } = collectBindings(tree);
   const problems: string[] = [];
 
-  const byName = new Map<string, NamedInput>();
-  for (const input of inputs) {
-    const first = byName.get(input.name);
-    if (first) problems.push(`${keyPath(input, "name")} "${input.name}" is already used by ${first.path}`);
-    else byName.set(input.name, input);
-  }
+  const enabled = buttons.filter((b) => !b.disabled);
+  inputs.forEach((input, i) => {
+    const earlier = inputs.slice(0, i).filter((other) => other.name === input.name);
+    const same = earlier.find((other) => other.card === input.card);
+    if (same) {
+      problems.push(`${keyPath(input, "name")} "${input.name}" is already used by ${same.path}`);
+      return;
+    }
+    for (const other of earlier) {
+      const button = enabled.find(
+        (b) => sendsInput(tree, b.path, input.path) && sendsInput(tree, b.path, other.path),
+      );
+      if (button) {
+        problems.push(
+          `${keyPath(input, "name")} "${input.name}" is also at ${other.path}, and the button at ${button.path} would send both; put each form in its own Card`,
+        );
+        return;
+      }
+    }
+  });
   if (!actions) return problems;
 
   const specs = new Map(actions.map((a) => [a.name, a]));
   const used = new Set<ActionSpec>();
-  // Each action's first Button that isn't disabled.
-  const enabledAt = new Map<ActionSpec, string>();
   for (const button of buttons) {
     const spec = specs.get(button.action);
     if (!spec) {
@@ -176,7 +200,6 @@ function bindingProblems(
       continue;
     }
     used.add(spec);
-    if (!button.disabled && !enabledAt.has(spec)) enabledAt.set(spec, button.path);
   }
 
   const optionsChecked = new Set<string>();
@@ -186,17 +209,20 @@ function bindingProblems(
       required?: string[];
     };
     const required = schema.required ?? [];
-    const path = enabledAt.get(spec);
-    if (path && designChecks) {
+    const optional = Object.keys(schema.properties ?? {}).filter((key) => !required.includes(key));
+    for (const button of designChecks ? enabled.filter((b) => b.action === spec.name) : []) {
+      const names = new Set(
+        inputs.filter((input) => sendsInput(tree, button.path, input.path)).map((input) => input.name),
+      );
+      const where = button.card ? " in its Card" : "";
       for (const key of required) {
-        if (!byName.has(key)) {
-          problems.push(`${path} action "${spec.name}" needs an input named "${key}", and none has that name`);
+        if (!names.has(key)) {
+          problems.push(`${button.path} action "${spec.name}" needs an input named "${key}"${where}, and none has that name`);
         }
       }
-      const optional = Object.keys(schema.properties ?? {}).filter((key) => !required.includes(key));
-      if (spec.operation === "edit" && optional.length > 0 && !optional.some((key) => byName.has(key))) {
+      if (spec.operation === "edit" && optional.length > 0 && !optional.some((key) => names.has(key))) {
         problems.push(
-          `${path} action "${spec.name}" changes nothing without an input for one of: ${optional.join(", ")}`,
+          `${button.path} action "${spec.name}" changes nothing without an input for one of: ${optional.join(", ")}`,
         );
       }
     }
@@ -284,7 +310,9 @@ export function validateUiTree(
       if (!isObject(node.props)) {
         errors.push(`${path}.props must be an object`);
       } else if (component) {
-        errors.push(...withPropsHint(propsErrors(propsValidator(component), node.props, path), component.name, hinted));
+        const problems = propsErrors(propsValidator(component), node.props, path);
+        errors.push(...withPropsHint(problems, component.name, hinted));
+        if (component.name === "Select" && problems.length === 0) errors.push(...selectValueProblems(node.props, path));
         if (component.name === "Markup" && isObject(node.props.root)) {
           errors.push(...validateMarkup(node.props.root, `${path}.props.root`));
         }

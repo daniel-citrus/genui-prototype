@@ -23,6 +23,8 @@ export interface AgentRun {
 export interface ToolOutcome {
   content: string;
   isError: boolean;
+  /** The failure was problems the model can fix and resend. */
+  retryable: boolean;
 }
 
 /**
@@ -43,6 +45,7 @@ export async function handleToolCall(
     return {
       content: "The user stopped this turn before this ran. Only run it again if they ask.",
       isError: true,
+      retryable: false,
     };
   }
 
@@ -59,5 +62,6 @@ export async function handleToolCall(
   return {
     content: JSON.stringify({ summary: result.summary, data: result.data }),
     isError: !result.ok,
+    retryable: result.retryable === true,
   };
 }

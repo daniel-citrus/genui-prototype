@@ -13,7 +13,7 @@ export const MAX_TOOL_CALLS_PER_TURN = 20;
 export const MAX_TURN_TOKENS = 150_000;
 
 /** Output tokens allowed in a single completion. */
-export const DEFAULT_MAX_OUTPUT_TOKENS = 2048;
+export const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
 
 /** JSON with object keys sorted recursively, so equal values serialize equally. */
 function stableStringify(value: unknown): string {

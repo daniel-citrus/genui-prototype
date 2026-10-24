@@ -348,4 +348,38 @@ describe("POST /api/actions/run", () => {
       for (const secret of ["s3cr", "private-search", "Remove "]) assert.ok(!all.includes(secret), secret);
     });
   });
+
+  describe("a design with a Card per item", () => {
+    const itemCard = (size: string) => ({
+      component: "Card",
+      children: [
+        { component: "TextInput", props: { label: "Note", name: "note" } },
+        { component: "Select", props: { label: "Size", name: "size", options: [size] } },
+        { component: "Button", props: { label: "Save", action: "save_note" } },
+      ],
+    });
+    const cards: UiNode = {
+      component: "Stack",
+      children: [itemCard("S"), itemCard("M"), { component: "TextInput", props: { label: "Search", name: "search" } }],
+    };
+
+    it("accepts the values of one Card", async () => {
+      rememberDesign(CONVERSATION, UI_ID, cards);
+      const app = await build();
+      const res = await run(app, body({ values: { note: "hi", size: "M" } }));
+      await app.close();
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(received, [{ note: "hi", size: "M" }]);
+    });
+
+    it("refuses a name outside every Card of the button, without echoing values", async () => {
+      rememberDesign(CONVERSATION, UI_ID, cards);
+      const app = await build();
+      const res = await run(app, body({ values: { note: "private-note", search: "private-search" } }));
+      await app.close();
+      assert.equal(res.statusCode, 400);
+      assert.equal(res.json().error.message, 'This design has no input named "search" next to a "save_note" button.');
+      assert.deepEqual(received, []);
+    });
+  });
 });
