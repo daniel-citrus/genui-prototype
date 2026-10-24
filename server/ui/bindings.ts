@@ -1,3 +1,5 @@
+import { nearestCard } from "shared/formScope";
+
 /**
  * A TextInput, Checkbox or Select with a `name`: a value a click can send.
  * Markup `input` and `select` elements count as one of these.
@@ -13,6 +15,8 @@ export interface NamedInput {
   type?: string;
   /** Select only: its string options. */
   options?: string[];
+  /** Path of the nearest Card around it, if any. */
+  card?: string;
 }
 
 /** A Button, or a Markup `button` element, with an `action`. */
@@ -22,6 +26,8 @@ export interface ActionButton {
   markup?: true;
   action: string;
   disabled: boolean;
+  /** Path of the nearest Card around it, if any. */
+  card?: string;
 }
 
 export interface TreeBindings {
@@ -102,5 +108,9 @@ export function collectBindings(tree: unknown): TreeBindings {
   };
 
   visit(tree, "tree");
+  for (const binding of [...bindings.inputs, ...bindings.buttons]) {
+    const card = nearestCard(tree, binding.path);
+    if (card) binding.card = card;
+  }
   return bindings;
 }

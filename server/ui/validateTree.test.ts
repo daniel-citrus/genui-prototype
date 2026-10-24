@@ -259,7 +259,7 @@ describe("validateUiTree bindings", () => {
 
   it("refuses two inputs with the same name, naming both paths, with or without actions", async () => {
     const tree = form(email, {
-      component: "Card",
+      component: "Stack",
       children: [{ component: "Checkbox", props: { label: "Again", name: "email" } }],
     });
     const expected = 'tree.children.1.children.0.props.name "email" is already used by tree.children.0';
@@ -597,5 +597,58 @@ describe("withPropsHint", () => {
     const problems = ["tree.children.1.props.label must be string"];
     assert.equal(withPropsHint(problems, "Button", hinted), problems);
     assert.deepEqual([...hinted], ["Button"]);
+  });
+});
+
+describe("validateUiTree Card-scoped checks", () => {
+  const menuActions = [updateItem];
+  const itemCard = (extra: unknown[] = []) => ({
+    component: "Card",
+    children: [itemSelect("Bạc xỉu"), nameInput, ...extra, actionButton("menu_update_item")],
+  });
+  const errors = async (tree: unknown) => (await check(tree, menuActions, menuValues)).errors;
+
+  it("accepts a Card per item, each with the same input names", async () => {
+    assert.deepEqual(await errors(form(itemCard(), itemCard(), itemCard())), []);
+  });
+
+  it("refuses the same name twice in one Card", async () => {
+    assert.deepEqual(await errors(form(itemCard([nameInput]))), [
+      'tree.children.0.children.2.props.name "name" is already used by tree.children.0.children.1',
+    ]);
+  });
+
+  it("refuses an outer button that would send the same name from two Cards", async () => {
+    const tree = form(
+      { component: "Card", children: [itemSelect("Bạc xỉu"), nameInput] },
+      { component: "Card", children: [nameInput] },
+      actionButton("menu_update_item"),
+    );
+    assert.ok(
+      (await errors(tree)).includes(
+        'tree.children.1.children.0.props.name "name" is also at tree.children.0.children.1, and the button at tree.children.2 would send both; put each form in its own Card',
+      ),
+    );
+  });
+
+  it("requires each button's own Card to hold the action's inputs", async () => {
+    const noItem = { component: "Card", children: [nameInput, actionButton("menu_update_item")] };
+    assert.deepEqual(await errors(form(itemCard(), noItem)), [
+      'tree.children.1.children.1 action "menu_update_item" needs an input named "item" in its Card, and none has that name',
+    ]);
+  });
+
+  it("runs the edit check for each button against its Card", async () => {
+    const itemOnly = { component: "Card", children: [itemSelect("Bạc xỉu"), actionButton("menu_update_item")] };
+    assert.deepEqual(await errors(form(itemCard(), itemOnly)), [
+      'tree.children.1.children.1 action "menu_update_item" changes nothing without an input for one of: name, description, category',
+    ]);
+  });
+
+  it("keeps the whole-design message for a button outside every Card", async () => {
+    const tree = form(nameInput, actionButton("menu_update_item"));
+    assert.deepEqual(await errors(tree), [
+      'tree.children.1 action "menu_update_item" needs an input named "item", and none has that name',
+    ]);
   });
 });
