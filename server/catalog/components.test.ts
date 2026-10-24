@@ -15,4 +15,11 @@ describe("catalog", () => {
       assert.ok(properties.root.description.includes(text), text);
     }
   });
+
+  it("lets a Select start on an option and be disabled", () => {
+    const select = catalog.find((c) => c.name === "Select")!;
+    const properties = select.propsSchema.properties as Record<string, { type: string }>;
+    assert.equal(properties.value.type, "string");
+    assert.equal(properties.disabled.type, "boolean");
+  });
 });

@@ -219,6 +219,8 @@ export const catalog: CatalogComponent[] = [
           description: "The choices, in display order.",
         },
         placeholder: { type: "string", description: "Hint shown before a choice is made." },
+        value: { type: "string", description: "The option it starts on; must be one of options." },
+        disabled: { type: "boolean", default: false, description: "Shows it greyed out and fixed; its value is still sent." },
         name: {
           type: "string",
           pattern: "^[A-Za-z][A-Za-z0-9_]*$",

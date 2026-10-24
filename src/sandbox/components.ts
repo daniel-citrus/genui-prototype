@@ -186,16 +186,19 @@ const Select: Renderer = (props, _children, path) => {
   select.id = id;
   setName(select, props, path);
   const placeholder = str(props, "placeholder");
+  const preset = str(props, "value");
   if (placeholder) {
     const option = new Option(placeholder, "");
     option.disabled = true;
-    option.selected = true;
+    option.selected = preset === undefined;
     select.append(option);
   }
   const options = Array.isArray(props.options) ? props.options : [];
   for (const value of options) {
     if (typeof value === "string") select.append(new Option(value, value));
   }
+  if (preset !== undefined) select.value = preset;
+  select.disabled = bool(props, "disabled", false);
   return field(str(props, "label") ?? "", select, id);
 };
 
