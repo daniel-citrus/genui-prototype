@@ -1,12 +1,7 @@
 {
   "id": "markup-bold-tag",
-  "prompt": "Define a custom component named SaleLabel that uses Markup to draw the word SALE in a b tag inside a span. Then show SaleLabel.",
+  "prompt": "Draw the word SALE in a b tag inside a span",
   "checks": [
-    { "endedBy": "reply" },
-    { "noError": true },
-    { "toolSucceeded": "define_component" },
-    { "toolSucceeded": "render_ui" },
-    { "agentComponent": "SaleLabel" },
     { "uiMarkupTag": "strong" },
     { "uiText": "SALE" }
   ]

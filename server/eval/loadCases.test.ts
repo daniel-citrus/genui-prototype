@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
-import { MAX_MESSAGE_CHARS } from "shared/api";
+import { MAX_PROMPT_CHARS } from "shared/generate";
 import { loadCases } from "./loadCases";
 
 function caseDir(): string {
@@ -14,275 +15,94 @@ function writeCase(dir: string, name: string, body: unknown): void {
   writeFileSync(join(dir, name), `${JSON.stringify(body, null, 2)}\n`, "utf8");
 }
 
+function loadOne(body: Record<string, unknown>) {
+  const dir = caseDir();
+  writeCase(dir, "c.json", { id: "c", prompt: "p", checks: [{ uiComponent: "Text" }], ...body });
+  return () => loadCases(dir);
+}
+
 describe("loadCases", () => {
+  it("loads every committed case", () => {
+    const cases = loadCases(join(dirname(fileURLToPath(import.meta.url)), "cases"));
+    assert.equal(cases.length, 22);
+  });
+
   it("loads valid files sorted by id", () => {
     const dir = caseDir();
-    writeCase(dir, "b.json", {
-      id: "case-b",
-      prompt: "second",
-      checks: [{ noError: true }],
-    });
-    writeCase(dir, "a.json", {
-      id: "case-a",
-      prompt: "first",
-      checks: [{ endedBy: "reply" }],
-    });
-
-    const cases = loadCases(dir);
-    assert.equal(cases.length, 2);
-    assert.deepEqual(
-      cases.map((c) => c.id),
-      ["case-a", "case-b"],
-    );
+    writeCase(dir, "b.json", { id: "case-b", prompt: "second", checks: [{ maxAttempts: 2 }] });
+    writeCase(dir, "a.json", { id: "case-a", prompt: "first", checks: [{ notesMaxWords: 5 }] });
+    assert.deepEqual(loadCases(dir).map((c) => c.id), ["case-a", "case-b"]);
   });
 
-  it("accepts endedBy unresolved", () => {
-    const dir = caseDir();
-    writeCase(dir, "u.json", { id: "u", prompt: "p", checks: [{ endedBy: "unresolved" }] });
-    assert.equal(loadCases(dir).length, 1);
+  it("accepts every check type", () => {
+    const checks = [
+      { maxAttempts: 1 },
+      { uiComponent: "A" },
+      { noUiComponent: "A" },
+      { uiButtonAction: "a" },
+      { noButtonAction: true },
+      { uiNamedInput: "a" },
+      { uiText: "a" },
+      { uiMarkupTag: "li" },
+      { agentComponent: "A" },
+      { notesMaxWords: 40 },
+      { notesExcludes: "a" },
+    ];
+    assert.deepEqual(loadOne({ checks })()[0]!.checks, checks);
   });
 
-  it("refuses invalid JSON", () => {
+  for (const check of [
+    { endedBy: "reply" },
+    { noError: true },
+    { toolCalled: "x" },
+    { toolNotCalled: "x" },
+    { toolSucceeded: "x" },
+    { definedWithKey: "x" },
+    { replyMaxWords: 40 },
+    { replyExcludes: "x" },
+  ]) {
+    it(`refuses the removed check ${Object.keys(check)[0]}`, () => {
+      assert.throws(loadOne({ checks: [check] }), /was removed/);
+    });
+  }
+
+  it("refuses bad check values", () => {
+    assert.throws(loadOne({ checks: [{ maxAttempts: 4 }] }), /maxAttempts must be an integer from 1 to 3/);
+    assert.throws(loadOne({ checks: [{ notesMaxWords: 0 }] }), /notesMaxWords must be an integer/);
+    assert.throws(loadOne({ checks: [{ notesExcludes: "" }] }), /non-empty string/);
+    assert.throws(loadOne({ checks: [{ noButtonAction: false }] }), /must be true/);
+    assert.throws(loadOne({ checks: [{ bogus: 1 }] }), /unknown field "bogus"/);
+    assert.throws(loadOne({ checks: [{ uiText: "a", uiComponent: "B" }] }), /exactly one key/);
+    assert.throws(loadOne({ checks: [{}] }), /exactly one of/);
+  });
+
+  it("refuses a prompt over MAX_PROMPT_CHARS and accepts one at the limit", () => {
+    assert.throws(loadOne({ prompt: "x".repeat(MAX_PROMPT_CHARS + 1) }), /prompt exceeds 4000 characters/);
+    assert.equal(loadOne({ prompt: "x".repeat(MAX_PROMPT_CHARS) })().length, 1);
+  });
+
+  it("refuses invalid JSON, non-objects, and unknown fields", () => {
     const dir = caseDir();
     writeFileSync(join(dir, "bad.json"), "{ not json", "utf8");
     assert.throws(() => loadCases(dir), /invalid JSON/);
-  });
-
-  it("refuses non-object root", () => {
-    const dir = caseDir();
     writeFileSync(join(dir, "bad.json"), "[]", "utf8");
     assert.throws(() => loadCases(dir), /expected a JSON object/);
+    assert.throws(loadOne({ extra: 1 }), /unknown field "extra"/);
   });
 
-  it("refuses missing id", () => {
+  it("refuses a bad id, an empty prompt, empty checks and duplicate ids", () => {
+    assert.throws(loadOne({ id: 3 }), /id must be a string/);
+    assert.throws(loadOne({ id: "Not Kebab" }), /kebab-case/);
+    assert.throws(loadOne({ prompt: "" }), /prompt must be non-empty/);
+    assert.throws(loadOne({ checks: [] }), /checks must be non-empty/);
     const dir = caseDir();
-    writeCase(dir, "bad.json", { prompt: "hi", checks: [{ noError: true }] });
-    assert.throws(() => loadCases(dir), /id must be a string/);
+    writeCase(dir, "a.json", { id: "same", prompt: "p", checks: [{ uiText: "a" }] });
+    writeCase(dir, "b.json", { id: "same", prompt: "p", checks: [{ uiText: "a" }] });
+    assert.throws(() => loadCases(dir), /duplicate id "same"/);
   });
 
-  it("refuses empty id", () => {
-    const dir = caseDir();
-    writeCase(dir, "bad.json", { id: "", prompt: "hi", checks: [{ noError: true }] });
-    assert.throws(() => loadCases(dir), /id must be kebab-case/);
-  });
-
-  it("refuses non-kebab id", () => {
-    const dir = caseDir();
-    writeCase(dir, "bad.json", { id: "Bad_Case", prompt: "hi", checks: [{ noError: true }] });
-    assert.throws(() => loadCases(dir), /id must be kebab-case/);
-  });
-
-  it("refuses empty prompt", () => {
-    const dir = caseDir();
-    writeCase(dir, "bad.json", { id: "ok", prompt: "", checks: [{ noError: true }] });
-    assert.throws(() => loadCases(dir), /prompt must be non-empty/);
-  });
-
-  it("refuses prompt longer than MAX_MESSAGE_CHARS", () => {
-    const dir = caseDir();
-    writeCase(dir, "bad.json", {
-      id: "ok",
-      prompt: "a".repeat(MAX_MESSAGE_CHARS + 1),
-      checks: [{ noError: true }],
-    });
-    assert.throws(() => loadCases(dir), /prompt exceeds/);
-  });
-
-  it("refuses empty checks", () => {
-    const dir = caseDir();
-    writeCase(dir, "bad.json", { id: "ok", prompt: "hi", checks: [] });
-    assert.throws(() => loadCases(dir), /checks must be non-empty/);
-  });
-
-  it("refuses unknown check key", () => {
-    const dir = caseDir();
-    writeCase(dir, "bad.json", {
-      id: "ok",
-      prompt: "hi",
-      checks: [{ mystery: true }],
-    });
-    assert.throws(() => loadCases(dir), /unknown field "mystery"/);
-  });
-
-  it("loads toolNotCalled check", () => {
-    const dir = caseDir();
-    writeCase(dir, "ok.json", {
-      id: "ok",
-      prompt: "hi",
-      checks: [{ toolNotCalled: "list_actions" }],
-    });
-    const cases = loadCases(dir);
-    assert.deepEqual(cases[0]!.checks, [{ toolNotCalled: "list_actions" }]);
-  });
-
-  it("refuses empty toolNotCalled", () => {
-    const dir = caseDir();
-    writeCase(dir, "bad.json", {
-      id: "ok",
-      prompt: "hi",
-      checks: [{ toolNotCalled: "" }],
-    });
-    assert.throws(() => loadCases(dir), /toolNotCalled must be a non-empty string/);
-  });
-
-  it("refuses toolCalled and toolNotCalled on one check", () => {
-    const dir = caseDir();
-    writeCase(dir, "bad.json", {
-      id: "ok",
-      prompt: "hi",
-      checks: [{ toolCalled: "list_actions", toolNotCalled: "render_ui" }],
-    });
-    assert.throws(() => loadCases(dir), /exactly one key/);
-  });
-
-  it("refuses two keys on one check", () => {
-    const dir = caseDir();
-    writeCase(dir, "bad.json", {
-      id: "ok",
-      prompt: "hi",
-      checks: [{ noError: true, toolCalled: "render_ui" }],
-    });
-    assert.throws(() => loadCases(dir), /exactly one key/);
-  });
-
-  it("refuses noError other than true", () => {
-    const dir = caseDir();
-    writeCase(dir, "bad.json", {
-      id: "ok",
-      prompt: "hi",
-      checks: [{ noError: false }],
-    });
-    assert.throws(() => loadCases(dir), /noError must be true/);
-  });
-
-  it("loads agentComponent and noButtonAction", () => {
-    const dir = caseDir();
-    writeCase(dir, "a.json", {
-      id: "ok",
-      prompt: "hi",
-      checks: [{ agentComponent: "PromoBanner" }, { noButtonAction: true }],
-    });
-    assert.deepEqual(loadCases(dir)[0]!.checks, [
-      { agentComponent: "PromoBanner" },
-      { noButtonAction: true },
-    ]);
-  });
-
-  it("refuses noButtonAction other than true", () => {
-    const dir = caseDir();
-    writeCase(dir, "bad.json", { id: "ok", prompt: "hi", checks: [{ noButtonAction: false }] });
-    assert.throws(() => loadCases(dir), /noButtonAction must be true/);
-  });
-
-  it("refuses an empty agentComponent and a two-key check with a new key", () => {
-    const dir = caseDir();
-    writeCase(dir, "bad.json", { id: "ok", prompt: "hi", checks: [{ agentComponent: "" }] });
-    assert.throws(() => loadCases(dir), /agentComponent must be a non-empty string/);
-    writeCase(dir, "bad.json", {
-      id: "ok",
-      prompt: "hi",
-      checks: [{ agentComponent: "X", noButtonAction: true }],
-    });
-    assert.throws(() => loadCases(dir), /exactly one key/);
-  });
-
-  it("loads replyMaxWords and replyExcludes", () => {
-    const dir = caseDir();
-    writeCase(dir, "a.json", {
-      id: "ok",
-      prompt: "hi",
-      checks: [{ replyMaxWords: 500 }, { replyMaxWords: 1 }, { replyExcludes: "Stack" }],
-    });
-    assert.deepEqual(loadCases(dir)[0]!.checks, [
-      { replyMaxWords: 500 },
-      { replyMaxWords: 1 },
-      { replyExcludes: "Stack" },
-    ]);
-  });
-
-  it("refuses bad replyMaxWords and replyExcludes values", () => {
-    const dir = caseDir();
-    for (const value of [0, 501, 1.5, "40"]) {
-      writeCase(dir, "bad.json", { id: "ok", prompt: "hi", checks: [{ replyMaxWords: value }] });
-      assert.throws(() => loadCases(dir), /bad\.json.*replyMaxWords must be an integer from 1 to 500/);
-    }
-    for (const value of ["", 5]) {
-      writeCase(dir, "bad.json", { id: "ok", prompt: "hi", checks: [{ replyExcludes: value }] });
-      assert.throws(() => loadCases(dir), /bad\.json.*replyExcludes must be a non-empty string/);
-    }
-  });
-
-  it("refuses extra case field", () => {
-    const dir = caseDir();
-    writeCase(dir, "bad.json", {
-      id: "ok",
-      prompt: "hi",
-      checks: [{ noError: true }],
-      tags: ["x"],
-    });
-    assert.throws(() => loadCases(dir), /unknown field "tags"/);
-  });
-
-  it("refuses extra check field", () => {
-    const dir = caseDir();
-    writeCase(dir, "bad.json", {
-      id: "ok",
-      prompt: "hi",
-      checks: [{ noError: true, note: "x" }],
-    });
-    assert.throws(() => loadCases(dir), /unknown field "note"/);
-  });
-
-  it("refuses duplicate id across files", () => {
-    const dir = caseDir();
-    writeCase(dir, "one.json", { id: "dup", prompt: "a", checks: [{ noError: true }] });
-    writeCase(dir, "two.json", { id: "dup", prompt: "b", checks: [{ noError: true }] });
-    assert.throws(() => loadCases(dir), /duplicate id "dup"/);
-  });
-
-  it("throws when any file in the directory is invalid", () => {
-    const dir = caseDir();
-    writeCase(dir, "good.json", { id: "good", prompt: "hi", checks: [{ noError: true }] });
-    writeCase(dir, "bad.json", { id: "", prompt: "hi", checks: [{ noError: true }] });
-    assert.throws(() => loadCases(dir), /id must be kebab-case/);
-  });
-
-  it("loads uiText and uiMarkupTag and refuses empty or non-string values", () => {
-    const dir = caseDir();
-    writeCase(dir, "ok.json", {
-      id: "ok",
-      prompt: "hi",
-      checks: [{ uiText: "x" }, { uiMarkupTag: "strong" }],
-    });
-    assert.deepEqual(loadCases(dir)[0]!.checks, [{ uiText: "x" }, { uiMarkupTag: "strong" }]);
-    writeCase(dir, "ok.json", { id: "ok", prompt: "hi", checks: [{ uiText: "" }] });
-    assert.throws(() => loadCases(dir), /uiText must be a non-empty string/);
-    writeCase(dir, "ok.json", { id: "ok", prompt: "hi", checks: [{ uiMarkupTag: 3 }] });
-    assert.throws(() => loadCases(dir), /uiMarkupTag must be a non-empty string/);
-  });
-
-  it("loads definedWithKey, noUiComponent and customComponents, and refuses bad values", () => {
-    const dir = caseDir();
-    const seed = { name: "Seeded" };
-    writeCase(dir, "ok.json", {
-      id: "ok",
-      prompt: "hi",
-      checks: [{ definedWithKey: "$each" }, { noUiComponent: "Markup" }],
-      customComponents: [seed],
-    });
-    const [loaded] = loadCases(dir);
-    assert.deepEqual(loaded!.checks, [{ definedWithKey: "$each" }, { noUiComponent: "Markup" }]);
-    assert.deepEqual(loaded!.customComponents, [seed]);
-    writeCase(dir, "ok.json", { id: "ok", prompt: "hi", checks: [{ definedWithKey: 3 }] });
-    assert.throws(() => loadCases(dir), /definedWithKey must be a non-empty string/);
-    writeCase(dir, "ok.json", { id: "ok", prompt: "hi", checks: [{ noUiComponent: 3 }] });
-    assert.throws(() => loadCases(dir), /noUiComponent must be a non-empty string/);
-    writeCase(dir, "ok.json", {
-      id: "ok",
-      prompt: "hi",
-      checks: [{ noError: true }],
-      customComponents: {},
-    });
-    assert.throws(() => loadCases(dir), /customComponents must be an array/);
+  it("keeps customComponents and refuses a non-array", () => {
+    assert.deepEqual(loadOne({ customComponents: [] })()[0]!.customComponents, []);
+    assert.throws(loadOne({ customComponents: {} }), /customComponents must be an array/);
   });
 });

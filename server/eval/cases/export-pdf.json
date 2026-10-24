@@ -2,10 +2,6 @@
   "id": "export-pdf",
   "prompt": "Show a button labeled Export PDF that exports this page as a PDF.",
   "checks": [
-    { "endedBy": "reply" },
-    { "noError": true },
-    { "toolCalled": "list_actions" },
-    { "toolSucceeded": "render_ui" },
     { "uiComponent": "Button" },
     { "noButtonAction": true }
   ]

@@ -2,7 +2,6 @@
   "id": "reuse-saved-card",
   "prompt": "Show the Latte at $4.50 using our saved menu item design.",
   "checks": [
-    { "toolNotCalled": "define_component" },
     { "agentComponent": "MenuItemCard" },
     { "uiText": "$4.50" }
   ],
