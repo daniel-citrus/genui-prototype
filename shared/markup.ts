@@ -307,12 +307,15 @@ function hidesControl(property: string, value: string): boolean {
  * and every element holding one also lose any style that could hide them.
  * Calls `report` once per thing left out, with its path below `path`.
  * Elements past MAX_MARKUP_ELEMENTS (in document order) or MAX_MARKUP_DEPTH
- * are left out too, reported once each.
+ * are left out too, reported once each. `kept` is called with each element
+ * that stays and its path in the received root, which can differ from its
+ * position among the kept siblings.
  */
 export function sanitizeMarkup(
   root: unknown,
   path: string,
   report: (problem: string) => void = () => {},
+  kept?: (element: MarkupElement, at: string) => void,
 ): MarkupElement | null {
   let elements = 0;
   let tooMany = false;
@@ -421,6 +424,7 @@ export function sanitizeMarkup(
       }
     }
     if (refusedInputType) return null;
+    kept?.(element, at);
 
     // Only input and select take a `name`.
     const isControl = tag === "button" ? element.action !== undefined : element.attrs?.name !== undefined;
