@@ -1,5 +1,6 @@
 import type { ToolResult } from "shared/api";
 import type { UiNode } from "shared/ui";
+import type { Logger } from "../log";
 import { createToolRegistry } from "./registry";
 
 /** A vendor-neutral tool definition; LLM adapters convert it to their format. */
@@ -10,13 +11,8 @@ export interface ToolSpec {
   input_schema: Record<string, unknown>;
 }
 
-/** The subset of a pino/Fastify logger tools use. `req.log` satisfies it. */
-export interface ToolLogger {
-  info(obj: object, msg?: string): void;
-  debug(obj: object, msg?: string): void;
-  error(obj: object, msg?: string): void;
-  warn(obj: object, msg?: string): void;
-}
+/** The logger tools use. */
+export type ToolLogger = Logger;
 
 /** What a tool handler gets besides its arguments. */
 export interface ToolContext {

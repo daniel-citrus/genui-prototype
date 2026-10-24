@@ -1,11 +1,11 @@
 import type { ActionResult } from "shared/api";
-import type { ToolLogger } from "../agent/tools";
+import type { Logger } from "../log";
 
 /** What an action handler gets besides its values. */
 export interface ActionContext {
   conversationId: string;
   /** The request's logger. */
-  log: ToolLogger;
+  log: Logger;
   /** Aborted when the request goes away; the registry also aborts it on timeout. */
   signal: AbortSignal;
 }
