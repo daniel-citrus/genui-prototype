@@ -1,26 +1,9 @@
-import type { AgentTrace, AgentTraceToolCall } from "../agent/trace";
+import type { UiNode } from "shared/ui";
+import type { Generation } from "../generate/generate";
 import { collectBindings, isObject } from "../ui/bindings";
 import type { CheckFailure, EvalCheck } from "./types";
 
-const NO_RENDER_UI =
-  "no successful render_ui tree on trace (result.ok, ui present, not skipped)";
-
-function lastSuccessfulRenderUi(trace: AgentTrace): AgentTraceToolCall | undefined {
-  let last: AgentTraceToolCall | undefined;
-  for (const completion of trace.completions) {
-    for (const toolCall of completion.toolCalls) {
-      if (
-        toolCall.call.name === "render_ui" &&
-        toolCall.result.ok &&
-        toolCall.ui &&
-        toolCall.skipped === undefined
-      ) {
-        last = toolCall;
-      }
-    }
-  }
-  return last;
-}
+type Designed = Extract<Generation, { ok: true }>;
 
 function treeHasComponent(tree: unknown, name: string): boolean {
   if (!isObject(tree)) return false;
@@ -58,165 +41,73 @@ function treeHasMarkupTag(tree: unknown, tag: string): boolean {
   return tree.children.some((child) => treeHasMarkupTag(child, tag));
 }
 
-function hasKey(value: unknown, key: string): boolean {
-  if (Array.isArray(value)) return value.some((item) => hasKey(item, key));
-  if (!isObject(value)) return false;
-  return Object.hasOwn(value, key) || Object.values(value).some((item) => hasKey(item, key));
-}
-
-export function replyText(trace: AgentTrace): string {
-  return trace.completions
-    .map((c) => c.content)
-    .filter((content): content is string => content !== null)
-    .join("\n");
-}
-
 function checkLabel(check: EvalCheck): string {
-  if ("endedBy" in check) return `endedBy "${check.endedBy}"`;
-  if ("noError" in check) return "noError";
-  if ("toolCalled" in check) return `toolCalled "${check.toolCalled}"`;
-  if ("toolNotCalled" in check) return `toolNotCalled "${check.toolNotCalled}"`;
-  if ("toolSucceeded" in check) return `toolSucceeded "${check.toolSucceeded}"`;
-  if ("uiComponent" in check) return `uiComponent "${check.uiComponent}"`;
-  if ("uiButtonAction" in check) return `uiButtonAction "${check.uiButtonAction}"`;
-  if ("uiText" in check) return `uiText "${check.uiText}"`;
-  if ("uiMarkupTag" in check) return `uiMarkupTag "${check.uiMarkupTag}"`;
-  if ("agentComponent" in check) return `agentComponent "${check.agentComponent}"`;
   if ("noButtonAction" in check) return "noButtonAction";
-  if ("definedWithKey" in check) return `definedWithKey "${check.definedWithKey}"`;
-  if ("noUiComponent" in check) return `noUiComponent "${check.noUiComponent}"`;
-  if ("replyMaxWords" in check) return `replyMaxWords ${check.replyMaxWords}`;
-  if ("replyExcludes" in check) return `replyExcludes "${check.replyExcludes}"`;
-  return `uiNamedInput "${check.uiNamedInput}"`;
+  const [name, value] = Object.entries(check)[0] as [string, string | number];
+  return typeof value === "number" ? `${name} ${value}` : `${name} "${value}"`;
 }
 
-function evaluateCheck(trace: AgentTrace, check: EvalCheck): CheckFailure | undefined {
+function evaluateCheck(generation: Designed, check: EvalCheck): CheckFailure | undefined {
   const label = checkLabel(check);
+  const tree: UiNode = generation.tree;
+  const fail = (detail: string): CheckFailure => ({ check, reason: `${label}: ${detail}` });
 
-  if ("endedBy" in check) {
-    if (trace.endedBy === check.endedBy) return undefined;
-    return {
-      check,
-      reason: `${label}: trace endedBy is "${trace.endedBy}"`,
-    };
+  if ("maxAttempts" in check) {
+    const used = generation.attempts.length;
+    return used <= check.maxAttempts ? undefined : fail(`took ${used} attempts`);
   }
 
-  if ("noError" in check) {
-    if (trace.error === undefined) return undefined;
-    return { check, reason: `${label}: trace has error` };
+  if ("notesMaxWords" in check) {
+    const words = generation.notes.split(/\s+/).filter(Boolean).length;
+    return words <= check.notesMaxWords ? undefined : fail(`notes have ${words} words`);
   }
 
-  if ("toolCalled" in check) {
-    const found = trace.completions.some((c) =>
-      c.toolCalls.some((tc) => tc.call.name === check.toolCalled),
-    );
-    if (found) return undefined;
-    return { check, reason: `${label}: no matching tool call` };
-  }
-
-  if ("toolSucceeded" in check) {
-    const found = trace.completions.some((c) =>
-      c.toolCalls.some(
-        (tc) =>
-          tc.call.name === check.toolSucceeded &&
-          tc.result.ok &&
-          tc.skipped === undefined,
-      ),
-    );
-    if (found) return undefined;
-    return { check, reason: `${label}: no successful matching tool call` };
-  }
-
-  if ("toolNotCalled" in check) {
-    const found = trace.completions.some((c) =>
-      c.toolCalls.some((tc) => tc.call.name === check.toolNotCalled),
-    );
-    if (!found) return undefined;
-    return { check, reason: `${label}: tool was called` };
-  }
-
-  if ("definedWithKey" in check) {
-    const found = trace.completions.some((c) =>
-      c.toolCalls.some(
-        (tc) =>
-          tc.call.name === "define_component" &&
-          tc.result.ok &&
-          tc.skipped === undefined &&
-          hasKey(tc.call.args, check.definedWithKey),
-      ),
-    );
-    if (found) return undefined;
-    return { check, reason: `${label}: no successful define_component call with that key` };
-  }
-
-  if ("replyMaxWords" in check) {
-    const words = replyText(trace).split(/\s+/).filter(Boolean).length;
-    if (words <= check.replyMaxWords) return undefined;
-    return { check, reason: `${label}: reply has ${words} words` };
-  }
-
-  if ("replyExcludes" in check) {
-    if (!replyText(trace).includes(check.replyExcludes)) return undefined;
-    return { check, reason: `${label}: reply contains the excluded text` };
-  }
-
-  const renderUi = lastSuccessfulRenderUi(trace);
-  if (!renderUi?.ui) {
-    return { check, reason: `${label}: ${NO_RENDER_UI}` };
-  }
-
-  if ("noUiComponent" in check) {
-    if (!treeHasComponent(renderUi.ui.tree, check.noUiComponent)) return undefined;
-    return { check, reason: `${label}: component found in last render_ui tree` };
+  if ("notesExcludes" in check) {
+    return generation.notes.includes(check.notesExcludes) ? fail("notes contain the excluded text") : undefined;
   }
 
   if ("agentComponent" in check) {
-    const argsTree = renderUi.call.args.tree;
-    if (argsTree === undefined) return { check, reason: `${label}: arguments tree is missing` };
-    if (treeHasComponent(argsTree, check.agentComponent)) return undefined;
-    return { check, reason: `${label}: component not found in the render_ui arguments` };
+    const own = generation.attempts.at(-1)?.tree;
+    if (own === undefined) return fail("the final attempt has no tree");
+    return treeHasComponent(own, check.agentComponent) ? undefined : fail("component not found in the model's own tree");
   }
 
-  const tree = renderUi.ui.tree;
+  if ("noUiComponent" in check) {
+    return treeHasComponent(tree, check.noUiComponent) ? fail("component found in the tree") : undefined;
+  }
 
   if ("uiComponent" in check) {
-    if (treeHasComponent(tree, check.uiComponent)) return undefined;
-    return { check, reason: `${label}: component not found in last render_ui tree` };
+    return treeHasComponent(tree, check.uiComponent) ? undefined : fail("component not found in the tree");
   }
 
   if ("uiText" in check) {
-    if (treeStrings(tree).some((text) => text.includes(check.uiText))) return undefined;
-    return { check, reason: `${label}: text not found in last render_ui tree` };
+    return treeStrings(tree).some((text) => text.includes(check.uiText)) ? undefined : fail("text not found in the tree");
   }
 
   if ("uiMarkupTag" in check) {
-    if (treeHasMarkupTag(tree, check.uiMarkupTag)) return undefined;
-    return { check, reason: `${label}: Markup tag not found in last render_ui tree` };
+    return treeHasMarkupTag(tree, check.uiMarkupTag) ? undefined : fail("Markup tag not found in the tree");
   }
 
   const bindings = collectBindings(tree);
 
   if ("noButtonAction" in check) {
-    if (!treeHasComponent(tree, "Button")) {
-      return { check, reason: `${label}: no Button in the last render_ui tree` };
-    }
-    if (bindings.buttons.length === 0) return undefined;
-    return { check, reason: `${label}: a button has an action` };
+    if (!treeHasComponent(tree, "Button")) return fail("no Button in the tree");
+    return bindings.buttons.length === 0 ? undefined : fail("a button has an action");
   }
 
   if ("uiButtonAction" in check) {
-    if (bindings.buttons.some((b) => b.action === check.uiButtonAction)) return undefined;
-    return { check, reason: `${label}: button action not found in last render_ui tree` };
+    return bindings.buttons.some((b) => b.action === check.uiButtonAction)
+      ? undefined
+      : fail("button action not found in the tree");
   }
 
-  if (bindings.inputs.some((i) => i.name === check.uiNamedInput)) return undefined;
-  return { check, reason: `${label}: named input not found in last render_ui tree` };
+  return bindings.inputs.some((i) => i.name === check.uiNamedInput) ? undefined : fail("named input not found in the tree");
 }
 
-export function checkTrace(trace: AgentTrace, checks: EvalCheck[]): CheckFailure[] {
+export function checkGeneration(generation: Designed, checks: EvalCheck[]): CheckFailure[] {
   const failures: CheckFailure[] = [];
   for (const check of checks) {
-    const failure = evaluateCheck(trace, check);
+    const failure = evaluateCheck(generation, check);
     if (failure) failures.push(failure);
   }
   return failures;

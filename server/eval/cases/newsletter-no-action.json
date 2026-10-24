@@ -2,10 +2,6 @@
   "id": "newsletter-no-action",
   "prompt": "Show a newsletter signup: an email field and a Subscribe button that adds the person to our mailing list.",
   "checks": [
-    { "endedBy": "reply" },
-    { "noError": true },
-    { "toolCalled": "list_actions" },
-    { "toolSucceeded": "render_ui" },
     { "uiComponent": "TextInput" },
     { "uiComponent": "Button" },
     { "noButtonAction": true }

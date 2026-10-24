@@ -2,15 +2,10 @@
   "id": "catalog-layout",
   "prompt": "Show a Card titled Specials. Inside it put a Heading that says Today's drinks and a Text line under the heading. Group them with a Stack.",
   "checks": [
-    { "endedBy": "reply" },
-    { "noError": true },
-    { "toolSucceeded": "render_ui" },
-    { "toolNotCalled": "list_actions" },
     { "uiComponent": "Stack" },
     { "uiComponent": "Card" },
     { "uiComponent": "Heading" },
     { "uiComponent": "Text" },
-    { "noUiComponent": "Markup" },
-    { "toolNotCalled": "define_component" }
+    { "noUiComponent": "Markup" }
   ]
 }

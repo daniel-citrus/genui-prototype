@@ -1,8 +1,7 @@
 import { parseArgs } from "node:util";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createOpenAILlm } from "../adapters/openai/OpenAILlm";
-import { SYSTEM_PROMPT } from "../agent/systemPrompt";
+import { createOpenAIComponentLlm } from "../adapters/openai/OpenAIComponentLlm";
 import { agentAvailable, config } from "../config";
 import { loadCases } from "./loadCases";
 import { runEvalCase } from "./runner";
@@ -30,7 +29,7 @@ export type CliMainOptions = {
   inject?: {
     loadCases?: typeof loadCases;
     runEvalCase?: typeof runEvalCase;
-    createOpenAILlm?: typeof createOpenAILlm;
+    createOpenAIComponentLlm?: typeof createOpenAIComponentLlm;
     createEvalLogDir?: typeof createEvalLogDir;
     writeEvalCaseLog?: typeof writeEvalCaseLog;
     timeoutSignal?: () => AbortSignal;
@@ -66,11 +65,16 @@ export function parseCliArgs(argv: string[]): CliArgs {
   return { ok: true, repeat };
 }
 
+function attemptCount(result: EvalCaseResult): number | undefined {
+  return result.generation?.attempts.length;
+}
+
 function formatResult(result: EvalCaseResult, label = ""): string {
   if (result.ok) return `pass ${result.id}${label}`;
   const parts = result.failures.map((f) => f.reason);
-  if (result.endedBy !== undefined) parts.push(`endedBy: ${result.endedBy}`);
-  if (result.error !== undefined) parts.push(`error: ${result.error}`);
+  const attempts = attemptCount(result);
+  if (attempts !== undefined) parts.push(`attempts: ${attempts}`);
+  if (result.error !== undefined && !parts.includes(result.error)) parts.push(`error: ${result.error}`);
   return `fail ${result.id}${label} ${parts.join("; ")}`;
 }
 
@@ -78,9 +82,8 @@ function timeoutResult(id: string, partial: EvalCaseResult): EvalCaseResult {
   return {
     id,
     ok: false,
-    failures: [{ check: { noError: true }, reason: "case timed out after 180 seconds" }],
-    trace: partial.trace,
-    ...(partial.endedBy !== undefined ? { endedBy: partial.endedBy } : {}),
+    failures: [{ reason: "case timed out after 180 seconds" }],
+    ...(partial.generation !== undefined ? { generation: partial.generation } : {}),
     ...(partial.error !== undefined ? { error: partial.error } : {}),
   };
 }
@@ -117,7 +120,7 @@ export async function main(options: CliMainOptions = {}): Promise<number> {
 
   const loadCasesFn = options.inject?.loadCases ?? loadCases;
   const runEvalCaseFn = options.inject?.runEvalCase ?? runEvalCase;
-  const createLlm = options.inject?.createOpenAILlm ?? createOpenAILlm;
+  const createLlm = options.inject?.createOpenAIComponentLlm ?? createOpenAIComponentLlm;
   const createEvalLogDirFn = options.inject?.createEvalLogDir ?? createEvalLogDir;
   const writeEvalCaseLogFn = options.inject?.writeEvalCaseLog ?? writeEvalCaseLog;
   const timeoutSignal =
@@ -141,11 +144,12 @@ export async function main(options: CliMainOptions = {}): Promise<number> {
     apiKey: config.openai.apiKey,
     model: config.openai.model,
     maxOutputTokens: config.openai.maxOutputTokens,
-    systemPrompt: SYSTEM_PROMPT,
   });
 
   let anyFailed = false;
   let anyLogFailed = false;
+  let runs = 0;
+  let firstTry = 0;
   const passes = new Map<string, number>();
   for (const evalCase of cases) {
     passes.set(evalCase.id, 0);
@@ -156,30 +160,31 @@ export async function main(options: CliMainOptions = {}): Promise<number> {
         result = timeoutResult(evalCase.id, result);
       }
 
-      if (result.trace === undefined) {
-        error(`log failed ${evalCase.id} missing-trace`);
-        anyLogFailed = true;
-      } else {
-        const record: EvalCaseLog = {
-          id: evalCase.id,
-          prompt: evalCase.prompt,
-          checks: evalCase.checks,
-          ok: result.ok,
-          failures: result.failures,
-          trace: result.trace,
-        };
-        if (result.endedBy !== undefined) record.endedBy = result.endedBy;
-        if (result.error !== undefined) record.error = result.error;
+      const generation = result.generation;
+      const record: EvalCaseLog = {
+        id: evalCase.id,
+        prompt: evalCase.prompt,
+        checks: evalCase.checks,
+        ok: result.ok,
+        failures: result.failures,
+        attempts: generation?.attempts ?? [],
+      };
+      if (generation?.ok) {
+        record.tree = generation.tree;
+        record.notes = generation.notes;
+      }
+      if (result.error !== undefined) record.error = result.error;
 
-        try {
-          if (repeat === 1) writeEvalCaseLogFn(logDir, record);
-          else writeEvalCaseLogFn(logDir, record, attempt);
-        } catch (err) {
-          error(`log failed ${evalCase.id} ${errorCode(err)}`);
-          anyLogFailed = true;
-        }
+      try {
+        if (repeat === 1) writeEvalCaseLogFn(logDir, record);
+        else writeEvalCaseLogFn(logDir, record, attempt);
+      } catch (err) {
+        error(`log failed ${evalCase.id} ${errorCode(err)}`);
+        anyLogFailed = true;
       }
 
+      runs++;
+      if (result.ok && attemptCount(result) === 1) firstTry++;
       if (result.ok) passes.set(evalCase.id, (passes.get(evalCase.id) ?? 0) + 1);
       else anyFailed = true;
       log(formatResult(result, repeat > 1 ? ` [${attempt}/${repeat}]` : ""));
@@ -191,6 +196,7 @@ export async function main(options: CliMainOptions = {}): Promise<number> {
       log(`rate ${evalCase.id} ${passes.get(evalCase.id)}/${repeat}`);
     }
   }
+  log(`first-try ${firstTry}/${runs}`);
   log(`logs ${resolve(logDir)}`);
 
   return anyFailed || anyLogFailed ? 1 : 0;

@@ -1,10 +1,54 @@
 {
   "id": "reusable-name-list",
-  "prompt": "Make a list I can reuse for any set of names, then show it with Ana, Bo and Cy.",
+  "prompt": "Show a list of the names Ana, Bo and Cy using our saved name list design.",
   "checks": [
-    { "toolSucceeded": "define_component" },
-    { "definedWithKey": "$each" },
-    { "toolSucceeded": "render_ui" },
+    { "agentComponent": "NameList" },
     { "uiText": "Cy" }
+  ],
+  "customComponents": [
+    {
+      "name": "NameList",
+      "description": "A column of names, one line per name.",
+      "category": "display",
+      "children": "none",
+      "propsSchema": {
+        "type": "object",
+        "properties": {
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The names to list."
+          }
+        },
+        "required": [
+          "names"
+        ],
+        "additionalProperties": false
+      },
+      "exampleProps": {
+        "names": [
+          "Ana"
+        ]
+      },
+      "template": {
+        "component": "Stack",
+        "props": {},
+        "children": [
+          {
+            "$each": "names",
+            "as": {
+              "component": "Text",
+              "props": {
+                "text": {
+                  "$item": true
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
   ]
 }

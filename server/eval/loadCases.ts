@@ -1,39 +1,36 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { MAX_MESSAGE_CHARS } from "shared/api";
+import { MAX_PROMPT_CHARS } from "shared/generate";
 import type { CustomComponentDefinition } from "shared/customComponents";
-import type { EndedBy } from "../agent/trace";
+import { MAX_ATTEMPTS } from "../generate/generate";
 import type { EvalCase, EvalCheck } from "./types";
 
 const KEBAB_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CASE_KEYS = ["id", "prompt", "checks", "customComponents"] as const;
 const CHECK_KEYS = [
+  "maxAttempts",
+  "uiComponent",
+  "noUiComponent",
+  "uiButtonAction",
+  "noButtonAction",
+  "uiNamedInput",
+  "uiText",
+  "uiMarkupTag",
+  "agentComponent",
+  "notesMaxWords",
+  "notesExcludes",
+] as const;
+
+const REMOVED_CHECK_KEYS = [
   "endedBy",
   "noError",
   "toolCalled",
   "toolNotCalled",
   "toolSucceeded",
-  "uiComponent",
-  "uiButtonAction",
-  "uiNamedInput",
-  "uiText",
-  "uiMarkupTag",
-  "agentComponent",
-  "noButtonAction",
   "definedWithKey",
-  "noUiComponent",
   "replyMaxWords",
   "replyExcludes",
-] as const;
-
-const ENDED_BY: ReadonlySet<string> = new Set([
-  "reply",
-  "max_steps",
-  "tool_budget",
-  "token_budget",
-  "stopped",
-  "unresolved",
-]);
+];
 
 function assertPlainObject(value: unknown, context: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -52,6 +49,9 @@ function refuseExtraKeys(obj: Record<string, unknown>, allowed: readonly string[
 
 function parseCheck(raw: unknown, context: string): EvalCheck {
   const obj = assertPlainObject(raw, context);
+  for (const key of REMOVED_CHECK_KEYS) {
+    if (key in obj) throw new Error(`${context}: check "${key}" was removed`);
+  }
   refuseExtraKeys(obj, CHECK_KEYS, context);
 
   const present = CHECK_KEYS.filter((key) => key in obj);
@@ -64,42 +64,33 @@ function parseCheck(raw: unknown, context: string): EvalCheck {
 
   const key = present[0];
   switch (key) {
-    case "endedBy": {
-      const value = obj.endedBy;
-      if (typeof value !== "string" || !ENDED_BY.has(value)) {
-        throw new Error(`${context}: endedBy must be one of ${[...ENDED_BY].join(", ")}`);
-      }
-      return { endedBy: value as EndedBy };
-    }
-    case "noError":
-      if (obj.noError !== true) {
-        throw new Error(`${context}: noError must be true`);
-      }
-      return { noError: true };
     case "noButtonAction":
       if (obj.noButtonAction !== true) {
         throw new Error(`${context}: noButtonAction must be true`);
       }
       return { noButtonAction: true };
-    case "replyMaxWords": {
-      const value = obj.replyMaxWords;
-      if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 500) {
-        throw new Error(`${context}: replyMaxWords must be an integer from 1 to 500`);
+    case "maxAttempts": {
+      const value = obj.maxAttempts;
+      if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > MAX_ATTEMPTS) {
+        throw new Error(`${context}: maxAttempts must be an integer from 1 to ${MAX_ATTEMPTS}`);
       }
-      return { replyMaxWords: value };
+      return { maxAttempts: value };
     }
-    case "toolCalled":
-    case "toolNotCalled":
-    case "toolSucceeded":
+    case "notesMaxWords": {
+      const value = obj.notesMaxWords;
+      if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 500) {
+        throw new Error(`${context}: notesMaxWords must be an integer from 1 to 500`);
+      }
+      return { notesMaxWords: value };
+    }
     case "uiComponent":
     case "uiButtonAction":
     case "uiNamedInput":
     case "uiText":
     case "uiMarkupTag":
     case "agentComponent":
-    case "definedWithKey":
     case "noUiComponent":
-    case "replyExcludes": {
+    case "notesExcludes": {
       const value = obj[key];
       if (typeof value !== "string" || value.length === 0) {
         throw new Error(`${context}: ${key} must be a non-empty string`);
@@ -128,8 +119,8 @@ function parseCase(raw: unknown, fileLabel: string): EvalCase {
   if (obj.prompt.length === 0) {
     throw new Error(`${fileLabel}: prompt must be non-empty`);
   }
-  if (obj.prompt.length > MAX_MESSAGE_CHARS) {
-    throw new Error(`${fileLabel}: prompt exceeds ${MAX_MESSAGE_CHARS} characters`);
+  if (obj.prompt.length > MAX_PROMPT_CHARS) {
+    throw new Error(`${fileLabel}: prompt exceeds ${MAX_PROMPT_CHARS} characters`);
   }
 
   if (!Array.isArray(obj.checks)) {
