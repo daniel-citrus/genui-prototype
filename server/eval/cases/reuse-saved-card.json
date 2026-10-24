@@ -1,0 +1,61 @@
+{
+  "id": "reuse-saved-card",
+  "prompt": "Show the Latte at $4.50 using our saved menu item design.",
+  "checks": [
+    { "toolNotCalled": "define_component" },
+    { "agentComponent": "MenuItemCard" },
+    { "uiText": "$4.50" }
+  ],
+  "customComponents": [
+    {
+      "name": "MenuItemCard",
+      "description": "A menu item in a card with its name and price.",
+      "category": "display",
+      "children": "none",
+      "propsSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Item name."
+          },
+          "price": {
+            "type": "string",
+            "description": "Price with its currency, such as $4.50."
+          }
+        },
+        "required": [
+          "name",
+          "price"
+        ],
+        "additionalProperties": false
+      },
+      "exampleProps": {
+        "name": "Latte",
+        "price": "$4.50"
+      },
+      "template": {
+        "component": "Card",
+        "props": {},
+        "children": [
+          {
+            "component": "Heading",
+            "props": {
+              "text": {
+                "$prop": "name"
+              }
+            }
+          },
+          {
+            "component": "Text",
+            "props": {
+              "text": {
+                "$prop": "price"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

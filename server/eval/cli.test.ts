@@ -31,6 +31,18 @@ const committedCases: EvalCase[] = [
     ],
   },
   {
+    id: "bullet-list-items",
+    prompt:
+      "Show these as a simple bullet list: Espresso, Latte, Mocha.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolSucceeded: "render_ui" },
+      { uiMarkupTag: "li" },
+      { uiText: "Mocha" },
+    ],
+  },
+  {
     id: "catalog-layout",
     prompt:
       "Show a Card titled Specials. Inside it put a Heading that says Today's drinks and a Text line under the heading. Group them with a Stack.",
@@ -43,6 +55,8 @@ const committedCases: EvalCase[] = [
       { uiComponent: "Card" },
       { uiComponent: "Heading" },
       { uiComponent: "Text" },
+      { noUiComponent: "Markup" },
+      { toolNotCalled: "define_component" },
     ],
   },
   {
@@ -55,6 +69,8 @@ const committedCases: EvalCase[] = [
       { toolNotCalled: "list_actions" },
       { toolSucceeded: "render_ui" },
       { uiComponent: "Alert" },
+      { noUiComponent: "Markup" },
+      { toolNotCalled: "define_component" },
     ],
   },
   {
@@ -109,6 +125,8 @@ const committedCases: EvalCase[] = [
       { toolSucceeded: "render_ui" },
       { uiButtonAction: "demo_echo" },
       { uiNamedInput: "text" },
+      { noUiComponent: "Markup" },
+      { toolNotCalled: "define_component" },
     ],
   },
   {
@@ -249,6 +267,19 @@ const committedCases: EvalCase[] = [
     ],
   },
   {
+    id: "per-item-edit-cards",
+    prompt:
+      "Show each menu item in its own card with a form to rename it.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolSucceeded: "render_ui" },
+      { uiComponent: "Card" },
+      { uiButtonAction: "menu_update_item" },
+      { uiNamedInput: "item" },
+    ],
+  },
+  {
     id: "plain-short-reply",
     prompt:
       "Make a welcome card with a title and a short greeting",
@@ -279,6 +310,91 @@ const committedCases: EvalCase[] = [
     ],
   },
   {
+    id: "reusable-name-list",
+    prompt:
+      "Make a list I can reuse for any set of names, then show it with Ana, Bo and Cy.",
+    checks: [
+      { toolSucceeded: "define_component" },
+      { definedWithKey: "$each" },
+      { toolSucceeded: "render_ui" },
+      { uiText: "Cy" },
+    ],
+  },
+  {
+    id: "reuse-saved-card",
+    prompt:
+      "Show the Latte at $4.50 using our saved menu item design.",
+    checks: [
+      { toolNotCalled: "define_component" },
+      { agentComponent: "MenuItemCard" },
+      { uiText: "$4.50" },
+    ],
+    customComponents: [
+      {
+        "name": "MenuItemCard",
+        "description": "A menu item in a card with its name and price.",
+        "category": "display",
+        "children": "none",
+        "propsSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Item name."
+            },
+            "price": {
+              "type": "string",
+              "description": "Price with its currency, such as $4.50."
+            }
+          },
+          "required": [
+            "name",
+            "price"
+          ],
+          "additionalProperties": false
+        },
+        "exampleProps": {
+          "name": "Latte",
+          "price": "$4.50"
+        },
+        "template": {
+          "component": "Card",
+          "props": {},
+          "children": [
+            {
+              "component": "Heading",
+              "props": {
+                "text": {
+                  "$prop": "name"
+                }
+              }
+            },
+            {
+              "component": "Text",
+              "props": {
+                "text": {
+                  "$prop": "price"
+                }
+              }
+            }
+          ]
+        }
+      }
+    ],
+  },
+  {
+    id: "revenue-bar-chart",
+    prompt:
+      "Show monthly revenue as a bar chart: Jan $1,200, Feb $900, Mar $1,500.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolSucceeded: "render_ui" },
+      { uiComponent: "Markup" },
+      { uiText: "Mar" },
+    ],
+  },
+  {
     id: "simple-heading",
     prompt:
       "Show a heading that says Hello",
@@ -287,6 +403,8 @@ const committedCases: EvalCase[] = [
       { noError: true },
       { toolSucceeded: "render_ui" },
       { uiComponent: "Heading" },
+      { noUiComponent: "Markup" },
+      { toolNotCalled: "define_component" },
       { replyMaxWords: 40 },
     ],
   },
@@ -301,6 +419,17 @@ const committedCases: EvalCase[] = [
       { toolSucceeded: "render_ui" },
       { uiComponent: "Button" },
       { noButtonAction: true },
+    ],
+  },
+  {
+    id: "star-rating",
+    prompt:
+      "Show a 4 out of 5 star rating for the Latte.",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolSucceeded: "render_ui" },
+      { uiComponent: "Markup" },
     ],
   },
 ];

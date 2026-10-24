@@ -6,6 +6,8 @@
     { "noError": true },
     { "toolSucceeded": "render_ui" },
     { "uiComponent": "Heading" },
+    { "noUiComponent": "Markup" },
+    { "toolNotCalled": "define_component" },
     { "replyMaxWords": 40 }
   ]
 }

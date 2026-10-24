@@ -58,6 +58,12 @@ function treeHasMarkupTag(tree: unknown, tag: string): boolean {
   return tree.children.some((child) => treeHasMarkupTag(child, tag));
 }
 
+function hasKey(value: unknown, key: string): boolean {
+  if (Array.isArray(value)) return value.some((item) => hasKey(item, key));
+  if (!isObject(value)) return false;
+  return Object.hasOwn(value, key) || Object.values(value).some((item) => hasKey(item, key));
+}
+
 export function replyText(trace: AgentTrace): string {
   return trace.completions
     .map((c) => c.content)
@@ -77,6 +83,8 @@ function checkLabel(check: EvalCheck): string {
   if ("uiMarkupTag" in check) return `uiMarkupTag "${check.uiMarkupTag}"`;
   if ("agentComponent" in check) return `agentComponent "${check.agentComponent}"`;
   if ("noButtonAction" in check) return "noButtonAction";
+  if ("definedWithKey" in check) return `definedWithKey "${check.definedWithKey}"`;
+  if ("noUiComponent" in check) return `noUiComponent "${check.noUiComponent}"`;
   if ("replyMaxWords" in check) return `replyMaxWords ${check.replyMaxWords}`;
   if ("replyExcludes" in check) return `replyExcludes "${check.replyExcludes}"`;
   return `uiNamedInput "${check.uiNamedInput}"`;
@@ -127,6 +135,20 @@ function evaluateCheck(trace: AgentTrace, check: EvalCheck): CheckFailure | unde
     return { check, reason: `${label}: tool was called` };
   }
 
+  if ("definedWithKey" in check) {
+    const found = trace.completions.some((c) =>
+      c.toolCalls.some(
+        (tc) =>
+          tc.call.name === "define_component" &&
+          tc.result.ok &&
+          tc.skipped === undefined &&
+          hasKey(tc.call.args, check.definedWithKey),
+      ),
+    );
+    if (found) return undefined;
+    return { check, reason: `${label}: no successful define_component call with that key` };
+  }
+
   if ("replyMaxWords" in check) {
     const words = replyText(trace).split(/\s+/).filter(Boolean).length;
     if (words <= check.replyMaxWords) return undefined;
@@ -141,6 +163,11 @@ function evaluateCheck(trace: AgentTrace, check: EvalCheck): CheckFailure | unde
   const renderUi = lastSuccessfulRenderUi(trace);
   if (!renderUi?.ui) {
     return { check, reason: `${label}: ${NO_RENDER_UI}` };
+  }
+
+  if ("noUiComponent" in check) {
+    if (!treeHasComponent(renderUi.ui.tree, check.noUiComponent)) return undefined;
+    return { check, reason: `${label}: component found in last render_ui tree` };
   }
 
   if ("agentComponent" in check) {

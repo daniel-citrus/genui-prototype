@@ -6,6 +6,8 @@
     { "noError": true },
     { "toolNotCalled": "list_actions" },
     { "toolSucceeded": "render_ui" },
-    { "uiComponent": "Alert" }
+    { "uiComponent": "Alert" },
+    { "noUiComponent": "Markup" },
+    { "toolNotCalled": "define_component" }
   ]
 }

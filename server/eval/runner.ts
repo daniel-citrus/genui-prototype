@@ -15,6 +15,7 @@ import type { AgentLlm } from "../ports/AgentLlm";
 import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
 import { InMemoryCustomComponentRepository } from "../ports/fakes/InMemoryCustomComponentRepository";
 import { InMemoryTraceRepository } from "../ports/fakes/InMemoryTraceRepository";
+import { validateDefinition } from "../customComponents/definition";
 import { checkTrace } from "./checks";
 import type { EvalCase, EvalCaseResult } from "./types";
 
@@ -27,15 +28,19 @@ export const evalRunnerTestHooks = {
   uuid: cryptoRandomUuid,
 };
 
-export function createEvalTools() {
-  const registry = createActionRegistry([
+function evalActionRegistry() {
+  return createActionRegistry([
     ...createActions(),
     ...createMenuActions(createInMemoryPosMenu()),
   ]);
+}
+
+export function createEvalTools(customComponents = new InMemoryCustomComponentRepository()) {
+  const registry = evalActionRegistry();
   return createToolRegistry(
     createAgentTools({
       components: new InMemoryComponentRepository(catalog),
-      customComponents: new InMemoryCustomComponentRepository(),
+      customComponents,
       actions: registry.specs,
       listChoices: registry.listChoices,
     }),
@@ -60,6 +65,27 @@ function runFailureReason(err: unknown): string {
   return "agent run failed";
 }
 
+/** Saves the case's seeds; returns `seed <name>: <first problem>` for the first invalid one. */
+async function seedComponents(
+  evalCase: EvalCase,
+  repository: InMemoryCustomComponentRepository,
+): Promise<string | undefined> {
+  const seeds = evalCase.customComponents ?? [];
+  if (seeds.length === 0) return undefined;
+  const registry = evalActionRegistry();
+  const components = await new InMemoryComponentRepository(catalog).list();
+  for (const seed of seeds) {
+    const check = await validateDefinition(seed, {
+      catalog: components,
+      resolve: (name) => repository.getByName(name),
+      actions: registry.specs,
+    });
+    if (!check.ok) return `seed ${seed.name}: ${check.errors[0]}`;
+    await repository.save(check.definition);
+  }
+  return undefined;
+}
+
 export async function runEvalCase(
   evalCase: EvalCase,
   opts: { llm: AgentLlm; signal?: AbortSignal },
@@ -68,11 +94,25 @@ export async function runEvalCase(
   const conversationId = `eval:${evalCase.id}:${evalRunnerTestHooks.uuid()}`;
   const signal = opts.signal ?? neverAborted;
 
+  const repository = new InMemoryCustomComponentRepository();
+  const seedError = await seedComponents(evalCase, repository);
+  if (seedError !== undefined) {
+    const trace = emptyTrace(conversationId);
+    return {
+      id: evalCase.id,
+      ok: false,
+      failures: [],
+      trace,
+      endedBy: trace.endedBy,
+      error: seedError,
+    };
+  }
+
   const run: AgentRun = {
     emit: () => {},
     conversationId,
     signal,
-    tools: createEvalTools(),
+    tools: createEvalTools(repository),
     log: noopLogger,
     traces,
   };
