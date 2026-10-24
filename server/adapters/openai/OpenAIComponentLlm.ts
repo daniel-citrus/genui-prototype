@@ -3,7 +3,7 @@ import type {
   ChatCompletion,
   ChatCompletionCreateParamsNonStreaming,
 } from "openai/resources/chat/completions";
-import { DEFAULT_MAX_OUTPUT_TOKENS } from "../../agent/guardrails";
+import { DEFAULT_MAX_OUTPUT_TOKENS } from "../../config";
 import type { ComponentLlm } from "../../ports/ComponentLlm";
 
 /** The slice of the OpenAI SDK this adapter uses. A real `OpenAI` satisfies it. */

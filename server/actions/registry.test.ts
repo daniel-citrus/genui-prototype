@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { ToolLogger } from "../agent/tools";
+import type { Logger } from "../log";
 import { createActions } from "./index";
 import { createActionRegistry, MAX_ACTION_MESSAGE_CHARS } from "./registry";
 import type { ActionContext, ActionDefinition, ChoiceSource } from "./types";
 
-function recordingLogger(): ToolLogger & { errors: Record<string, unknown>[] } {
+function recordingLogger(): Logger & { errors: Record<string, unknown>[] } {
   const errors: Record<string, unknown>[] = [];
   return {
     errors,

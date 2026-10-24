@@ -24,11 +24,10 @@ Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
    docker compose up -d db
    ```
 
-4. Apply the migrations (catalog and traces on the same Postgres instance), then seed the component catalog:
+4. Apply the migrations, then seed the component catalog:
 
    ```bash
    npm run db:migrate
-   npm run db:migrate:traces
    npm run db:seed
    ```
 
@@ -40,7 +39,7 @@ Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
    npm run dev
    ```
 
-Open http://localhost:5173. `curl -s localhost:5173/api/health` should show `{"ok":true,"db":true,"agent":true,"traces":true}` when both Postgres databases are up (same instance: `genui` and `genui_traces`; see `TRACE_DATABASE_URL` in `server/config.ts`). Without a key the app still runs, with `"agent":false`, and the chat replies with an error asking for `OPENAI_API_KEY`.
+Open http://localhost:5173. `curl -s localhost:5173/api/health` should show `{"ok":true,"db":true,"agent":true}` when Postgres is up. Without a key the app still runs, with `"agent":false`, and generating answers with an error asking for `OPENAI_API_KEY`.
 
 `npm run dev:web` and `npm run dev:api` start either half alone.
 
@@ -49,14 +48,12 @@ Open http://localhost:5173. `curl -s localhost:5173/api/health` should show `{"o
 ### Other scripts
 
 ```bash
-npm test              # unit tests (catalog DB tests need DATABASE_URL; traces DB tests need TRACE_DATABASE_URL)
+npm test              # unit tests (catalog DB tests need DATABASE_URL)
 npm run typecheck     # app, Vite config, and server
 npm run build         # web bundle → dist/
 npm run build:api     # API bundle → server-dist/index.mjs
 npm run preview       # serve dist/ on :4173
 npm run db:generate   # new migration after editing server/adapters/db/schema.ts
-npm run db:generate:traces   # new migration after editing server/adapters/traces/schema.ts
-npm run db:migrate:traces    # ensure genui_traces exists and apply traces migrations
 npm run db:seed       # sync the components table with server/catalog/components.ts (rerun after pulling catalog changes)
 npm run db:studio     # browse the database
 npm run eval          # live OpenAI eval cases; gitignored eval-logs JSON per case; `-- --repeat N` (1-10) reruns each case, logs <id>.<k>.json (needs OPENAI_API_KEY; same model as chat; not run in CI)
@@ -76,8 +73,7 @@ export OPENAI_API_KEY=sk-...
 docker compose up dev
 ```
 
-This brings up `db`, `api-dev` (port 3001), and `dev` (port 5173). Open http://localhost:5173. The development API does not migrate or seed on start: run `npm run db:migrate && npm run db:migrate:traces && npm run db:seed` against the Compose database from the host once, and again after pulling migration or catalog changes (or start the production flow, which migrates and seeds on start).
-
+This brings up `db`, `api-dev` (port 3001), and `dev` (port 5173). Open http://localhost:5173. The development API does not migrate or seed on start: run `npm run db:migrate && 
 **Production** (API image + nginx):
 
 ```bash

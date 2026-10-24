@@ -25,7 +25,6 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgres://genui:genui@localhost:5432/genui
-      TRACE_DATABASE_URL: postgres://genui:genui@localhost:5432/genui_traces
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,7 +32,6 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run db:migrate:traces
       - run: npm run typecheck
       - run: npm test
       - run: npm run build

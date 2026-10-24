@@ -1,31 +1,19 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { emptyToolRegistry } from "./agent/tools";
-import { InMemoryTraceRepository } from "./ports/fakes/InMemoryTraceRepository";
 import { buildApp } from "./app";
 import { parseTrustProxy } from "./config";
-import type { AgentLlm } from "./ports/AgentLlm";
 import { tooManyMessages } from "./rateLimit";
-
-const llm: AgentLlm = {
-  async complete() {
-    return { content: "ok", toolCalls: [] };
-  },
-};
 
 const build = (max: number, trustProxy?: number | false) =>
   buildApp({
-    llm,
-    tools: emptyToolRegistry,
     pingDb: async () => true,
     rateLimit: { max },
     trustProxy,
-    traces: new InMemoryTraceRepository(),
   });
 
 // Fails validation (400) without reaching the model; still counts toward the limit.
 const chat = (app: Awaited<ReturnType<typeof build>>, remoteAddress: string, headers = {}) =>
-  app.inject({ method: "POST", url: "/api/agent/chat", payload: {}, remoteAddress, headers });
+  app.inject({ method: "POST", url: "/api/generate", payload: {}, remoteAddress, headers });
 
 describe("chat rate limit", () => {
   it("refuses the request after max, with a retry-after and message", async () => {
@@ -80,20 +68,5 @@ describe("parseTrustProxy", () => {
   it("accepts only a positive integer", () => {
     for (const v of [undefined, "0", "abc", "true"]) assert.equal(parseTrustProxy(v), false);
     assert.equal(parseTrustProxy("1"), 1);
-  });
-});
-
-describe("forget conversation rate limit", () => {
-  it("answers 429 past the limit without using up chat", async () => {
-    const app = await build(2);
-    const forget = () =>
-      app.inject({ method: "DELETE", url: "/api/agent/conversations/c1", remoteAddress: "10.0.0.1" });
-    assert.equal((await forget()).statusCode, 204);
-    assert.equal((await forget()).statusCode, 204);
-    const res = await forget();
-    assert.equal(res.statusCode, 429);
-    assert.match(res.json().error.message, /^Too many messages\. Try again in \d+ seconds?\.$/);
-    assert.equal((await chat(app, "10.0.0.1")).statusCode, 400);
-    await app.close();
   });
 });

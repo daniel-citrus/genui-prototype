@@ -3,8 +3,6 @@ import { afterEach, describe, it } from "node:test";
 import type { UiNode } from "shared/ui";
 import { createActionRegistry } from "../actions/registry";
 import { createDesignStore } from "../designs";
-import { emptyToolRegistry } from "../agent/tools";
-import { InMemoryTraceRepository } from "../ports/fakes/InMemoryTraceRepository";
 import { buildApp } from "../app";
 import { DESIGN_GONE_MESSAGE } from "./actions";
 
@@ -78,13 +76,11 @@ const actions = createActionRegistry([
 
 const build = (opts: { max?: number; logLines?: string[] } = {}) =>
   buildApp({
-    tools: emptyToolRegistry,
     actions,
     designs,
     rateLimit: { max: opts.max ?? 1000 },
     logLevel: opts.logLines ? "info" : undefined,
     logStream: opts.logLines && { write: (line) => void opts.logLines?.push(line) },
-    traces: new InMemoryTraceRepository(),
   });
 
 type App = Awaited<ReturnType<typeof build>>;
@@ -223,7 +219,7 @@ describe("POST /api/actions/run", () => {
     assert.equal(res.statusCode, 413);
   });
 
-  it("rate-limits per IP before parsing, separately from chat", async () => {
+  it("rate-limits per IP before parsing, separately from generate", async () => {
     remember();
     const app = await build({ max: 2 });
     assert.equal((await run(app, body())).statusCode, 200);
@@ -233,13 +229,13 @@ describe("POST /api/actions/run", () => {
     assert.match(limited.json().error.message, /^Too many messages\. Try again in \d+ seconds?\.$/);
     assert.ok(limited.headers["retry-after"]);
     assert.equal((await run(app, body(), "10.0.0.2")).statusCode, 200);
-    const chat = await app.inject({
+    const generate = await app.inject({
       method: "POST",
-      url: "/api/agent/chat",
+      url: "/api/generate",
       payload: {},
       remoteAddress: "10.0.0.1",
     });
-    assert.equal(chat.statusCode, 400);
+    assert.equal(generate.statusCode, 400);
     await app.close();
   });
 

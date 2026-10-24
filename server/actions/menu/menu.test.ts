@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { UiNode } from "shared/ui";
 import { createInMemoryPosMenu } from "../../adapters/pos/InMemoryPosMenu";
-import type { ToolLogger } from "../../agent/tools";
+import type { Logger } from "../../log";
 import { catalog } from "../../catalog/components";
 import { InMemoryComponentRepository } from "../../ports/fakes/InMemoryComponentRepository";
 import type { Item, PosMenu } from "../../ports/PosMenu";
@@ -17,7 +17,7 @@ const signal = new AbortController().signal;
 
 function makeCtx() {
   const errors: unknown[] = [];
-  const log: ToolLogger = {
+  const log: Logger = {
     info() {},
     debug() {},
     warn() {},
