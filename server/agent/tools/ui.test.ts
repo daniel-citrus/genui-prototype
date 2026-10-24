@@ -72,6 +72,7 @@ describe("render_ui", () => {
 
     assert.equal(result.ok, false);
     assert.equal(result.summary, "UI has 2 problems");
+    assert.equal(result.retryable, true);
     assert.deepEqual(result.data, {
       errors: [
         "tree.children.0.props.label is required (call get_component Button for its props)",
@@ -102,6 +103,7 @@ describe("render_ui", () => {
     assert.deepEqual(result, {
       ok: false,
       summary: "UI has 1 problem",
+      retryable: true,
       data: {
         errors: ['tree.props.action "send_mail" is not a registered action (call list_actions to see them)'],
       },
@@ -219,6 +221,7 @@ describe("render_ui dropdown checks", () => {
     assert.deepEqual(result, {
       ok: false,
       summary: "UI has 1 problem",
+      retryable: true,
       data: {
         errors: [
           'tree.children.0.props.options "Latte" is not one of the menu_items values (call list_actions to get them)',
@@ -348,6 +351,7 @@ describe("render_ui with custom components", () => {
     assert.deepEqual(bad, {
       ok: false,
       summary: "UI has 1 problem",
+      retryable: true,
       data: { errors: ["tree.children.0 MenuItemCard cannot have children"] },
     });
     assert.equal(shown.length, 1);
@@ -413,6 +417,7 @@ describe("render_ui with custom components", () => {
     );
 
     assert.equal(result.summary, "UI has 2 problems");
+    assert.equal(result.retryable, true);
     assert.deepEqual(result.data, {
       errors: [
         "tree.children.0.props.price is required (call get_component MenuItemCard for its props)",
@@ -448,7 +453,7 @@ describe("render_ui with custom components", () => {
       'tree.component "MenuItemCard" was deleted; restore it in the Components panel or use another component';
 
     const root = await registry.run("render_ui", { tree: { component: "MenuItemCard", props: latte } }, ctx);
-    assert.deepEqual(root, { ok: false, summary: "UI has 1 problem", data: { errors: [deleted] } });
+    assert.deepEqual(root, { ok: false, summary: "UI has 1 problem", data: { errors: [deleted] }, retryable: true });
     const child = await registry.run("render_ui", { tree: stack({ component: "MenuItemCard", props: latte }) }, ctx);
     assert.deepEqual(child.data, { errors: [deleted.replace("tree", "tree.children.0")] });
     assert.equal(shown.length, 0);
@@ -517,6 +522,7 @@ describe("render_ui with custom components", () => {
     assert.equal((await registry.run("render_ui", { tree: stack({ component: "Divider" }) }, ctx)).ok, true);
     const result = await registry.run("render_ui", { tree: stack({ component: "MenuItemCard", props: latte }) }, ctx);
     assert.deepEqual(result, { ok: false, summary: "Custom components are unavailable" });
+    assert.equal(result.retryable, undefined);
     assert.equal(shown.length, 1);
     assert.equal(errors.length, 1);
   });

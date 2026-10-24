@@ -191,6 +191,7 @@ export function renderUiTool(
           ok: false,
           summary: `UI has ${n} problem${n === 1 ? "" : "s"}`,
           data: { errors },
+          retryable: true,
         };
       }
       ctx.showUi(tree as UiNode);

@@ -53,6 +53,7 @@ export function createToolRegistry(definitions: ToolDefinition[]): ToolRegistry 
           ok: false,
           summary: `Invalid arguments for ${name}`,
           data: { errors: formatSchemaErrors(entry.validate.errors) },
+          retryable: true,
         };
       }
 
