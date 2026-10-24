@@ -1,34 +1,30 @@
 import type { CustomComponentDefinition } from "shared/customComponents";
-import type { AgentTrace, EndedBy } from "../agent/trace";
+import type { Generation } from "../generate/generate";
 
 export type EvalCheck =
-  | { endedBy: EndedBy }
-  | { noError: true }
-  | { toolCalled: string }
-  | { toolNotCalled: string }
-  | { toolSucceeded: string }
+  | { maxAttempts: number }
   | { uiComponent: string }
+  | { noUiComponent: string }
   | { uiButtonAction: string }
+  | { noButtonAction: true }
   | { uiNamedInput: string }
   | { uiText: string }
   | { uiMarkupTag: string }
   | { agentComponent: string }
-  | { noButtonAction: true }
-  | { definedWithKey: string }
-  | { noUiComponent: string }
-  | { replyMaxWords: number }
-  | { replyExcludes: string };
+  | { notesMaxWords: number }
+  | { notesExcludes: string };
 
 export interface EvalCase {
   id: string;
   prompt: string;
   checks: EvalCheck[];
-  /** Saved into the run's in-memory repository before the turn. */
+  /** Saved into the run's in-memory repository before the generation. */
   customComponents?: CustomComponentDefinition[];
 }
 
 export interface CheckFailure {
-  check: EvalCheck;
+  /** Absent for a failure of the run itself, such as a generation that gave up. */
+  check?: EvalCheck;
   reason: string;
 }
 
@@ -36,7 +32,6 @@ export interface EvalCaseResult {
   id: string;
   ok: boolean;
   failures: CheckFailure[];
-  trace: AgentTrace;
-  endedBy?: EndedBy;
+  generation?: Generation;
   error?: string;
 }

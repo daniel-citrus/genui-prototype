@@ -2,11 +2,8 @@
   "id": "mockup-no-action",
   "prompt": "Show a mockup signup form with an email field, a password field, and a Create account button. The button must not run a server action.",
   "checks": [
-    { "endedBy": "reply" },
-    { "noError": true },
-    { "toolNotCalled": "list_actions" },
-    { "toolSucceeded": "render_ui" },
     { "uiComponent": "TextInput" },
-    { "uiComponent": "Button" }
+    { "uiComponent": "Button" },
+    { "noButtonAction": true }
   ]
 }

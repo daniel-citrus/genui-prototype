@@ -2,10 +2,6 @@
   "id": "menu-create-item",
   "prompt": "Show a form to add a new drink to the café menu.",
   "checks": [
-    { "endedBy": "reply" },
-    { "noError": true },
-    { "toolCalled": "list_actions" },
-    { "toolSucceeded": "render_ui" },
     { "uiButtonAction": "menu_create_item" },
     { "uiNamedInput": "name" },
     { "uiNamedInput": "size" },

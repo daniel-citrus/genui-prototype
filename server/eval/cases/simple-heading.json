@@ -2,12 +2,8 @@
   "id": "simple-heading",
   "prompt": "Show a heading that says Hello",
   "checks": [
-    { "endedBy": "reply" },
-    { "noError": true },
-    { "toolSucceeded": "render_ui" },
     { "uiComponent": "Heading" },
     { "noUiComponent": "Markup" },
-    { "toolNotCalled": "define_component" },
-    { "replyMaxWords": 40 }
+    { "notesMaxWords": 40 }
   ]
 }

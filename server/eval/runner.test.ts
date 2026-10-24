@@ -1,153 +1,112 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import type { CustomComponentDefinition } from "shared/customComponents";
-import type { AgentLlm, LlmTurn } from "../ports/AgentLlm";
-import type { ToolSpec } from "../agent/tools";
-import { hasConversation } from "../agent/conversations";
-import { evalRunnerTestHooks, runEvalCase } from "./runner";
+import type { ComponentLlm, LlmMessage, LlmReply } from "../ports/ComponentLlm";
+import { runEvalCase } from "./runner";
 import type { EvalCase } from "./types";
 
 const headingCase: EvalCase = {
   id: "heading-test",
   prompt: "Show a heading that says Hello",
-  checks: [{ toolSucceeded: "render_ui" }, { uiComponent: "Heading" }],
+  checks: [{ uiComponent: "Heading" }, { uiText: "Hello" }, { maxAttempts: 1 }],
 };
 
-interface ScriptedLlm extends AgentLlm {
-  calls: Array<{ messageCount: number; tools: ToolSpec[]; allowTools?: boolean }>;
-}
+const design = (tree: unknown) => JSON.stringify({ tree, notes: "Done." });
+const heading = { component: "Heading", props: { text: "Hello", level: 1 } };
 
-function scriptedLlm(turns: LlmTurn[]): ScriptedLlm {
-  const calls: ScriptedLlm["calls"] = [];
-  return {
-    calls,
-    async complete({ messages, tools, allowTools, onText }) {
-      calls.push({ messageCount: messages.length, tools, allowTools });
-      const turn = turns[Math.min(calls.length - 1, turns.length - 1)];
-      if (turn.content) onText(turn.content);
-      return turn;
+function scripted(replies: (string | Error)[]) {
+  const calls: LlmMessage[][] = [];
+  const llm: ComponentLlm = {
+    async complete({ messages }): Promise<LlmReply> {
+      calls.push(structuredClone(messages));
+      const next = replies[Math.min(calls.length - 1, replies.length - 1)]!;
+      if (next instanceof Error) throw next;
+      return { content: next, truncated: false };
     },
   };
+  return { llm, calls };
 }
 
 describe("runEvalCase", () => {
-  it("passes when the model lists components and render_ui a Heading", async () => {
-    const tree = { component: "Heading", props: { text: "Hello" } };
-    const llm = scriptedLlm([
-      {
-        content: null,
-        toolCalls: [{ id: "call_list", name: "list_components", arguments: "{}" }],
-      },
-      {
-        content: null,
-        toolCalls: [{ id: "call_ui", name: "render_ui", arguments: JSON.stringify({ tree }) }],
-      },
-      { content: "Done.", toolCalls: [] },
-    ]);
-
+  it("is ok for a passing design and keeps the generation", async () => {
+    const { llm } = scripted([design(heading)]);
     const result = await runEvalCase(headingCase, { llm });
-
-    assert.equal(result.id, headingCase.id);
     assert.equal(result.ok, true);
     assert.deepEqual(result.failures, []);
-    assert.equal(result.endedBy, "reply");
-    assert.equal(result.trace.endedBy, "reply");
-    assert.equal(result.trace.userText, headingCase.prompt);
-    assert.match(result.trace.conversationId, /^eval:heading-test:/);
-    const toolNames = result.trace.completions.flatMap((c) =>
-      c.toolCalls.map((tc) => tc.call.name),
-    );
-    assert(toolNames.includes("render_ui"));
+    assert.ok(result.generation?.ok);
+    assert.equal(result.error, undefined);
   });
 
-  it("fails checks without throwing when the model only replies with text", async () => {
-    const llm = scriptedLlm([{ content: "Here is a heading.", toolCalls: [] }]);
-
+  it("fails the failing checks of a valid design", async () => {
+    const { llm } = scripted([design({ component: "Text", props: { text: "Hi" } })]);
     const result = await runEvalCase(headingCase, { llm });
-
     assert.equal(result.ok, false);
-    assert.equal(result.failures.length, 2);
-    assert.match(result.failures[0]!.reason, /toolSucceeded "render_ui"/);
-    assert.match(result.failures[1]!.reason, /uiComponent "Heading"/);
-    assert.equal(result.endedBy, "reply");
-    assert.equal(result.trace.endedBy, "reply");
-    assert.match(result.trace.conversationId, /^eval:heading-test:/);
-    const hasRenderUi = result.trace.completions.some((c) =>
-      c.toolCalls.some((tc) => tc.call.name === "render_ui"),
-    );
-    assert.equal(hasRenderUi, false);
+    assert.deepEqual(result.failures.map((f) => f.check), [{ uiComponent: "Heading" }, { uiText: "Hello" }]);
   });
 
-  it("clears the in-memory conversation after the case", async () => {
-    const conversationId = "eval:heading-test:00000000-0000-4000-8000-000000000001";
-    evalRunnerTestHooks.uuid = () => "00000000-0000-4000-8000-000000000001";
-    try {
-      const llm = scriptedLlm([{ content: "text only", toolCalls: [] }]);
-
-      await runEvalCase(headingCase, { llm });
-
-      assert.equal(hasConversation(conversationId), false);
-    } finally {
-      evalRunnerTestHooks.uuid = randomUUID;
-    }
+  it("fails a maxAttempts check when a repair was needed", async () => {
+    const { llm, calls } = scripted([design({ component: "Nope" }), design(heading)]);
+    const result = await runEvalCase(headingCase, { llm });
+    assert.equal(calls.length, 2);
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.failures.map((f) => f.check), [{ maxAttempts: 1 }]);
   });
 
-  describe("customComponents seeds", () => {
-    const seed: CustomComponentDefinition = {
-      name: "SeedCard",
-      description: "A card with a heading.",
-      category: "display",
-      children: "none",
-      propsSchema: {
-        type: "object",
-        properties: { title: { type: "string", description: "Heading text." } },
-        required: ["title"],
-        additionalProperties: false,
-      },
-      exampleProps: { title: "Hi" },
-      template: {
-        component: "Card",
-        props: {},
-        children: [{ component: "Heading", props: { text: { $prop: "title" } } }],
-      },
-    };
-    const seeded: EvalCase = {
+  it("fails with the problem count when generation gives up", async () => {
+    const { llm } = scripted(["not json"]);
+    const result = await runEvalCase(headingCase, { llm });
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.failures, [{ reason: "generation failed: 1 problems" }]);
+    assert.equal(result.generation?.ok, false);
+    assert.equal(result.generation?.attempts.length, 3);
+  });
+
+  it("fails with the error name when generation rejects", async () => {
+    const { llm } = scripted([new TypeError("boom")]);
+    const result = await runEvalCase(headingCase, { llm });
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.failures, [{ reason: "generation error: TypeError" }]);
+    assert.equal(result.error, "generation error: TypeError");
+    assert.equal(result.generation, undefined);
+  });
+
+  it("reports an abort as a generation error", async () => {
+    const { llm } = scripted([design(heading)]);
+    const controller = new AbortController();
+    controller.abort();
+    const result = await runEvalCase(headingCase, { llm, signal: controller.signal });
+    assert.deepEqual(result.failures, [{ reason: "generation error: AbortError" }]);
+  });
+
+  const seed: CustomComponentDefinition = {
+    name: "Tag",
+    description: "A tag.",
+    category: "display",
+    children: "none",
+    propsSchema: { type: "object", properties: { text: { type: "string", description: "Text." } }, required: ["text"], additionalProperties: false },
+    exampleProps: { text: "A" },
+    template: { component: "Text", props: { text: { $prop: "text" } } },
+  };
+
+  it("seeds custom components so the design can use them", async () => {
+    const { llm, calls } = scripted([design({ component: "Tag", props: { text: "Pinned" } })]);
+    const evalCase: EvalCase = {
       id: "seeded",
-      prompt: "Show it",
-      checks: [{ toolSucceeded: "render_ui" }, { agentComponent: "SeedCard" }, { uiText: "Hello" }],
+      prompt: "Show a tag",
+      checks: [{ agentComponent: "Tag" }, { uiText: "Pinned" }],
       customComponents: [seed],
     };
+    const result = await runEvalCase(evalCase, { llm });
+    assert.deepEqual(result.failures, []);
+    assert.ok(calls[0]!.some((m) => m.content.includes("Tag")));
+  });
 
-    it("lists and renders a seeded component", async () => {
-      const tree = { component: "SeedCard", props: { title: "Hello" } };
-      const llm = scriptedLlm([
-        { content: null, toolCalls: [{ id: "l", name: "list_components", arguments: "{}" }] },
-        {
-          content: null,
-          toolCalls: [{ id: "u", name: "render_ui", arguments: JSON.stringify({ tree }) }],
-        },
-        { content: "Done.", toolCalls: [] },
-      ]);
-
-      const result = await runEvalCase(seeded, { llm });
-
-      const listed = result.trace.completions
-        .flatMap((c) => c.toolCalls)
-        .find((tc) => tc.call.name === "list_components");
-      assert.match(JSON.stringify(listed), /SeedCard/);
-      assert.equal(result.ok, true, JSON.stringify(result.failures));
-    });
-
-    it("fails an invalid seed without running the model", async () => {
-      const llm = scriptedLlm([{ content: "never", toolCalls: [] }]);
-      const bad = { ...seed, description: "" };
-
-      const result = await runEvalCase({ ...seeded, customComponents: [bad] }, { llm });
-
-      assert.equal(result.ok, false);
-      assert.equal(result.error, "seed SeedCard: description must not be empty");
-      assert.equal(llm.calls.length, 0);
-    });
+  it("fails without calling the model when a seed is invalid", async () => {
+    const { llm, calls } = scripted([design(heading)]);
+    const evalCase: EvalCase = { ...headingCase, customComponents: [{ ...seed, template: { component: "Missing" } }] };
+    const result = await runEvalCase(evalCase, { llm });
+    assert.equal(result.ok, false);
+    assert.match(result.error ?? "", /^seed Tag: /);
+    assert.equal(calls.length, 0);
   });
 });

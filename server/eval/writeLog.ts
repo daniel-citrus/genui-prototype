@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import type { AgentTrace, EndedBy } from "../agent/trace";
+import type { UiNode } from "shared/ui";
+import type { GenerationAttempt } from "../generate/generate";
 import type { EvalCheck, CheckFailure } from "./types";
 
 const KEBAB_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -11,9 +12,11 @@ export interface EvalCaseLog {
   checks: EvalCheck[];
   ok: boolean;
   failures: CheckFailure[];
-  endedBy?: EndedBy;
+  /** Every model call made, with its raw reply; empty when generation never ran. */
+  attempts: GenerationAttempt[];
+  tree?: UiNode;
+  notes?: string;
   error?: string;
-  trace: AgentTrace;
 }
 
 export function evalLogDirName(now: Date): string {
@@ -35,13 +38,10 @@ function buildLogRecord(log: EvalCaseLog): Record<string, unknown> {
     ok: log.ok,
     failures: log.failures,
   };
-  if (log.endedBy !== undefined) {
-    record.endedBy = log.endedBy;
-  }
-  if (log.error !== undefined) {
-    record.error = log.error;
-  }
-  record.trace = log.trace;
+  record.attempts = log.attempts;
+  if (log.tree !== undefined) record.tree = log.tree;
+  if (log.notes !== undefined) record.notes = log.notes;
+  if (log.error !== undefined) record.error = log.error;
   return record;
 }
 

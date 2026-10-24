@@ -2,9 +2,6 @@
   "id": "bullet-list-items",
   "prompt": "Show these as a simple bullet list: Espresso, Latte, Mocha.",
   "checks": [
-    { "endedBy": "reply" },
-    { "noError": true },
-    { "toolSucceeded": "render_ui" },
     { "uiMarkupTag": "li" },
     { "uiText": "Mocha" }
   ]
