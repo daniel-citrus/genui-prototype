@@ -69,7 +69,10 @@ async function runTurn(
   let toolCalls = 0;
   let promptTokens = 0;
   let completionTokens = 0;
+  // Keys of calls made since the last successful write, and of every successful
+  // write: an identical call is not run twice, but a read may repeat after a write.
   const seen = new Set<string>();
+  const written = new Set<string>();
   let endedBy: EndedBy = "stopped";
 
   const trace: AgentTrace = {
@@ -205,7 +208,7 @@ async function runTurn(
             "Tool budget used up",
             "Tool budget for this turn is used up; answer with what you have.",
           );
-        } else if (seen.has(key)) {
+        } else if (written.has(key) || seen.has(key)) {
           content = skipCall(
             run,
             call,
@@ -214,7 +217,12 @@ async function runTurn(
           );
         } else {
           seen.add(key);
-          content = (await handleToolCall(run, call)).content;
+          const outcome = await handleToolCall(run, call);
+          content = outcome.content;
+          if (!outcome.isError && run.tools.writes(call.name)) {
+            seen.clear();
+            written.add(key);
+          }
         }
         finishToolRecord(call);
         history.push({ role: "tool", tool_call_id: tc.id, content });
