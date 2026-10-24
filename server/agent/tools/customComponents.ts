@@ -24,6 +24,7 @@ export function defineComponentTool(
 ): ToolDefinition {
   return {
     name: "define_component",
+    writes: true,
     description:
       "Save a custom component built from existing components, so designs can use it by name in this and later chats. Saving a name that exists adds its next version. Every prop in props_schema must be used in the template through {\"$prop\": \"<name>\"}; text such as {{name}} is shown as written, never filled in. Template buttons may only use actions list_actions returned. If it reports problems, nothing is saved: fix them and call it again.",
     input_schema: {
@@ -55,7 +56,7 @@ export function defineComponentTool(
         template: {
           type: "object",
           description:
-            'The tree one use draws: {"component", "props", "children"} of catalog and custom components, where Markup may draw what nothing else can. A prop value {"$prop": "<name>"} takes that prop from the use; {"$children": true} in a children array marks where the use\'s children go. Every props_schema prop must be used through {"$prop": "<name>"}; text such as {{name}} is shown as written, never filled in. Markup takes one prop, root: a JSON element {"tag", "attrs"?, "style"?, "text"?, "children"?}, never an HTML string. Its text, attribute and style values may be {"$prop": "<name>"}. Style keys are kebab-case CSS properties, such as font-weight, and go in style, not attrs. Example: {"component": "Markup", "props": {"root": {"tag": "span", "children": [{"tag": "strong", "text": {"$prop": "label"}}]}}}.',
+            'The tree one use draws: {"component", "props", "children"} of catalog and custom components, where Markup may draw what nothing else can. A prop value {"$prop": "<name>"} takes that prop from the use; {"$children": true} in a children array marks where the use\'s children go. To repeat a part once per item of an array prop, put {"$each": "<prop>", "as": <node or element>} in a children array (one level only, no slot inside); inside as, {"$item": true} is the item and {"$item": "<field>"} one of its fields, in the same places as $prop. For instance {"tag": "ul", "children": [{"$each": "items", "as": {"tag": "li", "text": {"$item": true}}}]}; example_props then needs at least one item. Every props_schema prop must be used through {"$prop": "<name>"}; text such as {{name}} is shown as written, never filled in. Markup takes one prop, root: a JSON element {"tag", "attrs"?, "style"?, "text"?, "children"?}, never an HTML string. Its text, attribute and style values may be {"$prop": "<name>"}. Style keys are kebab-case CSS properties, such as font-weight, and go in style, not attrs. Example: {"component": "Markup", "props": {"root": {"tag": "span", "children": [{"tag": "strong", "text": {"$prop": "label"}}]}}}.',
         },
       },
       required: ["name", "description", "category", "children", "props_schema", "example_props", "template"],
@@ -110,6 +111,7 @@ export function deleteComponentTool(
 ): ToolDefinition {
   return {
     name: "delete_component",
+    writes: true,
     description:
       "Delete a custom component, so it is no longer listed or usable in new designs. Only when the person asks to delete it.",
     input_schema: {

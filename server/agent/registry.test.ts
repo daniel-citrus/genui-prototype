@@ -260,3 +260,15 @@ describe("createToolRegistry run", () => {
     assert.equal(result.data, exact);
   });
 });
+
+describe("createToolRegistry writes", () => {
+  it("is true only for tools defined with writes: true", () => {
+    const registry = createToolRegistry([
+      tool({ name: "save_thing", writes: true }),
+      tool({ name: "get_thing" }),
+    ]);
+    assert.equal(registry.writes("save_thing"), true);
+    assert.equal(registry.writes("get_thing"), false);
+    assert.equal(registry.writes("unknown"), false);
+  });
+});
