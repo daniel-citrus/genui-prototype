@@ -217,7 +217,14 @@ function bindingProblems(
       const where = button.card ? " in its Card" : "";
       for (const key of required) {
         if (!names.has(key)) {
-          problems.push(`${button.path} action "${spec.name}" needs an input named "${key}"${where}, and none has that name`);
+          const source = spec.choices?.[key];
+          if (typeof source === "string" && source !== "") {
+            problems.push(
+              `${button.path} action "${spec.name}" needs a Select named "${key}"${where}, with the ${source} values as its options, and none has that name`,
+            );
+          } else {
+            problems.push(`${button.path} action "${spec.name}" needs an input named "${key}"${where}, and none has that name`);
+          }
         }
       }
       if (spec.operation === "edit" && optional.length > 0 && !optional.some((key) => names.has(key))) {
