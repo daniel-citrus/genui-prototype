@@ -25,3 +25,24 @@ export interface GenerateFailure {
 }
 
 export type GenerateResponse = GenerateSuccess | GenerateFailure;
+
+/** The tool a host agent offers its model so it can ask genui for a UI. */
+export const GENERATE_UI_TOOL: { name: "generate_ui"; description: string; parameters: Record<string, unknown> } = {
+  name: "generate_ui",
+  description:
+    "Call this when the person wants to see or use a form, list, card, chart or other UI. " +
+    "In prompt, describe the UI and the data it shows. " +
+    "Relay the notes in the result to the person.",
+  parameters: {
+    type: "object",
+    properties: {
+      prompt: {
+        type: "string",
+        maxLength: MAX_PROMPT_CHARS,
+        description: "What the UI should do and the data it shows.",
+      },
+    },
+    required: ["prompt"],
+    additionalProperties: false,
+  },
+};

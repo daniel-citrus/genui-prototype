@@ -351,7 +351,7 @@ async function sendAction(button: HTMLButtonElement, action: string) {
     return;
   }
 
-  await postAction({ conversationId, uiId: shownUiId, action, values: actionValues(readFields(controls)) });
+  await postAction({ designId: shownUiId, action, values: actionValues(readFields(controls)) });
 }
 
 /** Posts an action request and shows its result, or asks its confirm question. */
@@ -361,7 +361,7 @@ async function postAction(request: ActionRunRequest) {
   try {
     const result = await runAction(request);
     // A design drawn meanwhile has already cleared the status area for itself.
-    const sameDesign = shownUiId === request.uiId;
+    const sameDesign = shownUiId === request.designId;
     if (result.confirm !== undefined) {
       // Nothing ran; a question for a design or turn the person has left is dropped.
       if (sameDesign && !activeTurn) askConfirm(request, result.confirm);

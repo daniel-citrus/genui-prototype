@@ -2,14 +2,15 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import type { UiNode } from "shared/ui";
 import { createActionRegistry } from "../actions/registry";
-import { rememberDesign, resetConversation } from "../agent/conversations";
+import { createDesignStore } from "../designs";
 import { emptyToolRegistry } from "../agent/tools";
 import { InMemoryTraceRepository } from "../ports/fakes/InMemoryTraceRepository";
 import { buildApp } from "../app";
 import { DESIGN_GONE_MESSAGE } from "./actions";
 
-const CONVERSATION = "actions-route-test";
-const UI_ID = "design-1";
+const DESIGN_ID = "design-1";
+
+let designs = createDesignStore({ max: 10 });
 
 const design: UiNode = {
   component: "Card",
@@ -79,6 +80,7 @@ const build = (opts: { max?: number; logLines?: string[] } = {}) =>
   buildApp({
     tools: emptyToolRegistry,
     actions,
+    designs,
     rateLimit: { max: opts.max ?? 1000 },
     logLevel: opts.logLines ? "info" : undefined,
     logStream: opts.logLines && { write: (line) => void opts.logLines?.push(line) },
@@ -88,8 +90,7 @@ const build = (opts: { max?: number; logLines?: string[] } = {}) =>
 type App = Awaited<ReturnType<typeof build>>;
 
 const body = (overrides: Record<string, unknown> = {}) => ({
-  conversationId: CONVERSATION,
-  uiId: UI_ID,
+  designId: DESIGN_ID,
   action: "save_note",
   values: {},
   ...overrides,
@@ -106,12 +107,12 @@ const run = (app: App, payload: unknown, remoteAddress = "10.0.0.1") =>
 
 describe("POST /api/actions/run", () => {
   afterEach(() => {
-    resetConversation(CONVERSATION);
+    designs = createDesignStore({ max: 10 });
     received = [];
     removed = [];
   });
 
-  const remember = () => rememberDesign(CONVERSATION, UI_ID, design);
+  const remember = () => designs.remember(DESIGN_ID, design);
 
   it("runs the action with only the values its schema declares", async () => {
     remember();
@@ -142,10 +143,9 @@ describe("POST /api/actions/run", () => {
       "",
       "{not json",
       [],
-      body({ conversationId: undefined }),
-      body({ conversationId: 1 }),
-      body({ uiId: undefined }),
-      body({ uiId: "" }),
+      body({ designId: undefined }),
+      body({ designId: 1 }),
+      body({ designId: "" }),
       body({ action: undefined }),
       body({ action: ["save_note"] }),
       body({ values: undefined }),
@@ -168,14 +168,23 @@ describe("POST /api/actions/run", () => {
     assert.deepEqual(received, []);
   });
 
-  it("gives 409 for an unknown design or conversation", async () => {
+  it("names the missing designId in its 400", async () => {
+    const app = await build();
+    const res = await run(app, body({ designId: undefined }));
+    await app.close();
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.json().error.message, "designId and action must be non-empty strings.");
+  });
+
+  it("gives 409 for an unknown design", async () => {
     remember();
     const app = await build();
-    for (const payload of [body({ uiId: "design-2" }), body({ conversationId: "someone-else" })]) {
+    for (const payload of [body({ designId: "design-2" })]) {
       const res = await run(app, payload);
       assert.equal(res.statusCode, 409);
       assert.deepEqual(res.json(), { error: { message: DESIGN_GONE_MESSAGE } });
     }
+    assert.equal(DESIGN_GONE_MESSAGE, "This design is no longer available. Generate it again.");
     await app.close();
   });
 
@@ -248,7 +257,7 @@ describe("POST /api/actions/run", () => {
       .filter((entry) => entry.msg === "action request");
     assert.equal(entries.length, 1);
     const [entry] = entries;
-    assert.equal(entry.conversationId, CONVERSATION);
+    assert.equal(entry.designId, DESIGN_ID);
     assert.equal(entry.action, "save_note");
     assert.equal(entry.ok, true);
     assert.equal(typeof entry.durationMs, "number");
@@ -299,7 +308,7 @@ describe("POST /api/actions/run", () => {
       remember();
       const app = await build();
       for (const confirmed of [undefined, true]) {
-        const gone = await run(app, remove({ uiId: "design-2", confirmed }));
+        const gone = await run(app, remove({ designId: "design-2", confirmed }));
         assert.equal(gone.statusCode, 409);
         assert.deepEqual(gone.json(), { error: { message: DESIGN_GONE_MESSAGE } });
         const badValues = await run(app, remove({ values: { pin: "1234" }, confirmed }));
@@ -364,7 +373,7 @@ describe("POST /api/actions/run", () => {
     };
 
     it("accepts the values of one Card", async () => {
-      rememberDesign(CONVERSATION, UI_ID, cards);
+      designs.remember(DESIGN_ID, cards);
       const app = await build();
       const res = await run(app, body({ values: { note: "hi", size: "M" } }));
       await app.close();
@@ -373,7 +382,7 @@ describe("POST /api/actions/run", () => {
     });
 
     it("refuses a name outside every Card of the button, without echoing values", async () => {
-      rememberDesign(CONVERSATION, UI_ID, cards);
+      designs.remember(DESIGN_ID, cards);
       const app = await build();
       const res = await run(app, body({ values: { note: "private-note", search: "private-search" } }));
       await app.close();

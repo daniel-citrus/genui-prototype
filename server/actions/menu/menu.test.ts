@@ -25,7 +25,7 @@ function makeCtx() {
       errors.push(obj);
     },
   };
-  const ctx: ActionContext = { conversationId: "conv-1", signal, log };
+  const ctx: ActionContext = { designId: "design-1", signal, log };
   return { ctx, errors };
 }
 

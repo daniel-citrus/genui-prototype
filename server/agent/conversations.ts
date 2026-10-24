@@ -1,4 +1,3 @@
-import type { UiNode } from "shared/ui";
 import type { HistoryMessage } from "../ports/AgentLlm";
 /**
  * Per-conversation message history, in memory only. The client owns the
@@ -9,15 +8,8 @@ import type { HistoryMessage } from "../ports/AgentLlm";
 
 type History = HistoryMessage[];
 
-/**
- * A conversation's transcript plus its newest designs, keyed by `ui` event id.
- * A click names the design it came from; after Stop the chat may show an
- * older design than the newest sent, so several are kept.
- */
 interface Conversation {
   history: History;
-  /** Oldest first (Map insertion order). */
-  designs: Map<string, UiNode>;
 }
 
 /**
@@ -26,15 +18,12 @@ interface Conversation {
  */
 export const MAX_CONVERSATIONS = 500;
 
-/** Most designs remembered per conversation; a newer one evicts the oldest. */
-export const MAX_DESIGNS_PER_CONVERSATION = 5;
-
 /** Least recently used first: every use moves an entry to the end. */
 const store = new Map<string, Conversation>();
 
 /** Returns the conversation's entry, creating it, and marks it most recently used. */
 function useConversation(conversationId: string): Conversation {
-  const conversation = store.get(conversationId) ?? { history: [], designs: new Map() };
+  const conversation = store.get(conversationId) ?? { history: [] };
   store.delete(conversationId);
   store.set(conversationId, conversation);
   if (store.size > MAX_CONVERSATIONS) {
@@ -46,21 +35,6 @@ function useConversation(conversationId: string): Conversation {
 
 export function getHistory(conversationId: string): History {
   return useConversation(conversationId).history;
-}
-
-/** Keeps a design that was sent as the `ui` event `id`. */
-export function rememberDesign(conversationId: string, id: string, tree: UiNode): void {
-  const { designs } = useConversation(conversationId);
-  designs.set(id, tree);
-  if (designs.size > MAX_DESIGNS_PER_CONVERSATION) {
-    const [oldest] = designs.keys();
-    designs.delete(oldest);
-  }
-}
-
-/** The design sent as `ui` event `id`, if still remembered. Doesn't count as a use. */
-export function getDesign(conversationId: string, id: string): UiNode | undefined {
-  return store.get(conversationId)?.designs.get(id);
 }
 
 /** Whether the server still has this conversation (it may have been forgotten). */
@@ -96,7 +70,7 @@ export async function oneTurnAtATime(
   }
 }
 
-/** Deletes a conversation's history and designs once any turn queued on it has ended. */
+/** Deletes a conversation's history once any turn queued on it has ended. */
 export function forgetConversation(conversationId: string): Promise<void> {
   return oneTurnAtATime(conversationId, async () => resetConversation(conversationId));
 }
