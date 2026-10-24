@@ -1,16 +1,12 @@
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import { createActionRegistry } from "./actions/registry";
 import type { ActionRegistry } from "./actions/types";
-import type { ToolRegistry } from "./agent/tools";
 import { createDesignStore, type DesignStore } from "./designs";
-import type { AgentLlm } from "./ports/AgentLlm";
 import type { ComponentLlm } from "./ports/ComponentLlm";
 import type { ComponentRepository } from "./ports/ComponentRepository";
 import type { CustomComponentRepository } from "./ports/CustomComponentRepository";
-import type { TraceRepository } from "./ports/TraceRepository";
 import { registerRateLimit, type ChatRateLimitOptions } from "./rateLimit";
 import { actionsRouter } from "./routes/actions";
-import { agentRouter } from "./routes/agent";
 import { customComponentsRouter } from "./routes/customComponents";
 import { generateRouter } from "./routes/generate";
 import { healthRouter } from "./routes/health";
@@ -21,18 +17,15 @@ export const MAX_DESIGNS = 500;
 export interface AppDeps {
   /** Pino level; omit to disable logging (tests). */
   logLevel?: string;
-  llm?: AgentLlm;
   /** The model behind `POST /api/generate`; omit and it answers 503. */
   componentLlm?: ComponentLlm;
   /** How long a generation may take; default `GENERATE_TIMEOUT_MS`. */
   generateTimeoutMs?: number;
   /** Where generated and shown designs are remembered; default holds `MAX_DESIGNS`. */
   designs?: DesignStore;
-  tools: ToolRegistry;
   /** What a Button click may run; omit for none. */
   actions?: ActionRegistry;
   pingDb?: () => Promise<boolean>;
-  pingTraces?: () => Promise<boolean>;
   /** Number of proxy hops to trust for the client IP; default false. */
   trustProxy?: number | false;
   rateLimit: ChatRateLimitOptions;
@@ -42,7 +35,6 @@ export interface AppDeps {
   customComponents?: CustomComponentRepository;
   /** The catalog custom component previews are expanded into. */
   components?: ComponentRepository;
-  traces: TraceRepository;
 }
 
 /**
@@ -98,14 +90,6 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   app.register(healthRouter, {
     prefix: "/api/health",
     pingDb: deps.pingDb,
-    pingTraces: deps.pingTraces,
-  });
-  app.register(agentRouter, {
-    prefix: "/api/agent",
-    llm: deps.llm,
-    tools: deps.tools,
-    designs,
-    traces: deps.traces,
   });
   app.register(actionsRouter, {
     prefix: "/api/actions",

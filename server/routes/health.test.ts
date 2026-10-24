@@ -12,22 +12,22 @@ async function health(opts: HealthOptions) {
 }
 
 describe("GET /api/health", () => {
-  it("reports traces false without pingTraces", async () => {
-    assert.equal((await health({})).traces, false);
+  it("reports db false without pingDb", async () => {
+    assert.equal((await health({})).db, false);
   });
 
-  it("reports the traces ping result", async () => {
-    assert.equal((await health({ pingTraces: async () => true })).traces, true);
-    assert.equal((await health({ pingTraces: async () => false })).traces, false);
+  it("reports the db ping result", async () => {
+    assert.equal((await health({ pingDb: async () => true })).db, true);
+    assert.equal((await health({ pingDb: async () => false })).db, false);
   });
 
-  it("reports traces false when the ping throws", async () => {
+  it("reports db false when the ping throws", async () => {
     const body = await health({
-      pingTraces: async () => {
+      pingDb: async () => {
         throw new Error("down");
       },
     });
-    assert.equal(body.traces, false);
+    assert.equal(body.db, false);
     assert.equal(body.ok, true);
   });
 });

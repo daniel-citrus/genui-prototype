@@ -17,7 +17,6 @@ services:
     environment:
       API_HOST: 0.0.0.0
       DATABASE_URL: postgres://genui:genui@db:5432/genui
-      TRACE_DATABASE_URL: postgres://genui:genui@db:5432/genui_traces
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       AGENT_MODEL: ${AGENT_MODEL:-}
       CHOKIDAR_USEPOLLING: "true"
@@ -54,7 +53,6 @@ services:
       dockerfile: Dockerfile.api
     environment:
       DATABASE_URL: postgres://genui:genui@db:5432/genui
-      TRACE_DATABASE_URL: postgres://genui:genui@db:5432/genui_traces
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       AGENT_MODEL: ${AGENT_MODEL:-}
       TRUST_PROXY: "1"
@@ -79,7 +77,6 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./docker/postgres/init-traces.sql:/docker-entrypoint-initdb.d/02-init-traces.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U genui -d genui"]
       interval: 5s

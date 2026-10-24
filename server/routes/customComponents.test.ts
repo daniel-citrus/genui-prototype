@@ -3,8 +3,6 @@ import { describe, it } from "node:test";
 import type { CustomComponentDetail } from "shared/api";
 import { MAX_CUSTOM_COMPONENT_VERSIONS, type CustomComponentDefinition } from "shared/customComponents";
 import type { UiNode } from "shared/ui";
-import { emptyToolRegistry } from "../agent/tools";
-import { InMemoryTraceRepository } from "../ports/fakes/InMemoryTraceRepository";
 import { buildApp } from "../app";
 import { catalog } from "../catalog/components";
 import { menuItemCard, panel, specials, withTemplate } from "../customComponents/testDefinitions";
@@ -25,13 +23,11 @@ async function seeded(...definitions: CustomComponentDefinition[]): Promise<InMe
 
 const build = (customComponents: CustomComponentRepository, opts: { max?: number; logLines?: string[] } = {}) =>
   buildApp({
-    tools: emptyToolRegistry,
     rateLimit: { max: opts.max ?? 1000 },
     customComponents,
     components: new InMemoryComponentRepository(catalog),
     logLevel: opts.logLines ? "info" : undefined,
     logStream: opts.logLines && { write: (line) => void opts.logLines?.push(line) },
-    traces: new InMemoryTraceRepository(),
   });
 
 type App = Awaited<ReturnType<typeof build>>;
@@ -318,9 +314,7 @@ describe("custom components route", () => {
 
   it("isn't registered without a custom component repository", async () => {
     const app = await buildApp({
-      tools: emptyToolRegistry,
       rateLimit: { max: 1000 },
-      traces: new InMemoryTraceRepository(),
     });
     assert.equal((await app.inject({ method: "GET", url: BASE })).statusCode, 404);
     await app.close();

@@ -2,13 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { GENERATE_UI_TOOL, MAX_PROMPT_CHARS } from "shared/generate";
 import { buildApp } from "../app";
-import { emptyToolRegistry } from "../agent/tools";
 import { catalog } from "../catalog/components";
 import { createDesignStore } from "../designs";
 import type { ComponentLlm, LlmReply } from "../ports/ComponentLlm";
 import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
 import { InMemoryCustomComponentRepository } from "../ports/fakes/InMemoryCustomComponentRepository";
-import { InMemoryTraceRepository } from "../ports/fakes/InMemoryTraceRepository";
 
 const heading = { component: "Heading", props: { text: "Hello", level: 1 } };
 const good = JSON.stringify({ tree: heading, notes: "All set." });
@@ -40,7 +38,6 @@ async function build(opts: {
 } = {}) {
   const designs = createDesignStore({ max: 10 });
   const app = await buildApp({
-    tools: emptyToolRegistry,
     componentLlm: opts.llm,
     components: new InMemoryComponentRepository(catalog),
     customComponents: opts.customComponents,
@@ -49,7 +46,6 @@ async function build(opts: {
     rateLimit: { max: opts.max ?? 1000 },
     logLevel: opts.logLines ? "info" : undefined,
     logStream: opts.logLines && { write: (line) => void opts.logLines?.push(line) },
-    traces: new InMemoryTraceRepository(),
   });
   return { app, designs };
 }
