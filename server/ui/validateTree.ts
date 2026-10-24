@@ -117,6 +117,15 @@ export function withPropsHint(problems: string[], name: string, hinted: Set<stri
   return [`${first} (call get_component ${name} for its props)`, ...rest];
 }
 
+/** A Select's `value` must be one of its options, and a disabled Select needs one. */
+function selectValueProblems(props: Record<string, unknown>, path: string): string[] {
+  const { value, options, disabled } = props;
+  if (typeof value === "string") {
+    return (options as string[]).includes(value) ? [] : [`${path}.props.value "${value}" is not one of its options`];
+  }
+  return disabled === true ? [`${path} a disabled Select needs a value`] : [];
+}
+
 /** Where a binding's key is set: a catalog prop, or the part of a Markup element that holds it. */
 const MARKUP_KEY_PATHS = { name: "attrs.name", action: "action", options: "children" };
 function keyPath(binding: NamedInput | ActionButton, key: keyof typeof MARKUP_KEY_PATHS): string {
@@ -301,7 +310,9 @@ export function validateUiTree(
       if (!isObject(node.props)) {
         errors.push(`${path}.props must be an object`);
       } else if (component) {
-        errors.push(...withPropsHint(propsErrors(propsValidator(component), node.props, path), component.name, hinted));
+        const problems = propsErrors(propsValidator(component), node.props, path);
+        errors.push(...withPropsHint(problems, component.name, hinted));
+        if (component.name === "Select" && problems.length === 0) errors.push(...selectValueProblems(node.props, path));
         if (component.name === "Markup" && isObject(node.props.root)) {
           errors.push(...validateMarkup(node.props.root, `${path}.props.root`));
         }

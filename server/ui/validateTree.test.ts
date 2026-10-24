@@ -226,6 +226,27 @@ const form = (...children: unknown[]) => ({ component: "Stack", children });
 const email = { component: "TextInput", props: { label: "Email", name: "email" } };
 const submit = { component: "Button", props: { label: "Sign up", action: "sign_up" } };
 
+describe("validateUiTree Select value", () => {
+  const select = (props: Record<string, unknown>) => ({
+    component: "Select",
+    props: { label: "Item", name: "item", options: ["Bạc xỉu", "Latte"], ...props },
+  });
+
+  it("accepts a preset, locked Select", async () => {
+    assert.deepEqual((await check(form(select({ value: "Bạc xỉu", disabled: true })))).errors, []);
+  });
+
+  it("refuses a value that isn't one of the options", async () => {
+    const result = await check(form(select({ value: "Mocha" })));
+    assert.deepEqual(result.errors, ['tree.children.0.props.value "Mocha" is not one of its options']);
+  });
+
+  it("refuses a disabled Select without a value", async () => {
+    const result = await check(form(select({ disabled: true })));
+    assert.deepEqual(result.errors, ["tree.children.0 a disabled Select needs a value"]);
+  });
+});
+
 describe("validateUiTree bindings", () => {
   it("accepts action and name props wired to a registered action", async () => {
     const tree = form(
