@@ -48,7 +48,6 @@ export const config = {
   databaseUrl: env.DATABASE_URL || "postgres://genui:genui@localhost:5432/genui",
   traceDatabaseUrl:
     env.TRACE_DATABASE_URL || "postgres://genui:genui@localhost:5432/genui_traces",
-  redisUrl: env.REDIS_URL || undefined,
   rateLimitPerMinute: port(env.AGENT_RATE_LIMIT_PER_MINUTE, 20),
   trustProxy: parseTrustProxy(env.TRUST_PROXY),
   logLevel: env.LOG_LEVEL || "info",

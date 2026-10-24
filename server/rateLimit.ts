@@ -1,6 +1,5 @@
 import rateLimit from "@fastify/rate-limit";
 import type { FastifyInstance } from "fastify";
-import type { Redis } from "ioredis";
 
 export const RATE_LIMIT_NAMESPACE = "genui-rate-limit:";
 
@@ -9,10 +8,8 @@ export interface ChatRateLimitOptions {
   max: number;
   /** Window length; default 60_000. */
   timeWindowMs?: number;
-  /** Key prefix in the store; default RATE_LIMIT_NAMESPACE. */
+  /** Key prefix for the counters; default RATE_LIMIT_NAMESPACE. */
   nameSpace?: string;
-  /** Shared store; omit to count in memory. */
-  redis?: Redis;
 }
 
 /** The message shown to the user when they hit the limit. */
@@ -31,7 +28,6 @@ export async function registerRateLimit(
     max: opts.max,
     timeWindow: opts.timeWindowMs ?? 60_000,
     nameSpace: opts.nameSpace ?? RATE_LIMIT_NAMESPACE,
-    redis: opts.redis,
     skipOnError: true,
     errorResponseBuilder: (_req, ctx) => ({
       statusCode: 429,
