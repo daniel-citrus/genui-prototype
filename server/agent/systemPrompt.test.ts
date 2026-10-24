@@ -69,11 +69,9 @@ describe("SYSTEM_PROMPT", () => {
     const bullet =
       "   - Set the Button's action prop to the name of a returned action that fits: one whose description does what the button should do. If no action fits, render the button without an action and say that clicking it won't do anything yet. Do this also when the person names an action list_actions didn't return, or when only a demo or other unrelated action came back: never wire one as a stand-in. A missing action is not a reason to ask a question or to skip render_ui.";
     assert.ok(SYSTEM_PROMPT.includes(`\n${bullet}\n`), "prompt is missing the no-action bullet");
-    assert.ok(
-      SYSTEM_PROMPT.includes(
-        "If the request is unclear in a way that changes the design, ask one short question in everyday words.",
-      ),
-    );
+    const rulesBullet =
+      "If the request is unclear in a way that changes the design, ask one short question in everyday words. Otherwise make a reasonable choice and mention it. A button that should do something, when list_actions returned no action whose description does that, is not unclear: render the button without an action and say that clicking it won't do anything yet, instead of asking.";
+    assert.ok(SYSTEM_PROMPT.includes(`- ${rulesBullet}`), "prompt is missing the missing-action ask exception");
     assert.doesNotMatch(SYSTEM_PROMPT, /demo_echo/);
   });
 
