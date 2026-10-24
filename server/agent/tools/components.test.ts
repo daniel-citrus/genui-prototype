@@ -1,12 +1,22 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import {
+  MARKUP_DISPLAY_VALUES,
+  MARKUP_FUNCTIONS,
+  MARKUP_HTML_TAGS,
+  MARKUP_INPUT_TYPES,
+  MARKUP_STYLE_PROPERTIES,
+  MARKUP_SVG_TAGS,
+  sanitizeMarkup,
+  type MarkupRules,
+} from "shared/markup";
 import { catalog } from "../../catalog/components";
 import { barChart, menuItemCard, panel, withTemplate } from "../../customComponents/testDefinitions";
 import type { ComponentRepository } from "../../ports/ComponentRepository";
 import type { CustomComponentRepository } from "../../ports/CustomComponentRepository";
 import { InMemoryComponentRepository } from "../../ports/fakes/InMemoryComponentRepository";
 import { InMemoryCustomComponentRepository } from "../../ports/fakes/InMemoryCustomComponentRepository";
-import { createToolRegistry } from "../registry";
+import { createToolRegistry, MAX_RESULT_DATA_CHARS } from "../registry";
 import type { ToolContext, ToolLogger } from "../tools";
 import { createAgentTools } from "./index";
 
@@ -79,6 +89,63 @@ describe("component tools", () => {
     assert.equal(result.summary, "Listed 3 layout components");
     const { components } = result.data as { components: Array<{ name: string }> };
     assert.deepEqual(components.map((c) => c.name).sort(), ["Card", "Divider", "Stack"]);
+  });
+
+  it("returns Markup's rules, listing every allowlist entry", async () => {
+    const { registry, ctx } = setup();
+    const result = await registry.run("get_component", { name: "Markup" }, ctx);
+    assert.equal(result.ok, true);
+    const { rules } = result.data as { rules: MarkupRules };
+
+    for (const [tag, attrs] of Object.entries(MARKUP_HTML_TAGS)) {
+      assert.ok(tag in rules.htmlTags, tag);
+      for (const attr of attrs) {
+        assert.ok(
+          rules.htmlTags[tag].includes(attr) ||
+            rules.commonAttributes.includes(attr),
+          `${tag} ${attr}`,
+        );
+      }
+    }
+    for (const [tag, attrs] of Object.entries(MARKUP_SVG_TAGS)) {
+      assert.deepEqual(rules.svgTags[tag], attrs, tag);
+    }
+    for (const [list, expected] of [
+      [rules.styleProperties, MARKUP_STYLE_PROPERTIES],
+      [rules.displayValues, MARKUP_DISPLAY_VALUES],
+      [rules.inputTypes, MARKUP_INPUT_TYPES],
+      [rules.functions, MARKUP_FUNCTIONS],
+    ] as const) {
+      assert.deepEqual(list, expected);
+    }
+    assert.deepEqual(rules.limits, {
+      elements: 200,
+      depth: 12,
+      textChars: 1000,
+      valueChars: 200,
+    });
+    assert.ok(rules.forbiddenInValues.includes("url("));
+    assert.deepEqual([...rules.booleanAttributes].sort(), [
+      "checked",
+      "disabled",
+      "selected",
+    ]);
+    assert.ok(rules.noTextTags.includes("img"));
+    assert.ok(rules.notes.length > 0);
+
+    const problems: string[] = [];
+    assert.deepEqual(
+      sanitizeMarkup(rules.example, "example", (p) => problems.push(p)),
+      rules.example,
+    );
+    assert.deepEqual(problems, []);
+    assert.ok(JSON.stringify(result.data).length < MAX_RESULT_DATA_CHARS);
+  });
+
+  it("gives no rules for other components", async () => {
+    const { registry, ctx } = setup();
+    const result = await registry.run("get_component", { name: "Button" }, ctx);
+    assert.equal("rules" in (result.data as object), false);
   });
 
   it("reads one component's props schema and example", async () => {

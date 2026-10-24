@@ -437,3 +437,81 @@ export function sanitizeMarkup(
 
   return visit(root, path, 1, false);
 }
+
+/** What `sanitizeMarkup` accepts, in a form the agent can read. */
+export interface MarkupRules {
+  /** Tag → attributes beyond `commonAttributes`. */
+  htmlTags: Record<string, readonly string[]>;
+  commonAttributes: readonly string[];
+  svgTags: Record<string, readonly string[]>;
+  styleProperties: readonly string[];
+  displayValues: readonly string[];
+  inputTypes: readonly string[];
+  functions: readonly string[];
+  forbiddenInValues: readonly string[];
+  booleanAttributes: readonly string[];
+  noTextTags: readonly string[];
+  limits: {
+    elements: number;
+    depth: number;
+    textChars: number;
+    valueChars: number;
+  };
+  notes: readonly string[];
+  example: MarkupElement;
+}
+
+const COMMON_ATTRIBUTES = html();
+
+/** The allowlist and limits `sanitizeMarkup` enforces, built from the same constants. */
+export function markupRules(): MarkupRules {
+  return {
+    htmlTags: Object.fromEntries(
+      Object.entries(MARKUP_HTML_TAGS).map(([tag, attrs]) => [
+        tag,
+        attrs.filter((a) => !COMMON_ATTRIBUTES.includes(a)),
+      ]),
+    ),
+    commonAttributes: COMMON_ATTRIBUTES,
+    svgTags: MARKUP_SVG_TAGS,
+    styleProperties: MARKUP_STYLE_PROPERTIES,
+    displayValues: MARKUP_DISPLAY_VALUES,
+    inputTypes: MARKUP_INPUT_TYPES,
+    functions: MARKUP_FUNCTIONS,
+    forbiddenInValues: UNSAFE_VALUE_PARTS,
+    booleanAttributes: [...BOOLEAN_ATTRIBUTES],
+    noTextTags: [...NO_TEXT_TAGS],
+    limits: {
+      elements: MAX_MARKUP_ELEMENTS,
+      depth: MAX_MARKUP_DEPTH,
+      textChars: MAX_MARKUP_TEXT_CHARS,
+      valueChars: MAX_MARKUP_VALUE_CHARS,
+    },
+    notes: [
+      "Style keys are kebab-case (background-color) and go in style, never in attrs.",
+      "There are no class names. img src must be an http: or https: URL.",
+      "No position, z-index or CSS transform in style; svg elements may use the transform attribute.",
+      "Text is plain text, never HTML. Elements in noTextTags take no text.",
+      'In a custom component template, {"$prop": "name"} fills an attribute, style value or text from a prop.',
+      'A children entry {"$each": "<list prop>", "as": <element>} repeats the element once per item of a list prop.',
+      'Inside "as", {"$item": true} is the current item and {"$item": "field"} is one of its fields, as a whole attribute, style or text value.',
+    ],
+    example: {
+      tag: "div",
+      style: { display: "flex", "align-items": "center", gap: "8px" },
+      children: [
+        {
+          tag: "span",
+          attrs: { "aria-label": "Status" },
+          style: {
+            width: "10px",
+            height: "10px",
+            "border-radius": "50%",
+            "background-color": "rgb(34, 197, 94)",
+          },
+        },
+        { tag: "span", text: "Open" },
+      ],
+    },
+  };
+}
