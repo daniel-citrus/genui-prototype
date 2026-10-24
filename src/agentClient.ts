@@ -67,3 +67,12 @@ async function errorMessage(response: Response): Promise<string> {
   }
   return `Request failed (${response.status})`;
 }
+
+/** Asks the API to delete a conversation. Never throws; failures are ignored (the server forgets it later anyway). */
+export async function forgetChat(conversationId: string): Promise<void> {
+  try {
+    await fetch(`/api/agent/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" });
+  } catch {
+    // Ignored: the server forgets the conversation later anyway.
+  }
+}
