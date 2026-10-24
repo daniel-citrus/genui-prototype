@@ -307,7 +307,7 @@ export const catalog: CatalogComponent[] = [
   {
     name: "Markup",
     description:
-      "Draws allowlisted HTML and SVG elements from a JSON tree, for what no other component can show, such as a bar chart or a star rating. Call get_component for Markup's full rules.",
+      "Draws allowlisted HTML and SVG elements from a JSON tree, for what no other component can show, such as a bar chart, a star rating, or a bullet or numbered list. Call get_component for Markup's full rules.",
     category: "display",
     children: "none",
     propsSchema: {

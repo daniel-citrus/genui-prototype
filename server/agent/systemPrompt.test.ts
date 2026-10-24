@@ -85,7 +85,8 @@ describe("SYSTEM_PROMPT", () => {
   it("prefers existing components and says when to define one", () => {
     for (const sentence of [
       "in this order of preference: catalog components, then existing custom components (from list_components), then a new custom component composed of those, defined with define_component.",
-      "Use Markup, which draws a visual from a JSON tree, only when the person asks for a look the components can't produce, such as a chart, a rating or a specific style;",
+      "Use Markup, which draws a visual from a JSON tree, only when the person asks for a look the components can't produce, such as a chart, a rating, a bullet or numbered list, or a specific style;",
+      "A bullet or numbered list is Markup with a ul or ol of li elements, not Text lines that start with a bullet character.",
       "For a one-off, put Markup directly in the design; define a component only for something reused or repeated.",
       "read a custom component with get_component like any other.",
       "Define one with define_component when the person asks to save or reuse part of a design, or when the request needs something no existing component draws.",
