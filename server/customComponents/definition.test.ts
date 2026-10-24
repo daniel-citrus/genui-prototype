@@ -367,4 +367,150 @@ describe("validateDefinition", () => {
       assert.deepEqual(await errorsOf(bare), []);
     });
   });
+
+  describe("$each", () => {
+    const list = (items: unknown) => ({
+      type: "object",
+      properties: { items: { type: "array", items, description: "The items." } },
+      additionalProperties: false,
+    });
+    const withRoot = (root: unknown, items: unknown = { type: "string" }, exampleItems: unknown = ["A", "B"]) => ({
+      ...withTemplate("BulletList", { component: "Markup", props: { root } }),
+      propsSchema: list(items),
+      exampleProps: { items: exampleItems },
+    });
+    const bulletList = (as: unknown, items: unknown = { type: "string" }, exampleItems: unknown = ["A", "B"]) => ({
+      ...withTemplate("BulletList", {
+        component: "Markup",
+        props: { root: { tag: "ul", children: [{ $each: "items", as }] } },
+      }),
+      propsSchema: list(items),
+      exampleProps: { items: exampleItems },
+    });
+    const rows = (
+      as: unknown,
+      items: unknown = { type: "object", properties: { label: { type: "string" } } },
+      exampleItems: unknown = [{ label: "A" }],
+    ) => ({
+      ...withTemplate("Rows", { component: "Stack", children: [{ $each: "items", as }] } as CustomComponentDefinition["template"]),
+      propsSchema: list(items),
+      exampleProps: { items: exampleItems },
+    });
+    const li = { tag: "li", text: { $item: true } };
+    const row = (field: unknown) => ({ component: "Text", props: { text: { $item: field } } });
+    const errorsOf = async (definition: unknown) => {
+      const result = await validate(definition);
+      return result.ok ? [] : result.errors;
+    };
+
+    it("accepts a string list and an object list, in Markup and in component children", async () => {
+      for (const definition of [bulletList(li), rows(row("label")), rows(row(true), { type: "string" }, ["A"])]) {
+        assert.deepEqual(await errorsOf(definition), []);
+      }
+    });
+
+    it("counts a prop used only through $each as used", async () => {
+      assert.deepEqual(await errorsOf(bulletList(li)), []);
+    });
+
+    it("refuses an undeclared prop and one that isn't an array", async () => {
+      const undeclared = withRoot({ tag: "ul", children: [{ $each: "rows", as: li }] });
+      assert.deepEqual(await errorsOf(undeclared), [
+        'template.props.root.children.0.$each uses prop "rows", which propsSchema.properties doesn\'t declare',
+        'propsSchema.properties.items is not used by the template; use it with {"$prop": "items"} or remove it',
+      ]);
+      const text = {
+        ...bulletList(li),
+        propsSchema: { type: "object", properties: { items: { type: "string", description: "x" } }, additionalProperties: false },
+        exampleProps: { items: "x" },
+      };
+      assert.deepEqual(await errorsOf(text), [
+        'template.props.root.children.0.$each uses prop "items", whose schema type isn\'t "array"',
+        'propsSchema.properties.items is not used by the template; use it with {"$prop": "items"} or remove it',
+      ]);
+    });
+
+    it("refuses other keys, a nested $each, a slot in as and $item outside as", async () => {
+      const extra = withRoot({ tag: "ul", children: [{ $each: "items", as: li, limit: 3 }] });
+      assert.deepEqual(await errorsOf(extra), ["template.props.root.children.0.limit is not allowed (use $each, as)"]);
+      const nested = { tag: "li", children: [{ $each: "items", as: li }] };
+      assert.deepEqual(await errorsOf(bulletList(nested)), [
+        'template.props.root.children.0.as.children.0 {"$each"} can\'t be nested inside another {"$each"}',
+      ]);
+      assert.deepEqual(await errorsOf(rows({ $children: true })), [
+        'template.children.0.as can\'t be a {"$children": true} slot',
+      ]);
+      const outside = { ...withTemplate("Outside", text({ $item: true })), ...noProps };
+      assert.deepEqual(await errorsOf(outside), [
+        'template.props.text {"$item"} is only allowed inside the "as" of a {"$each"} entry',
+      ]);
+    });
+
+    it("refuses a field the items don't declare and a field of non-object items", async () => {
+      assert.deepEqual(await errorsOf(rows(row("name"))), [
+        'template.children.0.as.props.text uses $item field "name", which the items schema doesn\'t declare',
+      ]);
+      assert.deepEqual(await errorsOf(bulletList({ tag: "li", text: { $item: "label" } })), [
+        'template.props.root.children.0.as.text uses $item field "label", but the items are not objects',
+      ]);
+    });
+
+    it("refuses an example with no items", async () => {
+      assert.deepEqual(await errorsOf(bulletList(li, { type: "string" }, [])), [
+        "exampleProps.items needs at least one item, so the repeated part can be checked",
+      ]);
+    });
+
+    it("gives the repetition hint for the three bullet-list attempts in a trace", async () => {
+      const hint = '{"$each": "items", "as": …} in a children array';
+      const asText = withRoot({ tag: "ul", children: [{ tag: "li", text: { $prop: "items" } }] });
+      assert.equal(
+        (await errorsOf(asText))[0],
+        `template.props.root.children.0.text items is a list; to repeat over it use ${hint}`,
+      );
+      const string = withRoot({ tag: "ul", children: [{ tag: "li", text: "{$each:items}" }] });
+      assert.deepEqual(await errorsOf(string), [
+        'propsSchema.properties.items is not used by the template; use it with {"$prop": "items"} or remove it',
+      ]);
+      const children = withRoot({ tag: "ul", children: { $prop: "items" } });
+      const [first, second] = await errorsOf(children);
+      assert.equal(
+        first,
+        'template.props.root.children {"$prop"} is only allowed as a whole prop value or a Markup text, attribute or style value',
+      );
+      assert.equal(second, `template.props.root.children items is a list; to repeat over it use ${hint}`);
+    });
+  });
+});
+
+describe("validateDefinition Card forms", () => {
+  let catalog: Component[];
+
+  beforeEach(async () => {
+    catalog = await new InMemoryComponentRepository(entries).list();
+  });
+
+  const form = () => ({
+    component: "Card",
+    children: [
+      { component: "TextInput", props: { label: "Name", name: "name" } },
+      { component: "Button", props: { label: "Add", action: "add_to_cart" } },
+    ],
+  });
+  const validate = (children: unknown[]) =>
+    validateDefinition(
+      { ...menuItemCard, ...noProps, children: "none", template: { component: "Stack", children } },
+      { catalog, resolve: async () => undefined, actions: [addToCart] },
+    );
+
+  it("accepts a template with two Card forms that reuse input names", async () => {
+    assert.equal((await validate([form(), form()])).ok, true);
+  });
+
+  it("refuses two Card forms that one button outside both would send", async () => {
+    const outer = { component: "Button", props: { label: "All", action: "add_to_cart" } };
+    const result = await validate([form(), form(), outer]);
+    assert.equal(result.ok, false);
+    assert.match(result.ok ? "" : result.errors[0], /would send both; put each form in its own Card/);
+  });
 });

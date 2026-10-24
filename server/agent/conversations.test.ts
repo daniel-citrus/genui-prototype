@@ -4,6 +4,7 @@ import type { UiNode } from "shared/ui";
 import {
   MAX_CONVERSATIONS,
   MAX_DESIGNS_PER_CONVERSATION,
+  forgetConversation,
   getDesign,
   getHistory,
   hasConversation,
@@ -132,5 +133,35 @@ describe("rememberDesign and getDesign", () => {
     assert.equal(getDesign("evict-0", "ui-1"), undefined);
 
     for (const id of [...others, "evict-new"]) resetConversation(id);
+  });
+});
+
+describe("forgetConversation", () => {
+  const design = (n: number): UiNode => ({ component: "Card", props: { title: `design ${n}` } });
+
+  it("removes history and designs and leaves other conversations alone", async () => {
+    getHistory("forget-a").push({ role: "user", content: "hi" });
+    rememberDesign("forget-a", "ui-1", design(1));
+    rememberDesign("forget-b", "ui-1", design(2));
+    await forgetConversation("forget-a");
+    assert.equal(hasConversation("forget-a"), false);
+    assert.equal(getDesign("forget-a", "ui-1"), undefined);
+    assert.deepEqual(getDesign("forget-b", "ui-1"), design(2));
+    await forgetConversation("forget-never-existed");
+    resetConversation("forget-b");
+  });
+
+  it("waits for a queued turn, so its late design does not survive", async () => {
+    const gate = deferred();
+    const turn = oneTurnAtATime("forget-c", async () => {
+      await gate.promise;
+      rememberDesign("forget-c", "ui-late", design(3));
+    });
+    const forgotten = forgetConversation("forget-c");
+    gate.resolve();
+    await turn;
+    await forgotten;
+    assert.equal(hasConversation("forget-c"), false);
+    assert.equal(getDesign("forget-c", "ui-late"), undefined);
   });
 });

@@ -42,6 +42,8 @@ export function createToolRegistry(definitions: ToolDefinition[]): ToolRegistry 
       input_schema,
     })),
 
+    writes: (name) => byName.get(name)?.def.writes === true,
+
     async run(name: string, args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
       const entry = byName.get(name);
       if (!entry) return { ok: false, summary: `Unknown tool: ${name}` };

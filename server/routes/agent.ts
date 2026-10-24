@@ -4,6 +4,7 @@ import type { AgentLlm } from "../ports/AgentLlm";
 import type { TraceRepository } from "../ports/TraceRepository";
 import type { ToolRegistry } from "../agent/tools";
 import { runAgent } from "../agent/loop";
+import { forgetConversation } from "../agent/conversations";
 import type { AgentRun } from "../agent/run";
 
 /** Chat bodies are a short message plus ids; 4,000 four-byte characters is about 16 KB of JSON. */
@@ -88,4 +89,16 @@ export const agentRouter: FastifyPluginAsync<AgentRouterOptions> = async (app, o
       if (!res.writableEnded) res.end();
     }
   });
+
+  /** Forget a conversation's history and designs, whether or not it exists. */
+  app.delete<{ Params: { conversationId: string } }>(
+    "/conversations/:conversationId",
+    { config: { rateLimit: {} } },
+    async (req, reply) => {
+      const { conversationId } = req.params;
+      await forgetConversation(conversationId);
+      req.log.info({ conversationId }, "conversation forgotten");
+      return reply.code(204).send();
+    },
+  );
 };

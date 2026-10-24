@@ -315,6 +315,48 @@ describe("checkTrace", () => {
     assert.doesNotMatch(blob, /"component"/);
   });
 
+  describe("reply checks", () => {
+    const words = (n: number) => Array.from({ length: n }, () => "w").join(" ");
+    const replyTrace = (...contents: (string | null)[]) =>
+      emptyTrace({
+        completions: contents.map((content) => ({
+          allowTools: true,
+          content,
+          truncated: false,
+          toolCalls: [],
+        })),
+      });
+
+    it("replyMaxWords passes at the limit and fails above it, across completions", () => {
+      assert.deepEqual(checkTrace(replyTrace(words(25), null, words(15)), [{ replyMaxWords: 40 }]), []);
+      const failures = checkTrace(replyTrace(words(25), null, words(16)), [{ replyMaxWords: 40 }]);
+      assert.equal(failures.length, 1);
+      assert.equal(failures[0]!.reason, "replyMaxWords 40: reply has 41 words");
+      assert.deepEqual(checkTrace(replyTrace(null), [{ replyMaxWords: 1 }]), []);
+    });
+
+    it("replyExcludes is case-sensitive", () => {
+      assert.deepEqual(checkTrace(replyTrace("a stack of cards"), [{ replyExcludes: "Stack" }]), []);
+      const failures = checkTrace(replyTrace("ok", "A Stack here"), [{ replyExcludes: "Stack" }]);
+      assert.equal(failures.length, 1);
+      assert.equal(
+        failures[0]!.reason,
+        'replyExcludes "Stack": reply contains the excluded text',
+      );
+    });
+
+    it("reasons omit reply text and user text", () => {
+      const failures = checkTrace(replyTrace(`completion-text-must-not-leak ${words(50)}`), [
+        { replyMaxWords: 40 },
+        { replyExcludes: "completion" },
+      ]);
+      assert.equal(failures.length, 2);
+      const blob = failures.map((f) => f.reason).join("\n");
+      assert.doesNotMatch(blob, /must-not-leak/);
+      assert.doesNotMatch(blob, new RegExp(DISTINCTIVE_USER_TEXT));
+    });
+  });
+
   describe("uiText and uiMarkupTag", () => {
     const heading = { component: "Heading", props: { text: "Hello Ada" } };
     const markup = {

@@ -1,3 +1,4 @@
+import { isEachEntry } from "shared/markup";
 import { isObject } from "./bindings";
 
 /**
@@ -16,5 +17,9 @@ export function omitEmptyChildren(
     const { children: _children, ...rest } = node;
     return rest;
   }
-  return { ...node, children: node.children.map((child) => omitEmptyChildren(child, childrenOf)) };
+  const strip = (child: unknown) =>
+    isEachEntry(child)
+      ? { ...child, as: omitEmptyChildren(child.as, childrenOf) }
+      : omitEmptyChildren(child, childrenOf);
+  return { ...node, children: node.children.map(strip) };
 }

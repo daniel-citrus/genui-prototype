@@ -245,6 +245,23 @@ const committedCases: EvalCase[] = [
       { toolNotCalled: "list_components" },
       { toolNotCalled: "list_actions" },
       { toolNotCalled: "render_ui" },
+      { replyMaxWords: 40 },
+    ],
+  },
+  {
+    id: "plain-short-reply",
+    prompt:
+      "Make a welcome card with a title and a short greeting",
+    checks: [
+      { endedBy: "reply" },
+      { noError: true },
+      { toolSucceeded: "render_ui" },
+      { replyMaxWords: 40 },
+      { replyExcludes: "render_ui" },
+      { replyExcludes: "list_components" },
+      { replyExcludes: "get_component" },
+      { replyExcludes: "props" },
+      { replyExcludes: "Stack" },
     ],
   },
   {
@@ -270,6 +287,7 @@ const committedCases: EvalCase[] = [
       { noError: true },
       { toolSucceeded: "render_ui" },
       { uiComponent: "Heading" },
+      { replyMaxWords: 40 },
     ],
   },
   {

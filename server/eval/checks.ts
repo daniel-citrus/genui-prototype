@@ -58,6 +58,13 @@ function treeHasMarkupTag(tree: unknown, tag: string): boolean {
   return tree.children.some((child) => treeHasMarkupTag(child, tag));
 }
 
+export function replyText(trace: AgentTrace): string {
+  return trace.completions
+    .map((c) => c.content)
+    .filter((content): content is string => content !== null)
+    .join("\n");
+}
+
 function checkLabel(check: EvalCheck): string {
   if ("endedBy" in check) return `endedBy "${check.endedBy}"`;
   if ("noError" in check) return "noError";
@@ -70,6 +77,8 @@ function checkLabel(check: EvalCheck): string {
   if ("uiMarkupTag" in check) return `uiMarkupTag "${check.uiMarkupTag}"`;
   if ("agentComponent" in check) return `agentComponent "${check.agentComponent}"`;
   if ("noButtonAction" in check) return "noButtonAction";
+  if ("replyMaxWords" in check) return `replyMaxWords ${check.replyMaxWords}`;
+  if ("replyExcludes" in check) return `replyExcludes "${check.replyExcludes}"`;
   return `uiNamedInput "${check.uiNamedInput}"`;
 }
 
@@ -116,6 +125,17 @@ function evaluateCheck(trace: AgentTrace, check: EvalCheck): CheckFailure | unde
     );
     if (!found) return undefined;
     return { check, reason: `${label}: tool was called` };
+  }
+
+  if ("replyMaxWords" in check) {
+    const words = replyText(trace).split(/\s+/).filter(Boolean).length;
+    if (words <= check.replyMaxWords) return undefined;
+    return { check, reason: `${label}: reply has ${words} words` };
+  }
+
+  if ("replyExcludes" in check) {
+    if (!replyText(trace).includes(check.replyExcludes)) return undefined;
+    return { check, reason: `${label}: reply contains the excluded text` };
   }
 
   const renderUi = lastSuccessfulRenderUi(trace);
