@@ -11,13 +11,13 @@ function placeholder(label: string): HTMLElement {
   return node;
 }
 
-function draw(node: UiNode): HTMLElement {
+function draw(node: UiNode, path: string): HTMLElement {
   if (!Object.hasOwn(components, node.component)) {
     return placeholder(`Unknown component: ${node.component}`);
   }
   const renderer = components[node.component as keyof typeof components];
-  const children = (node.children ?? []).map(draw);
-  return renderer(node.props ?? {}, children);
+  const children = (node.children ?? []).map((child, i) => draw(child, `${path}.children.${i}`));
+  return renderer(node.props ?? {}, children, path);
 }
 
 /** Replaces the container's contents with the empty-state message. */
@@ -30,5 +30,5 @@ export function renderEmpty(container: HTMLElement): void {
 
 /** Replaces the container's contents with the drawn tree. */
 export function renderUi(tree: UiNode, container: HTMLElement): void {
-  container.replaceChildren(draw(tree));
+  container.replaceChildren(draw(tree, "tree"));
 }

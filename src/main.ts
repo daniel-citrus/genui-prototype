@@ -1,5 +1,7 @@
 import "./style.css";
 import { MAX_MESSAGE_CHARS, type ActionResult, type ActionRunRequest, type AgentEvent } from "shared/api";
+import { sendsInput } from "shared/formScope";
+import type { UiNode } from "shared/ui";
 import { runAction } from "./actionsClient";
 import { streamChat } from "./agentClient";
 import { threadEffect, thinkingAfter } from "./chatEvents";
@@ -103,6 +105,7 @@ componentsToggle?.addEventListener("click", () => {
 let activeTurn: AbortController | null = null;
 /** The `id` of the `ui` event that drew the shown design; actions name it. */
 let shownUiId: string | null = null;
+let shownTree: UiNode | null = null;
 let actionInFlight = false;
 /** Set while the status area asks an action's confirm question. */
 let confirmShown = false;
@@ -224,6 +227,7 @@ function renderEvent(event: AgentEvent, view: TurnView) {
     if (event.type === "ui") {
       if (sandbox) renderUi(event.tree, sandbox);
       shownUiId = event.id;
+      shownTree = event.tree;
       showStatus(null);
       syncActionButtons();
     }
@@ -303,9 +307,12 @@ function isHidden(control: Element): boolean {
   );
 }
 
-async function sendAction(action: string) {
+async function sendAction(button: HTMLButtonElement, action: string) {
   if (!sandbox || !shownUiId) return;
-  const controls = [...sandbox.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select")];
+  // Only the fields the server will accept from this button: those in its nearest Card, or all without one.
+  const controls = [...sandbox.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select")].filter(
+    (control) => sendsInput(shownTree, button.dataset.path ?? "", control.dataset.path ?? ""),
+  );
   // Markup styles can put a field out of sight; the server and filterMarkup refuse the known ways.
   if (controls.some((control) => control.name && isHidden(control))) {
     showStatus({ ok: false, message: "This design has a hidden field, so the action was not sent." });
@@ -343,7 +350,7 @@ async function postAction(request: ActionRunRequest) {
 sandbox?.addEventListener("click", (e) => {
   const button = (e.target as Element).closest<HTMLButtonElement>("button[data-action]");
   if (!button?.dataset.action || button.disabled) return;
-  void sendAction(button.dataset.action);
+  void sendAction(button, button.dataset.action);
 });
 
 form?.addEventListener("submit", (e) => {

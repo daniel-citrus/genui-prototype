@@ -8,7 +8,7 @@ import { filterMarkup } from "./markup";
  * checked, but are still read defensively. Text only ever goes in through
  * `textContent` or a named attribute, never as HTML.
  */
-export type Renderer = (props: Record<string, unknown>, children: HTMLElement[]) => HTMLElement;
+export type Renderer = (props: Record<string, unknown>, children: HTMLElement[], path: string) => HTMLElement;
 
 type Props = Record<string, unknown>;
 
@@ -46,9 +46,10 @@ function uniqueId(prefix: string): string {
 }
 
 /** The `name` prop names the value an action receives from this field. */
-function setName(control: HTMLInputElement | HTMLSelectElement, props: Props): void {
+function setName(control: HTMLInputElement | HTMLSelectElement, props: Props, path: string): void {
   const name = str(props, "name");
   if (name) control.name = name;
+  control.dataset.path = path;
 }
 
 function field(label: string, control: HTMLElement, labelFor: string): HTMLElement {
@@ -132,7 +133,7 @@ const buttonSize = { sm: "px-3 py-1.5 text-xs", md: "px-4 py-2 text-sm", lg: "px
 
 const actionName = /^[a-z][a-z0-9_]*$/;
 
-const Button: Renderer = (props) => {
+const Button: Renderer = (props, _children, path) => {
   const node = el(
     "button",
     `inline-flex items-center justify-center self-start rounded-lg font-medium shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${pick(props, "variant", buttonVariant, "primary")} ${pick(props, "size", buttonSize, "md")}`,
@@ -142,13 +143,16 @@ const Button: Renderer = (props) => {
   node.disabled = bool(props, "disabled", false);
   // Only an enabled Button with a well-formed action name can send one.
   const action = str(props, "action");
-  if (action && actionName.test(action) && !node.disabled) node.dataset.action = action;
+  if (action && actionName.test(action) && !node.disabled) {
+    node.dataset.action = action;
+    node.dataset.path = path;
+  }
   return node;
 };
 
 const inputTypes = ["text", "email", "password", "number"];
 
-const TextInput: Renderer = (props) => {
+const TextInput: Renderer = (props, _children, path) => {
   const id = uniqueId("input");
   const input = el("input", inputClass);
   input.id = id;
@@ -158,29 +162,29 @@ const TextInput: Renderer = (props) => {
   if (placeholder) input.placeholder = placeholder;
   input.required = bool(props, "required", false);
   input.maxLength = MAX_FIELD_CHARS;
-  setName(input, props);
+  setName(input, props, path);
   return field(str(props, "label") ?? "", input, id);
 };
 
-const Checkbox: Renderer = (props) => {
+const Checkbox: Renderer = (props, _children, path) => {
   const id = uniqueId("checkbox");
   const wrapper = el("div", "flex items-center gap-2");
   const input = el("input", "size-4 rounded border-zinc-300 accent-zinc-900");
   input.type = "checkbox";
   input.id = id;
   input.checked = bool(props, "checked", false);
-  setName(input, props);
+  setName(input, props, path);
   const label = el("label", "text-sm text-zinc-700", str(props, "label") ?? "");
   label.htmlFor = id;
   wrapper.append(input, label);
   return wrapper;
 };
 
-const Select: Renderer = (props) => {
+const Select: Renderer = (props, _children, path) => {
   const id = uniqueId("select");
   const select = el("select", inputClass);
   select.id = id;
-  setName(select, props);
+  setName(select, props, path);
   const placeholder = str(props, "placeholder");
   if (placeholder) {
     const option = new Option(placeholder, "");
@@ -254,7 +258,11 @@ const Alert: Renderer = (props) => {
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-function buildMarkup(element: MarkupElement, inSvg: boolean): HTMLElement | SVGElement {
+function buildMarkup(
+  element: MarkupElement,
+  inSvg: boolean,
+  paths: WeakMap<MarkupElement, string>,
+): HTMLElement | SVGElement {
   const svg = inSvg || element.tag === "svg";
   const node = svg
     ? (document.createElementNS(SVG_NS, element.tag) as SVGElement)
@@ -268,6 +276,10 @@ function buildMarkup(element: MarkupElement, inSvg: boolean): HTMLElement | SVGE
   }
   if (element.text !== undefined) node.textContent = String(element.text);
 
+  // Controls and action buttons carry the path the server knows them by.
+  const path = paths.get(element);
+  if (path && (node instanceof HTMLInputElement || node instanceof HTMLSelectElement)) node.dataset.path = path;
+
   if (node instanceof HTMLInputElement && !node.hasAttribute("maxlength")) node.maxLength = MAX_FIELD_CHARS;
   // The server lists an option without a value by its text: send exactly that.
   if (node instanceof HTMLOptionElement && !node.hasAttribute("value")) node.value = String(element.text ?? "");
@@ -275,10 +287,13 @@ function buildMarkup(element: MarkupElement, inSvg: boolean): HTMLElement | SVGE
   if (node instanceof HTMLButtonElement) {
     node.type = "button";
     // Only an enabled button can send its action; the filter kept only snake_case names.
-    if (element.action && !node.disabled) node.dataset.action = element.action;
+    if (element.action && !node.disabled) {
+      node.dataset.action = element.action;
+      if (path) node.dataset.path = path;
+    }
   }
 
-  node.append(...(element.children ?? []).map((child) => buildMarkup(child, svg)));
+  node.append(...(element.children ?? []).map((child) => buildMarkup(child, svg, paths)));
   return node;
 }
 
@@ -287,12 +302,14 @@ function buildMarkup(element: MarkupElement, inSvg: boolean): HTMLElement | SVGE
  * outside the allowlist, inside a wrapper that keeps everything in its own
  * box, so nothing in it can cover the chat or the page.
  */
-const Markup: Renderer = (props) => {
+const Markup: Renderer = (props, _children, path) => {
   const wrapper = document.createElement("div");
   wrapper.style.setProperty("contain", "content");
   wrapper.style.setProperty("overflow", "hidden");
-  const root = filterMarkup(props.root);
-  if (root) wrapper.append(buildMarkup(root, false));
+  // Filtering can drop siblings, so remember each element's path in the received root.
+  const paths = new WeakMap<MarkupElement, string>();
+  const root = filterMarkup(props.root, (element, at) => paths.set(element, `${path}.props.${at}`));
+  if (root) wrapper.append(buildMarkup(root, false, paths));
   return wrapper;
 };
 
