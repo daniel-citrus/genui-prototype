@@ -1,7 +1,6 @@
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import { createActionRegistry } from "./actions/registry";
 import type { ActionRegistry } from "./actions/types";
-import type { RedisHandle } from "./adapters/redis/client";
 import type { ToolRegistry } from "./agent/tools";
 import type { AgentLlm } from "./ports/AgentLlm";
 import type { ComponentRepository } from "./ports/ComponentRepository";
@@ -26,7 +25,6 @@ export interface AppDeps {
   trustProxy?: number | false;
   rateLimit: ChatRateLimitOptions;
   /** Shared rate-limit store; closed with the app. Omit to count in memory. */
-  redis?: RedisHandle;
   /** Where log lines go when `logLevel` is set; default stdout. Tests capture them here. */
   logStream?: { write(line: string): void };
   /** Custom components for the Components panel; its route needs `components` too. */
@@ -81,14 +79,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     });
   });
 
-  const redis = deps.redis;
-  if (redis) app.addHook("onClose", () => redis.close());
-  await registerRateLimit(app, { ...deps.rateLimit, redis: redis?.client });
+  await registerRateLimit(app, deps.rateLimit);
 
   app.register(healthRouter, {
     prefix: "/api/health",
     pingDb: deps.pingDb,
-    pingRedis: redis?.ping,
     pingTraces: deps.pingTraces,
   });
   app.register(agentRouter, {
