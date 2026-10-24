@@ -264,7 +264,7 @@ describe("createOpenAILlm", () => {
       signal: new AbortController().signal,
       onText: () => {},
     });
-    assert.equal(dflt.calls[0].body.max_completion_tokens, 2048);
+    assert.equal(dflt.calls[0].body.max_completion_tokens, 4096);
   });
 
   it("marks a turn truncated only when finish_reason is length", async () => {
