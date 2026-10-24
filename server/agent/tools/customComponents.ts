@@ -24,6 +24,7 @@ export function defineComponentTool(
 ): ToolDefinition {
   return {
     name: "define_component",
+    writes: true,
     description:
       "Save a custom component built from existing components, so designs can use it by name in this and later chats. Saving a name that exists adds its next version. Every prop in props_schema must be used in the template through {\"$prop\": \"<name>\"}; text such as {{name}} is shown as written, never filled in. Template buttons may only use actions list_actions returned. If it reports problems, nothing is saved: fix them and call it again.",
     input_schema: {
@@ -110,6 +111,7 @@ export function deleteComponentTool(
 ): ToolDefinition {
   return {
     name: "delete_component",
+    writes: true,
     description:
       "Delete a custom component, so it is no longer listed or usable in new designs. Only when the person asks to delete it.",
     input_schema: {
