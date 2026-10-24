@@ -40,9 +40,16 @@ describe("catalog", () => {
   it("no longer limits Markup to templates and points to its rules", () => {
     const markup = catalog.find((c) => c.name === "Markup")!;
     const root = (markup.propsSchema.properties as Record<string, { description: string }>).root;
-    for (const text of [markup.description, root.description]) {
-      assert.ok(!text.includes("Only used inside custom component templates"));
-    }
+    assert.equal(
+      markup.description,
+      "Draws allowlisted HTML and SVG elements from a JSON tree, for what no other component can show, such as a bar chart, a star rating, or a bullet or numbered list. Call get_component for Markup's full rules.",
+    );
+    assert.ok(!markup.description.includes("Only used inside custom component templates"));
+    assert.ok(!root.description.includes("Only used inside custom component templates"));
     assert.match(markup.description, /get_component/);
+    assert.match(
+      root.description,
+      /The root element: \{ "tag", "attrs"\?, "style"\?, "text"\?, "action"\?, "children"\? \}, a JSON tree, never an HTML string/,
+    );
   });
 });
