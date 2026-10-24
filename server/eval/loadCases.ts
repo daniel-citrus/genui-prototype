@@ -32,6 +32,7 @@ const ENDED_BY: ReadonlySet<string> = new Set([
   "tool_budget",
   "token_budget",
   "stopped",
+  "unresolved",
 ]);
 
 function assertPlainObject(value: unknown, context: string): Record<string, unknown> {

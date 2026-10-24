@@ -87,6 +87,7 @@ export function defineComponentTool(
             ok: false,
             summary: `Definition has ${n} problem${n === 1 ? "" : "s"}`,
             data: { errors: check.errors },
+            retryable: true,
           };
         }
         const { version } = await customComponents.save(check.definition);

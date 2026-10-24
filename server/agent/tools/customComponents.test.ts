@@ -164,6 +164,7 @@ describe("define_component", () => {
       ok: false,
       summary: `Definition has ${expected.errors.length} problems`,
       data: { errors: expected.errors },
+      retryable: true,
     });
     assert.deepEqual((await repo.list({ includeDeleted: true })).components.map((c) => c.name), ["Panel"]);
   });
@@ -175,6 +176,7 @@ describe("define_component", () => {
     assert.deepEqual(result, {
       ok: false,
       summary: "Definition has 1 problem",
+      retryable: true,
       data: { errors: ['template.props.root.children.1.action "send_mail" is not a registered action (call list_actions to see them)'] },
     });
     assert.equal(await repo.getByName("OrderForm"), undefined);

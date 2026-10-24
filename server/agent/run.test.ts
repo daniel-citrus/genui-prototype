@@ -66,5 +66,15 @@ describe("handleToolCall with render_ui", () => {
       ["tool_call", "tool_result"],
     );
     assert.equal(outcome.isError, true);
+    assert.equal(outcome.retryable, true);
+  });
+
+  it("does not mark a successful render or an unknown tool retryable", async () => {
+    const { run } = makeRun();
+    const ok = await handleToolCall(run, { id: "c1", name: "render_ui", args: { tree: { component: "Divider" } } });
+    const unknown = await handleToolCall(run, { id: "c2", name: "nope", args: {} });
+    assert.equal(ok.retryable, false);
+    assert.equal(unknown.isError, true);
+    assert.equal(unknown.retryable, false);
   });
 });

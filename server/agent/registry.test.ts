@@ -174,6 +174,7 @@ describe("createToolRegistry run", () => {
         ok: false,
         summary: "Invalid arguments for get_thing",
         data: { errors },
+        retryable: true,
       });
     }
     assert.equal(ran, 0);
@@ -198,6 +199,7 @@ describe("createToolRegistry run", () => {
     const result = await registry.run("get_thing", { name: "x" }, ctx);
 
     assert.deepEqual(result, { ok: false, summary: "get_thing failed" });
+    assert.equal(result.retryable, undefined);
     assert.equal(JSON.stringify(result).includes("secret database detail"), false);
     const error = log.entries.find((e) => e.level === "error");
     assert.ok(error);

@@ -36,6 +36,12 @@ describe("loadCases", () => {
     );
   });
 
+  it("accepts endedBy unresolved", () => {
+    const dir = caseDir();
+    writeCase(dir, "u.json", { id: "u", prompt: "p", checks: [{ endedBy: "unresolved" }] });
+    assert.equal(loadCases(dir).length, 1);
+  });
+
   it("refuses invalid JSON", () => {
     const dir = caseDir();
     writeFileSync(join(dir, "bad.json"), "{ not json", "utf8");

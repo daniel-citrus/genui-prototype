@@ -25,6 +25,11 @@ export const TRUNCATED_NOTICE = "The reply was cut off because it was too long."
 export const FORGOTTEN_NOTICE =
   "I no longer have the earlier messages in this chat (the server restarted or the chat was set aside), so I'm answering this one on its own.";
 
+export const UNFINISHED_NOTICE = "This isn't finished: the last design still had problems.";
+
+export const REPAIR_REMINDER = (tool: string) =>
+  `Your last ${tool} call reported problems, so nothing was shown or saved. Fix them and call ${tool} again now. If you need to ask the person something first, reply with only that question.`;
+
 /**
  * The tool-use loop, server-side. Streams events through `run`. Turns on one
  * conversation run one at a time, since they share its history.
@@ -55,6 +60,11 @@ export function runAgent(
  * completion after the tool-call or token budget is spent, is sent with tools
  * off so the model answers with what it has. Tool calls past the budget, and
  * repeats of an earlier call, are answered without running.
+ *
+ * While the latest build (`render_ui`, or `define_component` with no render
+ * since) has fixable problems, a completion's text is held. A text-only reply
+ * then gets one system reminder in place of ending the turn; if the turn is
+ * still unfinished after that, it ends as `unresolved` with a notice.
  */
 async function runTurn(
   userText: string,
@@ -74,6 +84,12 @@ async function runTurn(
   const seen = new Set<string>();
   const written = new Set<string>();
   let endedBy: EndedBy = "stopped";
+  let repairReminders = 0;
+  // Whether the latest build call failed in a way the model can fix, and which
+  // tool failed last (named in the reminder).
+  let renderFailed = false;
+  let defineFailed = false;
+  let failedTool = "render_ui";
 
   const trace: AgentTrace = {
     conversationId,
@@ -123,17 +139,20 @@ async function runTurn(
     for (let step = 0; step < MAX_STEPS; step += 1) {
       if (run.signal.aborted) return;
 
-      // Why tools are off for this completion, if they are.
-      const toolsOff: EndedBy | undefined =
+      // Why tools are off for completion `at`, if they are.
+      const toolsOffAt = (at: number): EndedBy | undefined =>
         toolCalls >= MAX_TOOL_CALLS_PER_TURN
           ? "tool_budget"
           : promptTokens + completionTokens >= MAX_TURN_TOKENS
             ? "token_budget"
-            : step === MAX_STEPS - 1
+            : at >= MAX_STEPS - 1
               ? "max_steps"
               : undefined;
+      const toolsOff = toolsOffAt(step);
 
       const allowTools = toolsOff === undefined;
+      const unfinished = renderFailed || defineFailed;
+      const held: string[] = [];
 
       // Ask the model. Text deltas go out as SSE `text` events.
       steps += 1;
@@ -142,7 +161,7 @@ async function runTurn(
         tools: run.tools.specs,
         allowTools,
         signal: run.signal,
-        onText: (text) => run.emit({ type: "text", text }),
+        onText: (text) => (unfinished ? held.push(text) : run.emit({ type: "text", text })),
       });
       promptTokens += turn.usage?.promptTokens ?? 0;
       completionTokens += turn.usage?.completionTokens ?? 0;
@@ -171,11 +190,32 @@ async function runTurn(
       }
       history.push(assistant);
 
-      // No tools → this is the reply. Turn is done.
+      const emitHeld = () => {
+        if (held.length > 0) run.emit({ type: "text", text: held.join("") });
+      };
+
+      // No tools → this is the reply, unless a failed build is left to fix.
       if (turn.toolCalls.length === 0) {
-        endedBy = "reply";
+        if (!unfinished) {
+          endedBy = "reply";
+          return;
+        }
+        if (run.signal.aborted) {
+          emitHeld();
+          return;
+        }
+        // One reminder, if the model can use tools on its next completion.
+        if (repairReminders === 0 && toolsOffAt(step + 1) === undefined) {
+          repairReminders = 1;
+          history.push({ role: "system", content: REPAIR_REMINDER(failedTool) });
+          continue;
+        }
+        emitHeld();
+        run.emit({ type: "notice", message: UNFINISHED_NOTICE });
+        endedBy = "unresolved";
         return;
       }
+      emitHeld();
 
       // Answer each requested tool and push its result as a `tool` message;
       // the model sees it on the next completion. Every call gets exactly one
@@ -219,6 +259,14 @@ async function runTurn(
           seen.add(key);
           const outcome = await handleToolCall(run, call);
           content = outcome.content;
+          if (call.name === "render_ui") {
+            renderFailed = outcome.retryable;
+            if (outcome.retryable) failedTool = call.name;
+            else if (!outcome.isError) defineFailed = false;
+          } else if (call.name === "define_component") {
+            defineFailed = outcome.retryable;
+            if (outcome.retryable) failedTool = call.name;
+          }
           if (!outcome.isError && run.tools.writes(call.name)) {
             seen.clear();
             written.add(key);
@@ -241,6 +289,7 @@ async function runTurn(
     });
   } finally {
     trace.endedBy = endedBy;
+    trace.repairReminders = repairReminders;
     trace.steps = steps;
     trace.toolCalls = toolCalls;
     trace.promptTokens = promptTokens;
