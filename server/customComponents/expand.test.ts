@@ -342,3 +342,94 @@ describe("rewritePaths", () => {
     );
   });
 });
+
+describe("expandTree with $each", () => {
+  let catalog: Component[];
+  let repo: InMemoryCustomComponentRepository;
+
+  beforeEach(async () => {
+    catalog = await new InMemoryComponentRepository(entries).list();
+    repo = new InMemoryCustomComponentRepository();
+    const properties = (items: unknown) => ({
+      type: "object" as const,
+      properties: { items: { type: "array", items, description: "The items." } },
+      additionalProperties: false as const,
+    });
+    await repo.save({
+      ...withTemplate("BulletList", {
+        component: "Markup",
+        props: { root: { tag: "ul", children: [{ $each: "items", as: { tag: "li", text: { $item: true } } }] } },
+      }),
+      propsSchema: properties({ type: "string" }),
+      exampleProps: { items: ["A"] },
+    });
+    await repo.save({
+      ...withTemplate("Rows", {
+        component: "Stack",
+        children: [{ $each: "items", as: { component: "Text", props: { text: { $item: "label" } } } }, text("end")],
+      }),
+      propsSchema: properties({ type: "object", properties: { label: { type: "string" } } }),
+      exampleProps: { items: [{ label: "A" }] },
+    });
+  });
+
+  const expand = (tree: unknown) => expandTree(tree, { catalog, resolve: (name) => repo.getByName(name) });
+  const items = (n: number) => Array.from({ length: n }, (_, i) => ({ label: `row ${i}` }));
+
+  it("turns three items into three elements, in order", async () => {
+    const result = await expand({ component: "BulletList", props: { items: ["A", "B", "C"] } });
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(result.tree, {
+      component: "Markup",
+      props: {
+        root: {
+          tag: "ul",
+          children: [
+            { tag: "li", text: "A" },
+            { tag: "li", text: "B" },
+            { tag: "li", text: "C" },
+          ],
+        },
+      },
+    });
+  });
+
+  it("repeats a component node per item and keeps its siblings in place", async () => {
+    const result = await expand({ component: "Rows", props: { items: [{ label: "x" }, { label: "y" }] } });
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(result.tree, {
+      component: "Stack",
+      children: [text("x"), text("y"), text("end")],
+    });
+  });
+
+  it("leaves a missing field's key out, which the catalog check then reports", async () => {
+    const result = await expand({ component: "Rows", props: { items: [{}] } });
+    assert.deepEqual(result.tree?.children?.[0], { component: "Text", props: {} });
+    assert.match(validateUiTree(result.tree, catalog).errors.join("\n"), /children\.0\.props\.text is required/);
+  });
+
+  it("repeats zero times for no items or a missing optional prop", async () => {
+    for (const props of [{ items: [] }, {}]) {
+      const result = await expand({ component: "BulletList", props });
+      assert.deepEqual(result.errors, []);
+      assert.deepEqual(result.tree?.props?.root, { tag: "ul", children: [] });
+    }
+  });
+
+  it("refuses more than 100 items with the path and draws nothing", async () => {
+    const result = await expand({ component: "Stack", children: [{ component: "Rows", props: { items: items(101) } }] });
+    assert.deepEqual(result.errors, ["tree.children.0.props.items has 101 items; $each repeats at most 100"]);
+    assert.deepEqual(result.tree, { component: "Stack", children: [] });
+    assert.deepEqual((await expand({ component: "Rows", props: { items: items(100) } })).errors, []);
+  });
+
+  it("still applies the node and Markup limits after repetition", async () => {
+    const wide = Array.from({ length: 5 }, () => ({ component: "Rows", props: { items: items(100) } }));
+    const result = await expand({ component: "Stack", children: wide });
+    assert.equal(result.errors.length, 1);
+    assert.match(result.errors[0], /the expanded tree reached 400 nodes/);
+    const many = await expand({ component: "BulletList", props: { items: Array.from({ length: 100 }, () => "x") } });
+    assert.deepEqual(validateUiTree(many.tree, catalog).errors, []);
+  });
+});

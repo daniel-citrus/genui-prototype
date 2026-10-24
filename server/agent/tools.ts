@@ -36,12 +36,16 @@ export interface ToolDefinition {
   description: string;
   /** JSON Schema for the arguments: `type: "object"`, `additionalProperties: false`. */
   input_schema: Record<string, unknown>;
+  /** Set on tools that change stored state; a successful call lets earlier identical calls run again. */
+  writes?: true;
   run(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>;
 }
 
 /** The tools the agent may call, and how to run them. */
 export interface ToolRegistry {
   specs: ToolSpec[];
+  /** Whether the named tool changes stored state. False for unknown names. */
+  writes(name: string): boolean;
   run(name: string, args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>;
 }
 

@@ -2,6 +2,7 @@ import "./style.css";
 import { MAX_MESSAGE_CHARS, type ActionResult, type ActionRunRequest, type AgentEvent } from "shared/api";
 import { runAction } from "./actionsClient";
 import { streamChat } from "./agentClient";
+import { threadEffect, thinkingAfter } from "./chatEvents";
 import { createCustomComponentsPanel } from "./customComponentsPanel";
 import { actionValues, type FieldReading } from "./sandbox/actionValues";
 import { renderEmpty, renderUi } from "./sandbox/render";
@@ -15,7 +16,6 @@ const assistantTurnClass =
   "self-start max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-bl-md bg-zinc-100 px-4 py-2.5 text-sm leading-snug text-zinc-900 shadow-sm";
 const systemLineClass = "self-start px-1 text-xs text-zinc-500";
 const errorLineClass = "self-start rounded-md bg-red-50 px-2 py-1 text-xs text-red-700";
-const toolLineClass = "self-start px-1 font-mono text-xs text-zinc-500";
 const statusBaseClass = "sandbox-status shrink-0 text-sm";
 const statusToneClass = {
   ok: "mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-900",
@@ -107,13 +107,40 @@ let actionInFlight = false;
 /** Set while the status area asks an action's confirm question. */
 let confirmShown = false;
 
+/** The thinking indicator while it is in the thread; always the last item. */
+let thinkingEl: HTMLElement | null = null;
+
 function appendLine(className: string, text: string, tag = "p"): HTMLElement {
   const el = document.createElement(tag);
   el.className = className;
   el.textContent = text;
-  thread?.appendChild(el);
+  thread?.insertBefore(el, thinkingEl);
   scrollToBottom();
   return el;
+}
+
+function showThinking() {
+  if (thinkingEl || !thread) return;
+  const el = document.createElement("div");
+  el.className = `${assistantTurnClass} flex items-center gap-1`;
+  const label = document.createElement("span");
+  label.className = "sr-only";
+  label.textContent = "Thinking…";
+  el.appendChild(label);
+  for (const delay of ["", "[animation-delay:150ms]", "[animation-delay:300ms]"]) {
+    const dot = document.createElement("span");
+    dot.setAttribute("aria-hidden", "true");
+    dot.className = `h-1.5 w-1.5 rounded-full bg-zinc-400 animate-bounce motion-reduce:animate-none ${delay}`;
+    el.appendChild(dot);
+  }
+  thinkingEl = el;
+  thread.appendChild(el);
+  scrollToBottom();
+}
+
+function hideThinking() {
+  thinkingEl?.remove();
+  thinkingEl = null;
 }
 
 function scrollToBottom() {
@@ -175,7 +202,6 @@ function askConfirm(request: ActionRunRequest, question: string) {
     statusButton("Cancel", confirmButtonClass.cancel, () => {
       showStatus(null);
       syncActionButtons();
-      appendLine(toolLineClass, `⚡ ${request.action}: cancelled`);
     }),
   );
   sandboxStatus.className = `${statusBaseClass} ${statusToneClass.confirm}`;
@@ -188,39 +214,36 @@ interface TurnView {
   bubble: HTMLElement | null;
 }
 
+/** The last item the person sees in the thread, ignoring the thinking indicator. */
+function lastVisibleItem(): Element | null {
+  return thinkingEl ? thinkingEl.previousElementSibling : (thread?.lastElementChild ?? null);
+}
+
 function renderEvent(event: AgentEvent, view: TurnView) {
-  switch (event.type) {
-    case "text":
-      // Text after a tool line or notice opens a new bubble, so the thread
-      // reads in the order things happened.
-      if (!view.bubble || view.bubble !== thread?.lastElementChild) {
-        view.bubble = appendLine(assistantTurnClass, "", "article");
-      }
-      view.bubble.textContent += event.text;
-      scrollToBottom();
-      break;
-    case "tool_call":
-      appendLine(toolLineClass, `→ ${event.call.name}`);
-      break;
-    case "tool_result":
-      appendLine(
-        event.result.ok ? toolLineClass : errorLineClass,
-        `${event.result.ok ? "✓" : "✗"} ${event.call.name}: ${event.result.summary}`,
-      );
-      break;
-    case "ui":
+  if (threadEffect(event) === null) {
+    if (event.type === "ui") {
       if (sandbox) renderUi(event.tree, sandbox);
       shownUiId = event.id;
       showStatus(null);
       syncActionButtons();
+    }
+    return;
+  }
+  switch (event.type) {
+    case "text":
+      // Text after a notice or error opens a new bubble, so the thread reads
+      // in the order things happened.
+      if (!view.bubble || view.bubble !== lastVisibleItem()) {
+        view.bubble = appendLine(assistantTurnClass, "", "article");
+      }
+      view.bubble.textContent += event.text;
+      scrollToBottom();
       break;
     case "notice":
       appendLine(systemLineClass, event.message);
       break;
     case "error":
       appendLine(errorLineClass, event.message);
-      break;
-    case "done":
       break;
   }
 }
@@ -233,19 +256,26 @@ async function sendTurn(message: string) {
   setStreaming(true);
 
   appendLine(userTurnClass, message, "article");
+  showThinking();
   const view: TurnView = { bubble: null };
+  let thinking = true;
 
   try {
     await streamChat(
       { conversationId, message },
       (event) => {
         // Text after Stop belongs to an aborted turn.
-        if (!controller.signal.aborted) renderEvent(event, view);
+        if (controller.signal.aborted) return;
+        renderEvent(event, view);
+        thinking = thinkingAfter(thinking, event);
+        if (thinking) showThinking();
+        else hideThinking();
       },
       controller.signal,
     );
   } finally {
     if (activeTurn === controller) {
+      hideThinking();
       activeTurn = null;
       setStreaming(false);
     }
@@ -304,7 +334,6 @@ async function postAction(request: ActionRunRequest) {
       return;
     }
     if (sameDesign) showStatus(result);
-    appendLine(result.ok ? toolLineClass : errorLineClass, `⚡ ${request.action}: ${result.message}`);
   } finally {
     actionInFlight = false;
     syncActionButtons();
@@ -322,6 +351,7 @@ form?.addEventListener("submit", (e) => {
   if (activeTurn) {
     activeTurn.abort();
     activeTurn = null;
+    hideThinking();
     setStreaming(false);
     appendLine(systemLineClass, "Stopped.");
     return;
