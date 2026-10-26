@@ -1,5 +1,5 @@
 import type { PosMenu } from "../../ports/PosMenu";
-import { foldName, sizeLabel } from "../../text/names";
+import { foldName, optionLabel, sizeLabel } from "../../text/names";
 import type { ChoiceSource } from "../types";
 
 /** The dropdown sources of the menu actions; actions using one share the object. */
@@ -8,6 +8,7 @@ export interface MenuChoices {
   sizes: ChoiceSource;
   categories: ChoiceSource;
   groups: ChoiceSource;
+  options: ChoiceSource;
 }
 
 /** Names sorted by their folded form; ties keep their order. */
@@ -18,7 +19,7 @@ function byFoldedName(names: string[]): string[] {
     .map(({ name }) => name);
 }
 
-/** The four sources over `menu`, each listing current names sorted by folded name. */
+/** The five sources over `menu`, each listing current names sorted by folded name. */
 export function createMenuChoices(menu: PosMenu): MenuChoices {
   return {
     items: {
@@ -41,6 +42,13 @@ export function createMenuChoices(menu: PosMenu): MenuChoices {
     groups: {
       name: "menu_modifier_groups",
       list: async () => byFoldedName((await menu.listModifierGroups()).map((g) => g.name)),
+    },
+    options: {
+      name: "menu_modifier_options",
+      list: async () =>
+        byFoldedName(
+          (await menu.listModifierGroups()).flatMap((g) => g.options.map((o) => optionLabel(g.name, o.name))),
+        ),
     },
   };
 }

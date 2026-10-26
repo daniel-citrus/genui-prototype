@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createInMemoryPosMenu } from "../../adapters/pos/InMemoryPosMenu";
 import type { PosMenu } from "../../ports/PosMenu";
-import { chosen, findCategory, findGroup, findItem, findSize, text } from "./resolve";
+import { chosen, findCategory, findGroup, findItem, findOption, findSize, text } from "./resolve";
 
 const usd = (amount: number) => ({ amount, currency: "USD" });
 
@@ -107,6 +107,22 @@ describe("findSize", () => {
       findSize(await menuWithLookalike(), "bac xiu (l)"),
       ambiguous("bac xiu (l)", '2 sizes ("Bạc xỉu (L)", "Bac Xiu (L)")'),
     );
+  });
+});
+
+describe("findOption", () => {
+  it("finds an option by its exact or folded Group: Option label", async () => {
+    const menu = createInMemoryPosMenu();
+    for (const label of ["Mức đá (Ice level): Ít đá", "muc da ice level it da"]) {
+      const found = await findOption(menu, label);
+      assert.equal(found.group.id, "MG-ice", label);
+      assert.equal(found.option.id, "MO-ice-50", label);
+      assert.equal(found.label, "Mức đá (Ice level): Ít đá", label);
+    }
+  });
+
+  it("answers a missing label", async () => {
+    await assert.rejects(findOption(createInMemoryPosMenu(), "Topping: Pudding"), notFound("option", "Topping: Pudding"));
   });
 });
 

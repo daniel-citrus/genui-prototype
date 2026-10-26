@@ -3,8 +3,10 @@ import {
   type Category,
   type CreateVariationInput,
   type Item,
+  type ModifierGroup,
   type Money,
   type PosMenu,
+  type UpdateModifierGroupPatch,
   type Variation,
 } from "../../ports/PosMenu";
 import { cleanName, foldName } from "../../text/names";
@@ -84,6 +86,57 @@ export function createInMemoryPosMenu(): PosMenu {
     if (missing !== undefined) throw notFound("Modifier group", missing);
   }
 
+  /** Stricter than CapheVietPOS, which only refuses the same spelling. */
+  function assertGroupNameFree(name: string, ignoreId?: string): void {
+    const clash = foldClash(modifierGroups, name, ignoreId);
+    if (clash) throw refused(`A modifier group named "${clash.name}" already exists.`);
+  }
+
+  /**
+   * The group `current` becomes under `patch` (a new group with id `id` when
+   * there is no `current`), checked like CapheVietPOS's `modifierGroupDraft`.
+   */
+  function buildModifierGroup(
+    id: string,
+    current: ModifierGroup | undefined,
+    patch: UpdateModifierGroupPatch,
+  ): ModifierGroup {
+    const name = cleanName(patch.name ?? current?.name ?? "");
+    if (!name) throw refused("Modifier group name is required");
+    const options = (patch.options ?? current?.options ?? []).map((o) => ({ ...o, name: cleanName(o.name) }));
+    if (!options.length) throw refused("A modifier group needs at least one option");
+    for (const [i, o] of options.entries()) {
+      if (!o.name) throw refused("Every option needs a name");
+      if (!Number.isInteger(o.priceDelta.amount) || o.priceDelta.amount < 0) {
+        throw refused(`"${o.name}" needs a price of $0.00 or more`);
+      }
+      if (current && o.id !== undefined && !current.options.some((existing) => existing.id === o.id)) {
+        throw refused(`Option ${o.id} isn't in "${current.name}"`);
+      }
+      const folded = foldName(o.name);
+      const clash = folded && options.slice(0, i).find((earlier) => foldName(earlier.name) === folded);
+      if (clash) throw refused(`"${o.name}" and "${clash.name}" are the same option ignoring accents.`);
+    }
+    const maxSelect = patch.maxSelect ?? current?.maxSelect ?? 1;
+    if (!Number.isInteger(maxSelect) || maxSelect < 1 || maxSelect > options.length) {
+      throw refused(`Customers can pick between 1 and ${options.length} options here`);
+    }
+    const required = patch.required ?? current?.required ?? false;
+    return {
+      id,
+      name,
+      required,
+      minSelect: required ? 1 : 0,
+      maxSelect,
+      options: options.map((o) => ({
+        id: (current && o.id) || nextId("MO"),
+        modifierGroupId: id,
+        name: o.name,
+        priceDelta: { amount: o.priceDelta.amount, currency: o.priceDelta.currency },
+      })),
+    };
+  }
+
   function getItem(id: string): Item {
     const item = items.find((i) => i.id === id);
     if (!item) throw notFound("Item", id);
@@ -136,6 +189,22 @@ export function createInMemoryPosMenu(): PosMenu {
 
     async listModifierGroups() {
       return copy(modifierGroups);
+    },
+
+    async createModifierGroup(input) {
+      const group = buildModifierGroup(nextId("MG"), undefined, input);
+      assertGroupNameFree(group.name);
+      modifierGroups.push(group);
+      return copy(group);
+    },
+
+    async updateModifierGroup(id, patch) {
+      const index = modifierGroups.findIndex((g) => g.id === id);
+      if (index === -1) throw notFound("Modifier group", id);
+      const group = buildModifierGroup(id, modifierGroups[index], patch);
+      assertGroupNameFree(group.name, id);
+      modifierGroups[index] = group;
+      return copy(group);
     },
 
     async deleteModifierGroup(id) {

@@ -2,8 +2,8 @@
  * The café menu, as a point-of-sale system holds it. Mirrors CapheVietPOS at
  * commit 60764e5: `shared/MenuStore.ts` (the methods), `shared/domain/menu.ts`
  * and `shared/domain/money.ts` (the types), so a live CapheVietPOS adapter can
- * implement it without anything above it changing. Its `listLocations`,
- * `getItem`, `createModifierGroup` and `updateModifierGroup` are left out.
+ * implement it without anything above it changing. Its `listLocations` and
+ * `getItem` are left out.
  */
 
 /** An integer amount in the currency's minor unit (450 = $4.50), never a float. */
@@ -94,6 +94,35 @@ export interface UpdateVariationPatch {
   sku?: string | null;
 }
 
+export interface ModifierOptionInput {
+  name: string;
+  /** Extra charge when chosen; may be zero (e.g. sugar level). */
+  priceDelta: Money;
+}
+
+/** An option in an update: with `id` it changes that option, without it adds one. */
+export type ModifierOptionPatch = ModifierOptionInput & { id?: string };
+
+export interface CreateModifierGroupInput {
+  name: string;
+  /** The customer must pick at least one. */
+  required: boolean;
+  /** 1 = pick one; more = pick up to this many. */
+  maxSelect: number;
+  options: ModifierOptionInput[];
+}
+
+export interface UpdateModifierGroupPatch {
+  name?: string;
+  required?: boolean;
+  maxSelect?: number;
+  /**
+   * The full new option list: an entry with an `id` updates that option, one
+   * without adds a new option, and an existing option left out is removed.
+   */
+  options?: ModifierOptionPatch[];
+}
+
 /** An expected failure: a refused change (`validation`) or an unknown id (`not_found`). */
 export class PosMenuError extends Error {
   readonly code: "validation" | "not_found";
@@ -114,6 +143,14 @@ export interface PosMenu {
   deleteCategory(id: string): Promise<void>;
 
   listModifierGroups(): Promise<ModifierGroup[]>;
+  /**
+   * Refused without a name or an option, for an option without a name or with
+   * a negative price, two options that differ only in accents, or a `maxSelect`
+   * outside 1 to the number of options.
+   */
+  createModifierGroup(input: CreateModifierGroupInput): Promise<ModifierGroup>;
+  /** Checks the group as the patch leaves it, by the same rules as `createModifierGroup`. */
+  updateModifierGroup(id: string, patch: UpdateModifierGroupPatch): Promise<ModifierGroup>;
   /** Refused while any item, archived or not, uses it. */
   deleteModifierGroup(id: string): Promise<void>;
 

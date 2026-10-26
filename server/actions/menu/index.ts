@@ -1,16 +1,20 @@
 import { MAX_FIELD_CHARS } from "shared/api";
 import {
   PosMenuError,
+  type ModifierGroup,
+  type ModifierOptionInput,
+  type ModifierOptionPatch,
   type Money,
   type PosMenu,
   type UpdateItemPatch,
+  type UpdateModifierGroupPatch,
   type UpdateVariationPatch,
 } from "../../ports/PosMenu";
-import { sizeLabel } from "../../text/names";
+import { optionLabel, sizeLabel } from "../../text/names";
 import type { ActionDefinition } from "../types";
 import { createMenuChoices } from "./choices";
 import { formatPrice, parsePrice } from "./money";
-import { chosen, findCategory, findGroup, findItem, findSize, text } from "./resolve";
+import { chosen, findCategory, findGroup, findItem, findOption, findSize, text } from "./resolve";
 
 type Values = Record<string, string | boolean>;
 
@@ -28,7 +32,10 @@ const ITEM = nameInput("The item's name, one of the menu_items choices.");
 const SIZE = textInput('The size as "Item (Size)", one of the menu_item_sizes choices.');
 const CATEGORY = nameInput("The category's name, one of the menu_categories choices.");
 const GROUP = nameInput("The modifier group's name, one of the menu_modifier_groups choices.");
+const OPTION = textInput('The option as "Group: Option", one of the menu_modifier_options choices.');
 const PRICE = textInput("Price in dollars, e.g. 4.50.");
+
+const FREE: Money = { amount: 0, currency: "USD" };
 
 function inputs(properties: Record<string, object>, required: string[]): Record<string, unknown> {
   return { type: "object", properties, required, additionalProperties: false };
@@ -56,6 +63,57 @@ function price(values: Values): Money {
   return money;
 }
 
+/** An option's extra charge, typed in dollars; empty is free. */
+function charge(raw: string): Money {
+  if (!raw) return FREE;
+  const money = parsePrice(raw);
+  if (!money) throw refused("Extra charge must look like 0.75.");
+  return money;
+}
+
+/** How many options a customer may pick, typed as a whole number. */
+function maxSelect(raw: string): number {
+  if (!/^\d+$/.test(raw)) throw refused("How many a customer may pick must be a whole number, e.g. 1.");
+  return Number(raw);
+}
+
+/**
+ * Options typed as "Trân châu +0.75, Thạch, Kem cheese +$1.25": separated by
+ * commas, each with an optional extra charge after its last plus sign.
+ */
+function parseOptions(raw: string): ModifierOptionInput[] {
+  return raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const plus = entry.lastIndexOf("+");
+      if (plus === -1) return { name: entry, priceDelta: FREE };
+      const money = parsePrice(entry.slice(plus + 1));
+      if (!money) throw refused(`"${entry}": write its extra charge like +0.75.`);
+      return { name: entry.slice(0, plus).trim(), priceDelta: money };
+    });
+}
+
+/** A group's current options, as the full list `updateModifierGroup` takes. */
+function optionPatches(group: ModifierGroup): ModifierOptionPatch[] {
+  return group.options.map(({ id, name, priceDelta }) => ({ id, name, priceDelta }));
+}
+
+/** "at +$0.75", or "at no extra charge". */
+function chargeText(money: Money): string {
+  return money.amount > 0 ? `at +${formatPrice(money)}` : "at no extra charge";
+}
+
+/** `"Topping" (pick up to 3): Trân châu +$0.75, Thạch`, as CapheVietPOS's `describeModifierGroup` writes it. */
+function describeGroup(group: ModifierGroup): string {
+  const rule = group.maxSelect === 1 ? "pick one" : `pick up to ${group.maxSelect}`;
+  const options = group.options
+    .map((o) => (o.priceDelta.amount > 0 ? `${o.name} +${formatPrice(o.priceDelta)}` : o.name))
+    .join(", ");
+  return `"${group.name}" (${rule}${group.required ? ", required" : ""}): ${options}`;
+}
+
 /** `"Old"`, or `"Old" (now "New")` when renamed. */
 function renamed(before: string, after: string): string {
   return after === before ? `"${before}"` : `"${before}" (now "${after}")`;
@@ -63,7 +121,7 @@ function renamed(before: string, after: string): string {
 
 /**
  * The actions that change the café menu in `menu`. Their dropdown inputs
- * (`item`, `size`, `category`, `group`) take names from the shared sources and
+ * (`item`, `size`, `category`, `group`, `option`) take names from the shared sources and
  * are resolved by name when the action runs; an empty optional input leaves
  * that field as it is.
  */
@@ -336,6 +394,163 @@ export function createMenuActions(menu: PosMenu): ActionDefinition[] {
         const group = await findGroup(menu, chosen(values, "group"));
         await menu.deleteModifierGroup(group.id);
         return `Deleted the modifier group "${group.name}".`;
+      }),
+    },
+    {
+      name: "menu_create_modifier_group",
+      description:
+        "Adds a modifier group (e.g. sugar level) with its options. Reads name, options, and optionally required and max_select.",
+      area: "modifier_groups",
+      operation: "create",
+      input_schema: inputs(
+        {
+          name: nameInput("The new group's name, e.g. Sugar level."),
+          options: textInput(
+            'Its options, separated by commas, each with an optional extra charge after a plus sign, e.g. "Trân châu +0.75, Thạch +0.75, Kem cheese +1.25".',
+          ),
+          required: {
+            type: "boolean",
+            description: "true means the customer must pick at least one; missing or false means optional.",
+          },
+          max_select: textInput("How many options a customer may pick, a whole number; 1 means pick one. Empty means 1."),
+        },
+        ["name", "options"],
+      ),
+      run: guarded(async (values) => {
+        const max = text(values, "max_select");
+        const group = await menu.createModifierGroup({
+          name: text(values, "name"),
+          required: values.required === true,
+          maxSelect: max ? maxSelect(max) : 1,
+          options: parseOptions(text(values, "options")),
+        });
+        return `Created the modifier group ${describeGroup(group)}.`;
+      }),
+    },
+    {
+      name: "menu_update_modifier_group",
+      description:
+        "Renames a modifier group or changes how many options a customer may pick; an empty field stays as it is. Reads group, name and max_select.",
+      area: "modifier_groups",
+      operation: "edit",
+      input_schema: inputs(
+        {
+          group: GROUP,
+          name: nameInput("New name. Empty keeps the current one."),
+          max_select: textInput(
+            "How many options a customer may pick, a whole number; 1 means pick one. Empty keeps the current one.",
+          ),
+        },
+        ["group"],
+      ),
+      choices: { group: choices.groups },
+      run: guarded(async (values) => {
+        const groupName = chosen(values, "group");
+        const changed = (["name", "max_select"] as const).filter((key) => text(values, key));
+        if (!changed.length) throw refused(NOTHING_TO_CHANGE);
+        const patch: UpdateModifierGroupPatch = {};
+        if (changed.includes("max_select")) patch.maxSelect = maxSelect(text(values, "max_select"));
+        if (changed.includes("name")) patch.name = text(values, "name");
+        const group = await findGroup(menu, groupName);
+        const updated = await menu.updateModifierGroup(group.id, patch);
+        const fields = changed.map((key) => (key === "max_select" ? "pick limit" : key));
+        return `Updated ${renamed(group.name, updated.name)}: ${fields.join(", ")}.`;
+      }),
+    },
+    {
+      name: "menu_set_modifier_group_required",
+      description:
+        "Makes a modifier group required (the customer must pick at least one) or optional. Reads group and required.",
+      area: "modifier_groups",
+      operation: "edit",
+      input_schema: inputs(
+        {
+          group: GROUP,
+          required: { type: "boolean", description: "true makes the group required; false makes it optional." },
+        },
+        ["group", "required"],
+      ),
+      choices: { group: choices.groups },
+      run: guarded(async (values) => {
+        const group = await findGroup(menu, chosen(values, "group"));
+        const required = values.required === true;
+        await menu.updateModifierGroup(group.id, { required });
+        return required
+          ? `"${group.name}" is now required: customers must pick at least one.`
+          : `"${group.name}" is now optional.`;
+      }),
+    },
+    {
+      name: "menu_add_modifier_option",
+      description: "Adds an option to a modifier group. Reads group, name and optionally price (the extra charge).",
+      area: "modifier_options",
+      operation: "create",
+      input_schema: inputs(
+        {
+          group: GROUP,
+          name: nameInput("The new option's name, e.g. Trân châu."),
+          price: textInput("Extra charge in dollars, e.g. 0.75. Empty means no extra charge."),
+        },
+        ["group", "name"],
+      ),
+      choices: { group: choices.groups },
+      run: guarded(async (values) => {
+        const groupName = chosen(values, "group");
+        const priceDelta = charge(text(values, "price"));
+        const group = await findGroup(menu, groupName);
+        const name = text(values, "name");
+        await menu.updateModifierGroup(group.id, { options: [...optionPatches(group), { name, priceDelta }] });
+        return `Added the option "${optionLabel(group.name, name)}" ${chargeText(priceDelta)}.`;
+      }),
+    },
+    {
+      name: "menu_update_modifier_option",
+      description:
+        "Renames an option of a modifier group or changes its extra charge; an empty field stays as it is. Reads option, name and price.",
+      area: "modifier_options",
+      operation: "edit",
+      input_schema: inputs(
+        {
+          option: OPTION,
+          name: nameInput("New option name. Empty keeps the current one."),
+          price: textInput("New extra charge in dollars, e.g. 0.75; 0 makes it free. Empty keeps the current one."),
+        },
+        ["option"],
+      ),
+      choices: { option: choices.options },
+      run: guarded(async (values) => {
+        const label = chosen(values, "option");
+        const changed = (["name", "price"] as const).filter((key) => text(values, key));
+        if (!changed.length) throw refused(NOTHING_TO_CHANGE);
+        const priceDelta = changed.includes("price") ? charge(text(values, "price")) : undefined;
+        const { group, option, label: before } = await findOption(menu, label);
+        const name = text(values, "name") || option.name;
+        await menu.updateModifierGroup(group.id, {
+          options: optionPatches(group).map((o) =>
+            o.id === option.id ? { ...o, name, priceDelta: priceDelta ?? o.priceDelta } : o,
+          ),
+        });
+        return `Updated ${renamed(before, optionLabel(group.name, name))}: ${changed.join(", ")}.`;
+      }),
+    },
+    {
+      name: "menu_remove_modifier_option",
+      description: "Removes one option from a modifier group for good; a group keeps at least one option. Reads option.",
+      area: "modifier_options",
+      operation: "delete",
+      input_schema: inputs({ option: OPTION }, ["option"]),
+      choices: { option: choices.options },
+      confirm: "Remove the option {option}? This can't be undone.",
+      run: guarded(async (values) => {
+        const { group, option, label } = await findOption(menu, chosen(values, "option"));
+        const rest = optionPatches(group).filter((o) => o.id !== option.id);
+        if (rest.length && group.maxSelect > rest.length) {
+          throw refused(
+            `"${group.name}" lets customers pick up to ${group.maxSelect}; lower that to ${rest.length} first.`,
+          );
+        }
+        await menu.updateModifierGroup(group.id, { options: rest });
+        return `Removed the option "${label}".`;
       }),
     },
   ];

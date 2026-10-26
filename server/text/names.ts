@@ -28,3 +28,8 @@ export function foldName(name: string): string {
 export function sizeLabel(itemName: string, sizeName: string | undefined): string {
   return sizeName?.trim() ? `${itemName} (${sizeName})` : itemName;
 }
+
+/** "Topping: Trân châu". A colon, since group names often hold parentheses already. */
+export function optionLabel(groupName: string, optionName: string): string {
+  return `${groupName}: ${optionName}`;
+}
