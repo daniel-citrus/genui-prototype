@@ -255,6 +255,7 @@ Runtime dependencies are the API's: `fastify`, `@fastify/rate-limit`, `openai`, 
 - The CapheViet POS agent registering `GENERATE_UI_TOOL` and calling the generate and action routes.
 - A live CapheVietPOS adapter for the `PosMenu` port, behind authentication, so the same menu actions change the café's real menu; nothing built on the port changes.
 - Real, side-effecting actions (saving or sending data, for example), registered in `server/actions/` once authentication exists.
+- Pre-built custom components for action forms (a card shell, dropdown pickers, a price field), which first need a way to save custom components; build order and open questions are in [prebuilt-elements.md](prebuilt-elements.md).
 
 ## 11. History
 
