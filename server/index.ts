@@ -1,23 +1,15 @@
 import { agentAvailable, config } from "./config";
 import { createDb } from "./adapters/db/client";
-import { createTracesDb } from "./adapters/traces/client";
-import { DrizzleTraceRepository } from "./adapters/traces/DrizzleTraceRepository";
-import { ensureTracesDatabase } from "./adapters/traces/ensureDatabase";
-import { runMigrations as runTracesMigrations } from "./adapters/traces/migrate";
 import { DrizzleComponentRepository } from "./adapters/db/DrizzleComponentRepository";
 import { DrizzleCustomComponentRepository } from "./adapters/db/DrizzleCustomComponentRepository";
 import { runMigrations } from "./adapters/db/migrate";
 import { seedComponents } from "./adapters/db/seed";
-import { createRedis } from "./adapters/redis/client";
-import { createOpenAILlm } from "./adapters/openai/OpenAILlm";
+import { createOpenAIComponentLlm } from "./adapters/openai/OpenAIComponentLlm";
 import { createInMemoryPosMenu } from "./adapters/pos/InMemoryPosMenu";
 import { createActions } from "./actions/index";
 import { createMenuActions } from "./actions/menu/index";
 import { createActionRegistry } from "./actions/registry";
-import { SYSTEM_PROMPT } from "./agent/systemPrompt";
 import { catalog } from "./catalog/components";
-import { createToolRegistry } from "./agent/registry";
-import { createAgentTools } from "./agent/tools/index";
 import type { ComponentRepository } from "./ports/ComponentRepository";
 import { buildApp } from "./app";
 
@@ -38,60 +30,36 @@ function dbHost(url: string): string {
 
 // The only place real adapters are built.
 const database = createDb(config.databaseUrl);
-const tracesDatabase = createTracesDb(config.traceDatabaseUrl, config.databaseUrl);
-const traces = new DrizzleTraceRepository(tracesDatabase.db);
 const components = new DrizzleComponentRepository(database.db);
 const customComponents = new DrizzleCustomComponentRepository(database.db);
 
-const llm = agentAvailable
-  ? createOpenAILlm({
+const componentLlm = agentAvailable
+  ? createOpenAIComponentLlm({
       apiKey: config.openai.apiKey,
       model: config.openai.model,
       maxOutputTokens: config.openai.maxOutputTokens,
-      systemPrompt: SYSTEM_PROMPT,
     })
   : undefined;
 
-// The demo café menu: in memory, reset on every start, shared by every conversation.
+// The demo café menu: in memory, reset on every start, shared by every design.
 const menu = createInMemoryPosMenu();
 
 // What a Button in a rendered design may run.
 const actions = createActionRegistry([...createActions(), ...createMenuActions(menu)]);
 
-// Without Postgres the API still starts; each tool call then fails on its own.
-const tools = createToolRegistry(
-  createAgentTools({ components, actions: actions.specs, listChoices: actions.listChoices, customComponents }),
-);
-
-// Redis only backs the rate limit; the API starts and serves while it is down.
-// Its logger forwards to the app's, which exists once buildApp returns.
-let appLog: { warn(msg: string): void; info(msg: string): void } | undefined;
-const redis = config.redisUrl
-  ? createRedis(config.redisUrl, {
-      warn: (msg) => appLog?.warn(msg),
-      info: (msg) => appLog?.info(msg),
-    })
-  : undefined;
-
 const app = await buildApp({
   logLevel: config.logLevel,
-  llm,
-  tools,
+  componentLlm,
   actions,
   pingDb: database.ping,
-  pingTraces: tracesDatabase.ping,
   trustProxy: config.trustProxy,
   rateLimit: { max: config.rateLimitPerMinute },
-  redis,
   customComponents,
   components,
-  traces,
 });
-appLog = app.log;
 app.decorate("components", components);
 app.addHook("onClose", async () => {
   await database.close();
-  await tracesDatabase.close();
 });
 
 // In production the schema and the component catalog are brought up to date on
@@ -101,7 +69,6 @@ if (process.env.NODE_ENV === "production") {
   const failStartup = async (err: unknown, what: string) => {
     app.log.error({ err }, `${what} failed (${dbHost(config.databaseUrl)})`);
     await database.close().catch(() => {});
-    await tracesDatabase.close().catch(() => {});
     process.exit(1);
   };
   try {
@@ -116,20 +83,6 @@ if (process.env.NODE_ENV === "production") {
     );
   } catch (err) {
     await failStartup(err, "component seed");
-  }
-  try {
-    await ensureTracesDatabase(config.databaseUrl);
-  } catch (err) {
-    await failStartup(err, "traces database ensure");
-  }
-  try {
-    await runTracesMigrations(
-      tracesDatabase.db,
-      config.databaseUrl,
-      config.traceDatabaseUrl,
-    );
-  } catch (err) {
-    await failStartup(err, "traces database migration");
   }
 }
 

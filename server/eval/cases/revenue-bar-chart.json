@@ -2,9 +2,6 @@
   "id": "revenue-bar-chart",
   "prompt": "Show monthly revenue as a bar chart: Jan $1,200, Feb $900, Mar $1,500.",
   "checks": [
-    { "endedBy": "reply" },
-    { "noError": true },
-    { "toolSucceeded": "render_ui" },
     { "uiComponent": "Markup" },
     { "uiText": "Mar" }
   ]

@@ -2,9 +2,6 @@
   "id": "star-rating",
   "prompt": "Show a 4 out of 5 star rating for the Latte.",
   "checks": [
-    { "endedBy": "reply" },
-    { "noError": true },
-    { "toolSucceeded": "render_ui" },
     { "uiComponent": "Markup" }
   ]
 }

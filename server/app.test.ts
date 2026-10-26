@@ -1,23 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { emptyToolRegistry } from "./agent/tools";
-import type { AgentLlm } from "./ports/AgentLlm";
-import { InMemoryTraceRepository } from "./ports/fakes/InMemoryTraceRepository";
 import { buildApp } from "./app";
-
-const llm: AgentLlm = {
-  async complete() {
-    return { content: "ok", toolCalls: [] };
-  },
-};
 
 const build = () =>
   buildApp({
     rateLimit: { max: 1000 },
-    llm,
-    tools: emptyToolRegistry,
     pingDb: async () => true,
-    traces: new InMemoryTraceRepository(),
   });
 
 describe("buildApp", () => {
@@ -26,6 +14,7 @@ describe("buildApp", () => {
     const res = await app.inject({ method: "GET", url: "/api/health" });
     assert.equal(res.statusCode, 200);
     const body = res.json();
+    assert.deepEqual(Object.keys(body).sort(), ["agent", "db", "ok"]);
     assert.equal(body.ok, true);
     assert.equal(body.db, true);
     assert.equal(typeof body.agent, "boolean");
@@ -36,12 +25,12 @@ describe("buildApp", () => {
     const app = await build();
     const res = await app.inject({
       method: "POST",
-      url: "/api/agent/chat",
+      url: "/api/generate",
       headers: { "content-type": "application/json" },
       payload: "",
     });
     assert.equal(res.statusCode, 400);
-    assert.equal(res.json().error.message, "conversationId and message are required");
+    assert.equal(res.json().error.message, "Expected a JSON object body.");
     await app.close();
   });
 
@@ -49,7 +38,7 @@ describe("buildApp", () => {
     const app = await build();
     const res = await app.inject({
       method: "POST",
-      url: "/api/agent/chat",
+      url: "/api/generate",
       headers: { "content-type": "application/json" },
       payload: "{not json",
     });
@@ -69,38 +58,26 @@ describe("buildApp", () => {
     await app.close();
   });
 
-  it("answers 413 with a JSON error for a chat body over 32 KB", async () => {
+  it("answers 413 with a JSON error for a generate body over 32 KB", async () => {
     const app = await build();
     const res = await app.inject({
       method: "POST",
-      url: "/api/agent/chat",
-      payload: { conversationId: "c", message: "a".repeat(33 * 1024) },
+      url: "/api/generate",
+      payload: { prompt: "a".repeat(33 * 1024) },
     });
     assert.equal(res.statusCode, 413);
     assert.equal(typeof res.json().error.message, "string");
     await app.close();
   });
 
-  it("accepts 4,000 characters of 4-byte UTF-8 under the body limit", async () => {
+  it("answers 404 on the removed agent routes", async () => {
     const app = await build();
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/agent/chat",
-      payload: { conversationId: "c", message: "\u{1F600}".repeat(2000) },
-    });
-    assert.equal(res.statusCode, 200);
-    await app.close();
-  });
-
-  it("answers 400 with a JSON error for an over-long message", async () => {
-    const app = await build();
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/agent/chat",
-      payload: { conversationId: "c", message: "a".repeat(4001) },
-    });
-    assert.equal(res.statusCode, 400);
-    assert.equal(res.json().error.message, "Message is too long (max 4000 characters).");
+    for (const [method, url] of [
+      ["POST", "/api/agent/chat"],
+      ["DELETE", "/api/agent/conversations/c1"],
+    ] as const) {
+      assert.equal((await app.inject({ method, url, payload: method === "POST" ? {} : undefined })).statusCode, 404);
+    }
     await app.close();
   });
 });

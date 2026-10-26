@@ -17,7 +17,6 @@ services:
     environment:
       API_HOST: 0.0.0.0
       DATABASE_URL: postgres://genui:genui@db:5432/genui
-      TRACE_DATABASE_URL: postgres://genui:genui@db:5432/genui_traces
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       AGENT_MODEL: ${AGENT_MODEL:-}
       CHOKIDAR_USEPOLLING: "true"
@@ -54,15 +53,11 @@ services:
       dockerfile: Dockerfile.api
     environment:
       DATABASE_URL: postgres://genui:genui@db:5432/genui
-      TRACE_DATABASE_URL: postgres://genui:genui@db:5432/genui_traces
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       AGENT_MODEL: ${AGENT_MODEL:-}
       TRUST_PROXY: "1"
-      REDIS_URL: redis://redis:6379
     depends_on:
       db:
-        condition: service_healthy
-      redis:
         condition: service_healthy
 
   web:
@@ -82,20 +77,8 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./docker/postgres/init-traces.sql:/docker-entrypoint-initdb.d/02-init-traces.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U genui -d genui"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  redis:
-    image: redis:8-alpine
-    command: redis-server --save "" --appendonly no
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 10

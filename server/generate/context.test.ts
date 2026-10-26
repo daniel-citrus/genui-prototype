@@ -1,0 +1,166 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import type { StoredCustomComponent } from "shared/customComponents";
+import type { ActionSpec } from "../actions/types";
+import { catalog } from "../catalog/components";
+import { menuItemCard } from "../customComponents/testDefinitions";
+import type { CustomComponentRepository } from "../ports/CustomComponentRepository";
+import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
+import { ACTIONS_WARN_CHARS, buildContext, MAX_CHOICES, MAX_LISTED_CUSTOM_COMPONENTS, type ContextDeps } from "./context";
+
+const components = new InMemoryComponentRepository(catalog);
+
+const action: ActionSpec = {
+  name: "rename_item",
+  description: "Renames an item.",
+  input_schema: { type: "object", properties: { item: { type: "string", description: "Item." } } },
+  area: "items",
+  operation: "edit",
+  confirm: "Rename {item}?",
+  choices: { item: "item_names" },
+};
+
+function stored(name: string, over: Partial<StoredCustomComponent> = {}): StoredCustomComponent {
+  return {
+    ...menuItemCard,
+    name,
+    version: 1,
+    versions: 1,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    deletedAt: null,
+    ...over,
+  };
+}
+
+function repoOf(list: StoredCustomComponent[] | Error): CustomComponentRepository {
+  return {
+    async list() {
+      if (list instanceof Error) throw list;
+      return { components: list, total: list.length };
+    },
+  } as CustomComponentRepository;
+}
+
+function setup(overrides: Partial<ContextDeps> = {}) {
+  const logged: { level: string; obj: object }[] = [];
+  const logger = (level: string) => (obj: object) => void logged.push({ level, obj });
+  const deps: ContextDeps = {
+    components,
+    actions: [action],
+    listChoices: async () => ["Latte", "Mocha"],
+    customComponents: repoOf([stored("Specials")]),
+    log: { info: logger("info"), debug: logger("debug"), warn: logger("warn"), error: logger("error") },
+    signal: new AbortController().signal,
+    ...overrides,
+  };
+  return { deps, logged };
+}
+
+const parse = (section: string | undefined) => JSON.parse(section!.slice(section!.indexOf("\n") + 1));
+
+describe("buildContext", () => {
+  it("lists catalog, markup rules, actions, choices and custom components in order", async () => {
+    const { deps } = setup();
+    const { sections, catalog: read } = await buildContext("a form", deps);
+    assert.equal(read.length, catalog.length);
+    assert.equal(sections.length, 5);
+    assert.deepEqual(sections.map((s) => s.split("\n")[0]), [
+      "Catalog components:",
+      "Markup rules:",
+      "Actions a Button may run:",
+      "Dropdown values by source:",
+      "Saved custom components:",
+    ]);
+    const [first] = parse(sections[0]);
+    assert.deepEqual(Object.keys(first), ["name", "category", "description", "children", "propsSchema", "exampleProps"]);
+    assert.ok(parse(sections[1]).htmlTags);
+    assert.deepEqual(parse(sections[2]), [
+      {
+        name: "rename_item",
+        description: action.description,
+        input_schema: action.input_schema,
+        area: "items",
+        operation: "edit",
+        confirm: "Rename {item}?",
+        choices: { item: "item_names" },
+      },
+    ]);
+    assert.deepEqual(parse(sections[3]), { item_names: { values: ["Latte", "Mocha"], truncated: false } });
+    const [custom] = parse(sections[4]);
+    assert.deepEqual(Object.keys(custom), ["name", "description", "category", "children", "propsSchema", "exampleProps"]);
+  });
+
+  it("omits the optional sections without their ports", async () => {
+    const { deps } = setup({ listChoices: undefined, customComponents: undefined });
+    assert.equal((await buildContext("x", deps)).sections.length, 3);
+  });
+
+  it("cuts a source to 50 values and says so", async () => {
+    const many = Array.from({ length: MAX_CHOICES + 5 }, (_, i) => `v${i}`);
+    const { deps } = setup({ listChoices: async () => many });
+    const { sections } = await buildContext("x", deps);
+    const { item_names } = parse(sections[3]);
+    assert.equal(item_names.values.length, MAX_CHOICES);
+    assert.equal(item_names.truncated, true);
+  });
+
+  it("lists a failing source with no values and logs only its name", async () => {
+    const { deps, logged } = setup({
+      listChoices: async () => {
+        throw new Error("secret detail");
+      },
+    });
+    const { sections } = await buildContext("x", deps);
+    const { item_names } = parse(sections[3]);
+    assert.deepEqual(item_names.values, []);
+    assert.ok(item_names.error);
+    assert.deepEqual(logged, [{ level: "error", obj: { source: "item_names" } }]);
+  });
+
+  it("leaves out components named like a catalog component ignoring case", async () => {
+    const { deps } = setup({ customComponents: repoOf([stored("button"), stored("Specials")]) });
+    const { sections } = await buildContext("x", deps);
+    assert.deepEqual(parse(sections[4]).map((c: { name: string }) => c.name), ["Specials"]);
+  });
+
+  it("ranks past 40 by shared prompt words, then by most recent update", async () => {
+    const list = Array.from({ length: 45 }, (_, i) =>
+      stored(`Widget${String.fromCharCode(65 + (i % 26))}${i}`, {
+        description: "Plain widget.",
+        updatedAt: `2026-02-${String(i + 1).padStart(2, "0")}T00:00:00.000Z`,
+      }),
+    );
+    list[0] = stored("Specials", { description: "Daily specials board.", updatedAt: "2025-01-01T00:00:00.000Z" });
+    list[1] = stored("OldPromo", { description: "Shows a discount banner.", updatedAt: "2025-01-02T00:00:00.000Z" });
+    const { deps } = setup({ customComponents: repoOf(list) });
+    const names: string[] = parse((await buildContext("show the specials and a discount", deps)).sections[4]).map(
+      (c: { name: string }) => c.name,
+    );
+    assert.equal(names.length, MAX_LISTED_CUSTOM_COMPONENTS);
+    assert.deepEqual(names.slice(0, 2).sort(), ["OldPromo", "Specials"]);
+    assert.equal(names[2], list[44]!.name);
+    assert.equal(names[3], list[43]!.name);
+  });
+
+  it("continues with no custom components, and warns, when the repository fails", async () => {
+    const { deps, logged } = setup({ customComponents: repoOf(new Error("down")) });
+    const { sections } = await buildContext("x", deps);
+    assert.deepEqual(parse(sections[4]), []);
+    assert.deepEqual(logged.map((l) => l.level), ["warn"]);
+  });
+
+  it("warns when the actions section is very long", async () => {
+    const big: ActionSpec = { ...action, description: "d".repeat(ACTIONS_WARN_CHARS) };
+    const { deps, logged } = setup({ actions: [big] });
+    await buildContext("x", deps);
+    assert.ok(logged.some((l) => l.level === "warn"));
+  });
+
+  it("rejects when the catalog can't be read", async () => {
+    const { deps } = setup({
+      components: { ...components, list: async () => Promise.reject(new Error("db")) } as unknown as ContextDeps["components"],
+    });
+    await assert.rejects(buildContext("x", deps), /db/);
+  });
+});

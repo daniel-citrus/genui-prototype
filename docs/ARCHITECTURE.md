@@ -1,236 +1,158 @@
 # Architecture
 
-genui-prototype is a two-pane web app: on the left you chat with an AI agent, on the right a sandbox will show the UI it generates. It is a **Vite + TypeScript** browser app and a **Fastify** API in one repository. The API runs the agent on **OpenAI** and streams replies to the browser over server-sent events (SSE), and it owns a **Postgres** database accessed through **Drizzle**.
+genui-prototype is a UI generator. A host agent (the CapheViet POS agent is planned) offers its model one tool, `generate_ui` (`GENERATE_UI_TOOL` in [shared/generate.ts](../shared/generate.ts)), and calls `POST /api/generate` with a plain-language prompt. The API makes one **OpenAI** JSON-mode call (plus at most two repairs), checks the design it gets back, and answers with a validated UI tree and short notes for the person. A **Vite + TypeScript** preview page draws the tree in a sandbox and lets a person click its buttons. The API is **Fastify** and owns a **Postgres** database accessed through **Drizzle**.
 
 Related: [README](../README.md)
 
 ## Index
 
 1. [System overview](#1-system-overview)
-2. [Browser app](#2-browser-app)
+2. [Preview page](#2-preview-page)
 3. [API](#3-api)
-4. [A chat turn, end to end](#4-a-chat-turn-end-to-end)
+4. [A generation, end to end](#4-a-generation-end-to-end)
 5. [Data](#5-data)
 6. [Environments](#6-environments)
 7. [Configuration](#7-configuration)
 8. [Repository layout](#8-repository-layout)
 9. [Build, test, and CI](#9-build-test-and-ci)
 10. [Current limits and what's next](#10-current-limits-and-whats-next)
+11. [History](#11-history)
 
 ## 1. System overview
 
 ```mermaid
 flowchart LR
-  subgraph Browser
-    Chat["Chat pane"]
-    Sandbox["Sandbox pane<br/>(draws ui events, sends button clicks)"]
-    Panel["Components panel<br/>(list, preview, delete, restore, revert)"]
-    Client["Agent, actions and custom components clients<br/>fetch + SSE reader"]
-    Chat --> Client
-    Sandbox --> Client
-    Panel --> Client
-  end
-
-  Edge["Web server<br/>Vite :5173 in dev<br/>nginx :8080 in production"]
-
-  subgraph API ["API (Fastify, Node 24, :3001)"]
-    Limits["Request limits<br/>size cap, per-IP rate limit"]
-    Routes["HTTP routes<br/>GET /api/health<br/>POST /api/agent/chat<br/>POST /api/actions/run<br/>/api/custom-components"]
-    Loop["Agent loop"]
-    Convos["Conversations: history and last designs<br/>(in memory)"]
-    Tools["Tool registry<br/>list_components, get_component,<br/>list_actions, render_ui,<br/>define_component, delete_component"]
-    Expander["Custom component expander<br/>and definition checks"]
-    Actions["Action registry<br/>demo_echo, 14 menu actions"]
-    LlmPort["AgentLlm port"]
-    RepoPort["ComponentRepository port"]
-    CustomPort["CustomComponentRepository port"]
-    MenuPort["PosMenu port"]
-    TracePort["TraceRepository port"]
-    OpenAIAdapter["OpenAI adapter"]
-    DbAdapter["Drizzle catalog adapter"]
-    TracesAdapter["Drizzle traces adapter"]
-    MenuAdapter["Demo menu adapter<br/>(in memory, reset on start)"]
-    Limits --> Routes
-    Routes --> Loop
-    Routes -- "action clicks, no model call" --> Actions
-    Routes -. "remembered design" .-> Convos
-    Routes -- "Components panel" --> CustomPort
-    Routes -. "previews" .-> Expander
-    Loop --> Convos
-    Loop --> TracePort
-    Loop --> Tools
-    Tools -. "action specs, dropdown values" .-> Actions
-    Tools -- "expand before validating" --> Expander
-    Loop --> LlmPort
-    Tools --> RepoPort
-    Tools --> CustomPort
-    Actions --> MenuPort
-    LlmPort --> OpenAIAdapter
-    RepoPort --> DbAdapter
-    CustomPort --> DbAdapter
-    TracePort --> TracesAdapter
-    MenuPort --> MenuAdapter
-  end
-
-  OpenAI["OpenAI<br/>Chat Completions"]
-  DB[("Postgres genui<br/>components,<br/>custom_components,<br/>custom_component_versions")]
-  TracesDB[("Postgres genui_traces<br/>agent_traces")]
-  Redis[("Redis<br/>optional, rate-limit counters")]
-
-  Client -- "POST /api/agent/chat<br/>POST /api/actions/run<br/>/api/custom-components" --> Edge
-  Edge -- "proxies /api" --> Routes
-  Edge -. "SSE events, action results" .-> Client
-  OpenAIAdapter -- "streaming HTTPS" --> OpenAI
-  DbAdapter --> DB
-  TracesAdapter --> TracesDB
-  Limits -. "optional" .-> Redis
-  Routes -. "health check" .-> DB
-  Routes -. "health check" .-> TracesDB
-
-  subgraph Eval ["Eval harness (CLI · §9)"]
-    EvalCLI["Eval CLI<br/>npm run eval"]
-    CaseFiles["Case files<br/>server/eval/cases/*.json"]
-    TraceChecks["Trace checkers<br/>checkTrace"]
-    EvalLogFiles["Eval log files<br/>eval-logs/ (gitignored)"]
-    EvalFakes["In-memory fakes<br/>catalog · custom · traces · menu"]
-    EvalCLI --> CaseFiles
-    EvalCLI --> TraceChecks
-    EvalCLI --> EvalLogFiles
-  end
-
-  EvalCLI -. "runAgent per case<br/>(no Fastify, no SSE)" .-> Loop
-  EvalCLI --> OpenAIAdapter
-  Loop -. "eval wiring" .-> EvalFakes
-  TraceChecks -. "last AgentTrace" .-> EvalFakes
+  Host["CapheViet POS agent (planned)"] --> Routes["API routes"]
+  Preview["Preview page, sandbox and Components panel"] --> Routes
+  Routes --> Gen["Generator"]
+  Routes --> Designs["Design store"]
+  Gen --> Checks["UI checks and custom component expander"]
+  Gen --> Actions["Action registry and demo menu"]
+  Gen --> OpenAI["OpenAI (one JSON call, up to 2 repairs)"]
+  Routes --> Actions
+  Checks --> DB[("Postgres genui")]
+  Eval["Eval CLI"] --> Gen
 ```
 
-- **The browser only talks to its own origin.** The web server serves the app and proxies `/api` to the API, so there is no CORS setup.
-- **The API follows ports and adapters.** The agent loop and future features depend on small interfaces (`AgentLlm`, `ComponentRepository`, `CustomComponentRepository`, `PosMenu`, `TraceRepository`). The OpenAI, Drizzle catalog and traces, and in-memory demo menu adapters implement them, and [server/index.ts](../server/index.ts) is the one place that wires real adapters in (it passes them to `buildApp` in [server/app.ts](../server/app.ts), which builds the Fastify app and is what tests use). Tests swap in fakes.
-- **Eval runs beside the HTTP API, not through it.** `npm run eval` ([server/eval/cli.ts](../server/eval/cli.ts)) loads committed JSON cases, calls the same agent loop and OpenAI adapter as chat (same model and [system prompt](../server/agent/systemPrompt.ts)), but wires in-memory catalog, custom-component, trace, and menu ports ([server/eval/runner.ts](../server/eval/runner.ts)) so nothing hits Postgres or the browser and it does not write `genui_traces`. After each turn it scores the saved `AgentTrace` with deterministic checks ([server/eval/checks.ts](../server/eval/checks.ts)), writes one JSON file per case under a gitignored `eval-logs/<timestamp>/` directory (the file holds the case prompt, checks, result, and full turn trace), and prints one `pass` or `fail` line per case followed by a `logs` line with the directory's absolute path. `npm run eval -- --repeat N` (1 to 10) runs each case N times: each attempt is logged as `<id>.<k>.json`, its result line ends in `[k/N]`, and after all cases one `rate <id> <passes>/<N>` line per case precedes the `logs` line; a plain run (or `--repeat 1`) is unchanged. Eval needs `OPENAI_API_KEY` and CI does not run it (§9).
-- **Types shared by both sides** (request bodies, SSE event shapes, component and custom component types) live in [shared/](../shared/), so the browser and the API can't disagree about the wire format. So do the Markup rules ([shared/markup.ts](../shared/markup.ts)), which the API checks and the browser applies again before drawing (§3).
+- **The browser only talks to its own origin.** The web server serves the preview page and proxies `/api` to the API, so there is no CORS setup.
+- **The API follows ports and adapters.** The generator and the routes depend on small interfaces (`ComponentLlm`, `ComponentRepository`, `CustomComponentRepository`, `PosMenu`). The OpenAI, Drizzle and in-memory demo menu adapters implement them, and [server/index.ts](../server/index.ts) is the one place that wires real adapters in (it passes them to `buildApp` in [server/app.ts](../server/app.ts), which builds the Fastify app and is what tests use). Tests swap in fakes.
+- **Eval runs beside the HTTP API, not through it.** `npm run eval` ([server/eval/cli.ts](../server/eval/cli.ts)) loads committed JSON cases and calls `generateComponent` directly with the OpenAI adapter (same model and [prompt](../server/generate/prompt.ts) as the API), with in-memory catalog, custom-component and menu ports ([server/eval/runner.ts](../server/eval/runner.ts)), so nothing touches Postgres or the browser (§9).
+- **Types shared by both sides** (request and response bodies, component and custom component types, the `generate_ui` tool definition) live in [shared/](../shared/), so the browser and the API can't disagree about the wire format. So do the Markup rules ([shared/markup.ts](../shared/markup.ts)), which the API checks and the browser applies again before drawing (§3).
 
-## 2. Browser app
+## 2. Preview page
 
 ```
 ┌──────────────────────────────┬──────────────────────────────┐
-│ [▾] [Components] [New chat]  │                              │
+│ Describe a UI   [Components] │  action status area          │
+├──────────────────────────────┼──────────────────────────────┤
+│ [ prompt box              ]  │  sandbox                     │
+│               [ Generate ]   │  (latest generated design)   │
 ├──────────────────────────────┤                              │
-│  agent chat thread           │  action status area          │
-│  (user + streamed agent      ├──────────────────────────────┤
-│   bubbles, notices, errors,  │  sandbox panel               │
-│   thinking dots)             │  (latest rendered design)    │
-├──────────────────────────────┤                              │
-│ [ Message the agent…     ]   │                              │
-│               [Send / Stop]  │                              │
+│ notes or error               │                              │
 └──────────────────────────────┴──────────────────────────────┘
 ```
 
-- **Chat pane:** the agent's text streams into a bubble, and notices and errors render as small lines in the thread, in the order they arrive. Tool calls and results are not shown (turn traces still record them). Text that resumes after tool calls continues the current bubble unless a notice or error came in between, which starts a new bubble. A thinking indicator (three animated dots in a grey bubble, read once as "Thinking…" by screen readers, still under `prefers-reduced-motion`) shows right after the person's message and whenever a tool call is made, is removed by the next text, `done`, `error`, the end of the stream or **Stop**, and is always the last item in the thread. The rules for which events add a line and when the indicator shows are in [src/chatEvents.ts](../src/chatEvents.ts). While a reply streams, **Send** becomes **Stop**, which aborts the request; the API sees the connection close and stops the turn.
-- **Conversation identity:** a random id; a conversation lasts until **New chat** or a reload starts a new one. **New chat** aborts any streaming turn, clears the thread, composer, sandbox and status area, and asks the API to delete the old conversation (`DELETE /api/agent/conversations/:id`, not awaited; a failure is ignored).
+- **Prompt and Generate:** the prompt box takes at most `MAX_PROMPT_CHARS` (4000, in [shared/generate.ts](../shared/generate.ts)) characters. **Generate** posts the prompt to `POST /api/generate` through [src/generateClient.ts](../src/generateClient.ts) and is disabled until the answer comes back. Network and HTTP failures resolve to an error message, so there is always something to show.
+- **Notes and errors:** on success the design's `notes` appear under the prompt; when the design still had problems after its tries, or the request failed, the page says so in a red box. Nothing is saved in the browser.
+- **Design identity:** the sandbox keeps the `id` of the design it draws and sends it back as `designId` with every action click. A newer design replaces the old one and clears the status area.
 - **Sandbox pane:** shows "Designs you ask for appear here." until a `ui` event arrives, then draws that tree and keeps the event's `id`; a newer `ui` event replaces it (and clears the status area), and nothing is saved in the browser. The renderer is in [src/sandbox/](../src/sandbox/): `components.ts` has one function per catalog component (a map typed by `RENDERED_COMPONENTS`, so a missing one fails typecheck), and `render.ts` walks the tree and gives each renderer its tree path (`tree.children.0`); every drawn control and action button carries it in `data-path`, Markup elements counted on the received `root` before filtering (`tree.children.0.props.root.children.1`), so the paths match the API's. Tree text goes in only through `textContent` or named attributes, never as HTML; image URLs are re-checked for http(s); a component the browser has no function for draws as a dashed "Unknown component" box. Inputs, checkboxes and selects work as normal form controls; a Button with an `action` prop, or a Markup `button` with an `action`, runs that action (below), and any other button does nothing. `src/sandbox/componentNames.test.ts` fails if the catalog and `RENDERED_COMPONENTS` differ.
-- **Drawing Markup:** the `Markup` renderer in `components.ts` first passes its `root` through `filterMarkup` ([src/sandbox/markup.ts](../src/sandbox/markup.ts)), which drops anything outside the allowlist by the same `sanitizeMarkup` rules the API checked (§3), so a tree that slipped past the API still can't draw more. It then builds the elements one by one (`createElementNS` inside an `svg`), setting attributes with `setAttribute`, styles with `style.setProperty` and text with `textContent`, inside a wrapper with `contain: content; overflow: hidden`, so nothing in it can cover the chat or the page. Its images load with no referrer, its buttons never submit, an `input` without a `maxlength` gets 1000, and only an enabled `button` with an `action` sends a click.
-- **Action clicks:** clicking a button that has an `action` first makes sure every named field it sends can be seen: if one is hidden (by `display`, `visibility` or opacity) or less than 1px wide or tall, nothing is sent and the status area says "This design has a hidden field, so the action was not sent." It then checks those fields with the browser's own validation (a required field left empty shows its message and nothing is sent), and posts `{ conversationId, uiId, action, values }` to `POST /api/actions/run` (§3) through [src/actionsClient.ts](../src/actionsClient.ts). `values` holds the named TextInput, Checkbox and Select fields and Markup `input` and `select` fields the clicked button sends (the ones inside its nearest Card, nested Cards included, or all of the design's when it has no Card; the same rule the API applies, `sendsInput` in [shared/formScope.ts](../shared/formScope.ts)), keyed by its `name` (checkboxes as booleans, the rest as strings); password fields are never sent. The result appears in the status area above the design only; nothing is added to the chat. Action buttons are disabled while an action request or a chat turn is in flight, or while a confirm question is shown. If a newer design was drawn before a result came back, the result is not shown (it belongs to the old design). Clicks never reach the agent and make no model call; network and HTTP failures show as a failed result. For an action that asks first (the three menu deletes), the API answers the click with its question instead of running it (§3). The status area shows the question in place, above the design, with **Yes** and **Cancel**, **Yes** resends the same request, with the values read for the first click, as `confirmed: true`, and its result shows as above; **Cancel** sends nothing and adds nothing. A question that comes back after a newer design was drawn or a chat turn started is dropped, and a new design or chat turn clears an unanswered one.
-- **New chat:** the **New chat** button in the chat header, beside **Components**, runs the reset described under conversation identity. Saved custom components and an open Components panel are untouched.
-- **Components panel:** the **Components** button in the chat header opens a panel over the chat ([src/customComponentsPanel.ts](../src/customComponentsPanel.ts)), which talks to the custom components route (§3) through [src/customComponentsClient.ts](../src/customComponentsClient.ts) and loads the list each time it opens. It lists every custom component with its description, version and last update, deleted ones under "Deleted" with **Restore**. Selecting one shows its version and category, a preview (the component with its example props, expanded by the API and drawn by the sandbox renderer in the panel, with its action buttons stripped so they send nothing) or the problems that kept it from expanding, and its versions, newest first, each earlier one with **Revert to version N**. Its header has **Delete**, or **Restore** when it is deleted. After each change the panel reloads the list and the selection, and a failure (such as the route's limit or "unavailable" message) shows at its top. It never creates or edits a definition; only the agent does.
-- **Session menu:** a placeholder for now.
-- **Stack:** plain TypeScript and DOM APIs, no UI framework; styling with Tailwind. Code is in [src/](../src/): the shell and chat rendering, the agent client, an SSE parser, the sandbox renderer, and the Components panel and its client.
+- **Drawing Markup:** the `Markup` renderer in `components.ts` first passes its `root` through `filterMarkup` ([src/sandbox/markup.ts](../src/sandbox/markup.ts)), which drops anything outside the allowlist by the same `sanitizeMarkup` rules the API checked (§3), so a tree that slipped past the API still can't draw more. It then builds the elements one by one (`createElementNS` inside an `svg`), setting attributes with `setAttribute`, styles with `style.setProperty` and text with `textContent`, inside a wrapper with `contain: content; overflow: hidden`, so nothing in it can cover the page. Its images load with no referrer, its buttons never submit, an `input` without a `maxlength` gets 1000, and only an enabled `button` with an `action` sends a click.
+- **Action clicks:** clicking a button that has an `action` first makes sure every named field it sends can be seen: if one is hidden (by `display`, `visibility` or opacity) or less than 1px wide or tall, nothing is sent and the status area says "This design has a hidden field, so the action was not sent." It then checks those fields with the browser's own validation (a required field left empty shows its message and nothing is sent), and posts `{ designId, action, values }` to `POST /api/actions/run` (§3) through [src/actionsClient.ts](../src/actionsClient.ts). `values` holds the named TextInput, Checkbox and Select fields and Markup `input` and `select` fields the clicked button sends (the ones inside its nearest Card, nested Cards included, or all of the design's when it has no Card; the same rule the API applies, `sendsInput` in [shared/formScope.ts](../shared/formScope.ts)), keyed by its `name` (checkboxes as booleans, the rest as strings); password fields are never sent. The result appears in the status area above the design. Action buttons are disabled while a generation or an action request is in flight, or while a confirm question is shown. If a newer design was drawn before a result came back, the result is not shown (it belongs to the old design). Network and HTTP failures show as a failed result. For an action that asks first (the three menu deletes), the API answers the click with its question instead of running it (§3). The status area shows the question in place, with **Yes** and **Cancel**; **Yes** resends the same request, with the values read for the first click, as `confirmed: true`; **Cancel** sends nothing. A question that comes back after a newer design was drawn is dropped, and a new design clears an unanswered one.
+- **Components panel:** the **Components** button in the prompt pane's header opens a panel over the prompt pane ([src/customComponentsPanel.ts](../src/customComponentsPanel.ts)), which talks to the custom components route (§3) through [src/customComponentsClient.ts](../src/customComponentsClient.ts) and loads the list each time it opens. It lists every custom component with its description, version and last update, deleted ones under "Deleted" with **Restore**. Selecting one shows its version and category, a preview (the component with its example props, expanded by the API and drawn by the sandbox renderer in the panel, with its action buttons stripped so they send nothing) or the problems that kept it from expanding, and its versions, newest first, each earlier one with **Revert to version N**. Its header has **Delete**, or **Restore** when it is deleted. After each change the panel reloads the list and the selection, and a failure (such as the route's limit or "unavailable" message) shows at its top. The page never creates or edits a definition: custom components are read-only building blocks here.
+- **Stack:** plain TypeScript and DOM APIs, no UI framework; styling with Tailwind. Code is in [src/](../src/): the shell, the generate and actions clients, the sandbox renderer, and the Components panel and its client.
 
 ## 3. API
 
 | Part | Role |
 |---|---|
-| **Routes** ([server/routes/](../server/routes/)) | `GET /api/health` returns `{ ok, db, agent, redis, traces }`: whether the catalog Postgres answers, whether an OpenAI key is set, whether Redis answers (`null` when `REDIS_URL` is not set), and whether the traces Postgres answers (`traces` is `false` when the ping is omitted, fails, or throws). `POST /api/agent/chat` runs one agent turn and streams it back as SSE. `DELETE /api/agent/conversations/:conversationId` forgets a conversation's history and designs (after any turn queued on it ends) and answers 204 whether or not it existed; saved traces stay. `POST /api/actions/run` runs the action a sandbox button click names, with no model call (below). `/api/custom-components` serves the Components panel (below): list every custom component, read one with a preview, soft-delete, restore and revert to an earlier version |
-| **Agent** ([server/agent/](../server/agent/)) | The tool-use loop (§4), the in-memory conversation store (history and remembered designs only), the tool registry, and the agent's tools (`tools/`): `list_components` lists the catalog by name, category, description and children, then up to 40 custom components (`custom: true`, optional `search` on name or description); `get_component` returns one catalog or custom component's props schema and example props (`Markup` also returns `rules`: the allowlisted tags, attributes, style properties, display values, input types and functions, the forbidden value parts, boolean attributes, tags without text, the limits, notes on `$prop`, `$each` and `$item`, and a valid example, all built from the constants `sanitizeMarkup` uses; a custom one also returns its `version` and `template`); `list_actions` finds registered actions by area and operation (below); `define_component` checks a definition and saves the next version; `delete_component` soft-deletes one; `render_ui` expands custom components, then checks the expanded tree against the catalog, the registered actions and the current dropdown values and, if valid, sends only that expanded tree to the browser as a `ui` event (§4) |
+| **Routes** ([server/routes/](../server/routes/)) | `GET /api/health` returns `{ ok, db, agent }`: whether Postgres answers and whether an OpenAI key is set. `POST /api/generate` designs a UI from a prompt (below). `POST /api/actions/run` runs the action a sandbox button click names, with no model call (below). `/api/custom-components` serves the Components panel: list every custom component, read one with a preview, soft-delete, restore and revert to an earlier version |
+| **Generator** ([server/generate/](../server/generate/)) | `generate.ts`: `generateComponent(prompt, deps)`, one JSON-mode model call plus at most two repairs (§4). `context.ts`: the catalog, Markup rules, registered actions, dropdown values and listed custom components as messages. `prompt.ts`: the system prompt and the repair messages. `checkDesign.ts`: `checkDesign`, which every design passes before it is returned (§4) |
+| **Design store** ([server/designs.ts](../server/designs.ts)) | `createDesignStore({ max })`: designs by id, in memory; past `max` (500 in `buildApp`) the oldest is dropped. The generate route remembers each successful design; the action route reads it |
 | **Custom components** ([server/customComponents/](../server/customComponents/)) | `definition.ts`: `validateDefinition` checks a definition's shape, template, Markup and action names before save. `expand.ts`: `expandTree` substitutes custom components for their current version's template (with instance props and a `{$children: true}` slot), repeats a `{$each: <array prop>, as}` entry once per item (at most 100; `{$item}` inside `as` is the item or one of its fields, allowed in a children array of a template node or Markup element, one level only), reports deleted components, loops and nesting limits, and rewrites validator paths so errors name the custom component and version (§4) |
 | **Custom components route** ([server/routes/customComponents.ts](../server/routes/customComponents.ts)) | `GET /api/custom-components` lists every component (deleted included), up to 500. `GET /api/custom-components/:name` returns the current version, every version's metadata, and a preview (`preview` is the expanded example tree, or `previewErrors` lists why it wouldn't expand). `DELETE /api/custom-components/:name` soft-deletes; `POST .../restore` undoes that; `POST .../revert` with `{ version }` saves a copy of that version as the new current one. Names must match `^[A-Z][A-Za-z0-9]*$`. A repository failure answers 503 with a fixed message; refusals (limit, deleted, and the like) use 404 or 409 with the repository's message |
 | **Actions** ([server/actions/](../server/actions/)) | The action registry: named handlers a Button click can run, each with a closed `input_schema` whose properties are all strings or booleans, and optionally an `area` (snake_case, what it works on), an `operation` (`create`, `edit`, `archive`, `delete`, `attach`, `detach` or `other`; both count as `other` when missing), dropdown sources for string inputs (`choices`, each a named `ChoiceSource` that lists current values), and a `confirm` question whose `{input}` placeholders name declared properties. Values are checked against the schema before a handler runs; a handler gets 10 seconds (then its signal is aborted and the result is "took too long"), a throw becomes an `ok: false` result, and result messages are cut to 500 characters. `listChoices` returns a source's current values. `index.ts` registers `demo_echo`, which has no side effects and replies "Demo action received: <text>"; [server/index.ts](../server/index.ts) adds the menu actions after it |
 | **Menu actions** ([server/actions/menu/](../server/actions/menu/)) | `createMenuActions(menu)`: fourteen actions over a `PosMenu`. Items: create, update (name, description, category), archive or unarchive, set or clear the image. Modifier groups: attach to and detach from an item, delete. Sizes: add, update (name, SKU), set the price, remove. Categories: create, rename, delete. Their `item`, `size`, `category` and `group` inputs are dropdowns over four shared sources (`menu_items`, `menu_item_sizes` as "Item (Size)", `menu_categories`, `menu_modifier_groups`, archived items included, sorted by folded name) and are resolved by name when the action runs: the exact name first, then a unique match after `foldName`. Prices are typed in dollars (`parsePrice` strips `$` and `,`). In the update actions an empty field stays as it is, and an update with every field empty is refused. A `PosMenuError`, from the menu or from resolving a name, becomes an `ok: false` result with its message. The three deletes (`menu_remove_size`, `menu_delete_category`, `menu_delete_modifier_group`) have a confirm question. Name helpers (`cleanName`, `foldName`, `sizeLabel`) are in [server/text/names.ts](../server/text/names.ts) |
-| **UI checks** ([server/ui/](../server/ui/)) | `validateTree.ts`: the `render_ui` checks (§4). `bindings.ts`: finds a tree's named inputs and action Buttons, each with its nearest Card. [shared/formScope.ts](../shared/formScope.ts) decides form scope (`nearestCard`, `sendsInput`). `checkAction.ts`: whether a click may run an action with the values sent |
-| **Ports** ([server/ports/](../server/ports/)) | `AgentLlm`: run one model turn with streaming. `ComponentRepository`: read the component catalog. `CustomComponentRepository`: list, read, save, soft-delete and restore custom component definitions with versions (§5). `TraceRepository`: persist turn traces (§5). `PosMenu`: the café menu as a point-of-sale system holds it (categories, modifier groups, items and their sizes, prices as integer minor units), mirroring CapheVietPOS's `MenuStore` at its commit 60764e5 so a live CapheVietPOS adapter can implement it; expected failures reject with a `PosMenuError` (`validation` or `not_found`). `fakes/`: in-memory versions for tests |
-| **Adapters** ([server/adapters/](../server/adapters/)) | `openai/`: streaming Chat Completions. `db/`: Drizzle client, schema, migrations, the catalog repository, `DrizzleCustomComponentRepository`, and the catalog seed. `traces/`: Drizzle client, schema, migrations, and `DrizzleTraceRepository` for database `genui_traces` (§5). `pos/`: `createInMemoryPosMenu`, the demo café menu (a copy of `fixtures.ts`, CapheVietPOS's placeholder menu) with CapheVietPOS's menu rules, such as refusing a negative price, two categories (or two sizes of one item) whose names differ only in accents, or deleting a category or modifier group an item still uses (§5) |
+| **UI checks** ([server/ui/](../server/ui/)) | `validateTree.ts`: the tree checks `checkDesign` runs (§4). `bindings.ts`: finds a tree's named inputs and action Buttons, each with its nearest Card. [shared/formScope.ts](../shared/formScope.ts) decides form scope (`nearestCard`, `sendsInput`). `checkAction.ts`: whether a click may run an action with the values sent |
+| **Ports** ([server/ports/](../server/ports/)) | `ComponentLlm`: one JSON-answering model call with no tools. `ComponentRepository`: read the component catalog. `CustomComponentRepository`: list, read, save, soft-delete and restore custom component definitions with versions (§5); the generator only reads it. `PosMenu`: the café menu as a point-of-sale system holds it (categories, modifier groups, items and their sizes, prices as integer minor units), mirroring CapheVietPOS's `MenuStore` at its commit 60764e5 so a live CapheVietPOS adapter can implement it; expected failures reject with a `PosMenuError` (`validation` or `not_found`). `fakes/`: in-memory versions for tests and eval |
+| **Adapters** ([server/adapters/](../server/adapters/)) | `openai/`: `createOpenAIComponentLlm`, one Chat Completions call with `response_format: json_object`. `db/`: Drizzle client, schema, migrations, the catalog repository, `DrizzleCustomComponentRepository`, and the catalog seed. `pos/`: `createInMemoryPosMenu`, the demo café menu (a copy of `fixtures.ts`, CapheVietPOS's placeholder menu) with CapheVietPOS's menu rules, such as refusing a negative price, two categories (or two sizes of one item) whose names differ only in accents, or deleting a category or modifier group an item still uses (§5) |
 | **Catalog** ([server/catalog/](../server/catalog/)) | `components.ts`: the predefined UI components, the source of truth for the `components` table, including `Markup` (allowlisted HTML and SVG as a JSON tree; valid in designs and in custom component templates, checked in [shared/markup.ts](../shared/markup.ts)). `validate.ts`: the rules every entry follows (§5) |
-| **App** ([server/app.ts](../server/app.ts)) | `buildApp` creates the Fastify app: trust proxy, the request limits below, and the routes. `server/index.ts` wires the adapters, the demo menu and the action registry and listens |
+| **App** ([server/app.ts](../server/app.ts)) | `buildApp` creates the Fastify app: trust proxy, the rate limiter, and the routes. `server/index.ts` wires the adapters, the demo menu and the action registry and listens |
 | **Config** ([server/config.ts](../server/config.ts)) | The only place the API reads environment variables (§7) |
 
-**Request limits.** The chat, action and conversation-delete routes below share one limiter; `/api/custom-components` uses the same per-IP limit but is counted separately from chat and from actions.
+**Generate route.** `POST /api/generate` takes `{ prompt }` ([shared/generate.ts](../shared/generate.ts)) and answers with a `GenerateResponse`.
 
-- **Message length (chat):** `MAX_MESSAGE_CHARS` (4000, in [shared/api.ts](../shared/api.ts)) is both the chat textarea's `maxlength` and the route's check; a longer message gets a 400 ("Message is too long (max 4000 characters)."). Malformed JSON gets a 400 on both routes.
-- **Body size:** a 32 KB `bodyLimit` on each chat and action route; a larger body gets a 413. Custom component routes allow 1 KB (enough for `{ "version": n }` on revert).
-- **Rate limit:** `@fastify/rate-limit` allows `AGENT_RATE_LIMIT_PER_MINUTE` requests per client IP per minute on each route (fixed window; IPv6 addresses are grouped by /64). The two routes share the limiter and its settings but are counted separately, so clicking actions does not use up chat requests. Past it the route answers 429 with a `Retry-After` header and "Too many messages. Try again in N seconds." It runs before the body is read.
-- **Store:** counters are in memory by default. With `REDIS_URL` set they live in Redis (`ioredis`, keys prefixed `genui-rate-limit:`), so several API instances share them. The limiter fails open: while Redis is not connected or is down, requests pass, with one warning logged per outage.
+- **Body checks:** the body must be a JSON object with a non-empty `prompt` (trimmed) of at most 4000 characters; otherwise 400. Bodies over 32 KB get a 413.
+- **Not configured:** without an OpenAI key (or the catalog repository) it answers 503 "The generator is not configured: set OPENAI_API_KEY."
+- **Success:** 200 `{ ok: true, id, tree, notes, attempts }`. `id` is a random UUID under which the checked, expanded tree is remembered in the design store; `notes` is the model's text for the person, trimmed and cut to 500 characters, possibly empty; `attempts` is the number of model calls (1 to 3).
+- **Design still wrong:** 422 `{ ok: false, error, problems, attempts }` with the problems from the last attempt (at most 20), after three model calls.
+- **Failures:** a failed model call is 502 "The model request failed."; an unreadable custom component repository is 503 "Custom components are unavailable." A generation is cut off after `GENERATE_TIMEOUT_MS` (90 seconds) and when the client disconnects; an aborted request gets no answer.
+- **Logging:** one info line per generation with the design id, `ok`, attempts, problem count, prompt and completion tokens, and `durationMs`. The prompt, the design and the notes may hold personal data and are never logged.
+
+**Request limits.**
+
+- **Body size:** a 32 KB `bodyLimit` on the generate and action routes; a larger body gets a 413. Custom component routes allow 1 KB (enough for `{ "version": n }` on revert). Malformed JSON gets a 400.
+- **Rate limit:** `@fastify/rate-limit` allows `AGENT_RATE_LIMIT_PER_MINUTE` requests per client IP per minute on each of the generate, action and custom components routes (fixed window; IPv6 clients are grouped by /64). The routes share the settings but are counted separately. Past it the route answers 429 with a `Retry-After` header and "Too many messages. Try again in N seconds." It runs before the body is read.
+- **Store:** counters live in process memory, so each API instance counts on its own.
 - **Trust proxy:** the client IP comes from the socket unless `TRUST_PROXY` (number of proxy hops) is set, in which case Fastify reads `X-Forwarded-For`. nginx sets that header and the production `api` uses `TRUST_PROXY=1`, which is safe only because the API's port is not published. Where clients can reach the API directly, leave it off: they could spoof the header and dodge the limit.
 
-**`list_actions`.** It takes two required arguments, each from a fixed list built from the registered actions when the tools are created: `area` (every action's area, `other` for those without one, plus `any`) and `operation` (the operations in use, plus `any`). It returns, as `actions`, up to 10 actions that fit both, in full: name, description, `input_schema`, area, operation, and their `confirm` question and `choices` (input → source) when they have them. When none fit both, it returns the area's actions instead and says so (`match: "area"` rather than `"exact"`), with a fixed `note` (`AREA_FALLBACK_NOTE`, placed before the lists) telling the model to use one only if its description does what the button should do and otherwise to render the button without an action. Every other action gets one line in `others` (name, area, operation, and the description cut to 120 characters), so a wrong guess never hides an action. `choices` holds the first 50 current values of each source the returned actions name (with `truncated` when there are more); a source that fails to load is logged and listed empty with an error.
+**Action route.** `POST /api/actions/run` takes `{ designId, action, values, confirmed? }` ([shared/api.ts](../shared/api.ts)) and never calls the model.
 
-**Action route.** `POST /api/actions/run` takes `{ conversationId, uiId, action, values, confirmed? }` ([shared/api.ts](../shared/api.ts)) and never calls the model.
-
-- **Body checks:** the three ids must be non-empty strings, `values` an object of at most 100 strings or booleans, and `confirmed`, if present, a boolean; otherwise 400.
-- **Design check:** the route looks up the design by `conversationId` and `uiId` among the ones the API remembers (§5). If it is gone (after a restart, after eviction, or after five newer designs), it answers 409 "This design is no longer available. Ask the agent to show it again." (`DESIGN_GONE_MESSAGE`). Otherwise `checkActionRequest` requires an enabled Button or Markup `button` in that design with this `action`, and every value must belong to a named input that button sends and fit it (a button sends everything inside its nearest Card, Cards nested inside it included, or the whole design when it has no Card; with several buttons for the action, the first whose scope takes every value is used): a string of at most 1000 characters for a TextInput or Markup `input`, a boolean for a Checkbox or Markup checkbox `input`, one of the options (or "") for a Select or Markup `select`. If several inputs in a scope share a name, a value is accepted when it fits any of them and refused when any of them is a password field. A name no scope has is refused with `This design has no input named "<name>" next to a "<action>" button.` (without "next to…" when the button is outside every Card). A failed check is a 400 whose message names the input, never the value.
-- **Confirmation:** values the action's schema doesn't declare are dropped. If the action has a `confirm` question and the request doesn't say `confirmed: true`, nothing runs: the response is 200 `{ ok: false, message, confirm }`, where `message` and `confirm` are both the question with each `{input}` replaced by its value (`(none)` when empty), cut to 500 characters. The browser asks it and resends with `confirmed: true` (§2).
+- **Body checks:** `designId` and `action` must be non-empty strings, `values` an object of at most 100 strings or booleans, and `confirmed`, if present, a boolean; otherwise 400.
+- **Design check:** the route looks up the design by `designId` in the design store (§5). If it is gone (after a restart, or after 500 newer designs), it answers 409 "This design is no longer available. Generate it again." (`DESIGN_GONE_MESSAGE`). Otherwise `checkActionRequest` requires an enabled Button or Markup `button` in that design with this `action`, and every value must belong to a named input that button sends and fit it (a button sends everything inside its nearest Card, Cards nested inside it included, or the whole design when it has no Card; with several buttons for the action, the first whose scope takes every value is used): a string of at most 1000 characters for a TextInput or Markup `input`, a boolean for a Checkbox or Markup checkbox `input`, one of the options (or "") for a Select or Markup `select`. If several inputs in a scope share a name, a value is accepted when it fits any of them and refused when any of them is a password field. A name no scope has is refused with `This design has no input named "<name>" next to a "<action>" button.` (without "next to…" when the button is outside every Card). A failed check is a 400 whose message names the input, never the value.
+- **Confirmation:** values the action's schema doesn't declare are dropped. If the action has a `confirm` question and the request doesn't say `confirmed: true`, nothing runs: the response is 200 `{ ok: false, message, confirm }`, where `message` and `confirm` are both the question with each `{input}` replaced by its value (`(none)` when empty), cut to 500 characters. The caller asks it and resends with `confirmed: true` (§2).
 - **Run:** the registry runs the handler with the declared values; its abort signal fires if the client disconnects. The response is 200 `{ ok, message }`, whether the handler succeeded or not.
-- **Logging:** every request that passes the body checks gets one info log line with the conversation id, action, `ok` and `durationMs`, plus `confirmation` (`asked` or `given`) for an action with a confirm question that passed the design check. Submitted values may be personal data and are never logged, and neither is the filled-in question.
+- **Logging:** every request that passes the body checks gets one info log line with the action, `ok` and `durationMs`, plus `confirmation` (`asked` or `given`) for an action with a confirm question that passed the design check. Submitted values may be personal data and are never logged, and neither is the filled-in question.
 
-**Startup.** The API builds its adapters and registers the routes. In production it first applies catalog database migrations, then seeds the component catalog (§5), then ensures database `genui_traces` exists and applies traces migrations, and exits with status 1 if any step fails. In development catalog and traces setup are run by hand (`npm run db:migrate`, `npm run db:migrate:traces`, then `npm run db:seed`; rerun the seed after pulling catalog changes, §5) and the API starts even when Postgres is down (health then reports `db: false` and/or `traces: false`, and component tool calls or trace saves fail until the relevant database is up). Without an OpenAI key the API still starts; health reports `agent: false` and a chat turn answers with one `error` event naming the missing key.
+**Startup.** The API builds its adapters and registers the routes. In production it first applies database migrations, then seeds the component catalog (§5), and exits with status 1 if either fails. In development both are run by hand (`npm run db:migrate`, then `npm run db:seed`; rerun the seed after pulling catalog changes, §5) and the API starts even when Postgres is down (health then reports `db: false`, and generating fails until it is up). Without an OpenAI key the API still starts; health reports `agent: false` and `POST /api/generate` answers 503.
 
-## 4. A chat turn, end to end
+## 4. A generation, end to end
 
 ```mermaid
 sequenceDiagram
   actor User
-  participant B as Browser
-  participant R as Chat route
-  participant L as Agent loop
+  participant P as Preview page
+  participant R as Generate route
+  participant G as Generator
   participant O as OpenAI
-  participant T as Tool registry
 
-  User->>B: types a message
-  B->>R: POST /api/agent/chat
-  R->>L: run the turn
-  Note over L: one turn at a time per conversation
-  loop up to 10 model calls
-    L->>O: history and tool definitions
-    O-->>L: streamed text and tool calls
-    L-->>B: text events (SSE)
-    opt the model asked for tools
-      L->>T: run each tool
-      T-->>L: result, added to history
-      L-->>B: tool_call, ui { id, tree } and tool_result events
-    end
+  User->>P: types a prompt, clicks Generate
+  P->>R: POST /api/generate
+  R->>G: generateComponent(prompt)
+  G->>G: build context (catalog, actions, choices, custom components)
+  loop up to 3 model calls
+    G->>O: messages (JSON mode)
+    O-->>G: { tree, notes }
+    G->>G: checkDesign
+    Note over G: problems are sent back as a repair message
   end
-  R-->>B: done, or error
+  G-->>R: design, or problems after 3 tries
+  R-->>P: 200 { id, tree, notes } or 422
 ```
 
-- The loop sends the conversation history and the available tools to the model, streams its text to the browser as it arrives, runs any tools the model asks for, and calls the model again with the results. A reply with no tool calls ends the turn. The exception is a failed build: while the latest `render_ui` call reported problems the model can fix (or the latest `define_component` call did, with no successful `render_ui` since), the loop holds each completion's text instead of streaming it. A held completion that makes tool calls is emitted when it ends. A held text-only reply is dropped from the chat (it stays in history) and the loop adds one system message telling the model its last call reported problems and to call it again, or to reply with only a question if it must ask one; this happens once per turn and only when the next completion can use tools. If the turn is still unfinished when the model replies with text again, or no reminder is possible, the loop emits the held text and a `notice` ("This isn't finished: the last design still had problems.") and ends with `endedBy: "unresolved"`. Results marked `retryable` are "UI has N problems", "Definition has N problems" and "Invalid arguments for <tool>"; refusals, unknown tools and tool failures are not.
-- Each turn is capped by the constants in [server/agent/guardrails.ts](../server/agent/guardrails.ts): 10 model calls, 20 tool calls, and 150,000 tokens (prompt plus completion, summed over the turn's calls). The last call, and any call after the tool-call or token cap is reached, is sent with tool use switched off (`tool_choice: "none"`), so the model answers with what it has. A tool call past the cap, or a repeat of an earlier call with the same arguments, is not run; the model is told so. Repeats are forgotten after a successful `define_component` or `delete_component`, so a failed call can be retried once the component is fixed and a read can be repeated; a successful write itself is never run twice. If the model still asks for tools once they are off, the turn ends with an `error` event.
-- A reply cut off by the output-token limit (`AGENT_MAX_OUTPUT_TOKENS`) is followed by a `notice` event. When the turn finishes, the loop builds one turn trace ([server/agent/trace.ts](../server/agent/trace.ts)): completions (each model call's text, truncation, usage, and tool outcomes), skip reasons when a tool call was not run, optional UI trees when `render_ui` succeeded, how many repair reminders were sent (`repairReminders`, 0 or 1), and any terminal `error` event message. In a `finally` block it calls `TraceRepository.save` with that trace; a failed save logs a warning (conversation id and error only, never payload, `userText`, completions, or trees) and the turn still completes. Every turn also ends with one counts-only info log line (`agent turn finished`): conversation id, model calls, tool calls, prompt and completion tokens, and why it ended.
-- The system prompt lives in [server/agent/systemPrompt.ts](../server/agent/systemPrompt.ts). The OpenAI adapter adds it on each call, so it is never stored in history. It tells the agent what it can and cannot do and gives it a procedure: list components once; if a button should do something, find the action first, before reading components, by calling `list_actions` with the area and operation that fit (`any` when unsure; skipped when an action found earlier in the chat fits, or when no button needs the server), and build the form around the returned inputs and choices; choose components in order of preference (catalog, then existing custom components from `list_components`, then a new one from `define_component`, with `Markup` only when the person asks for a look the components can't produce, such as a chart or a rating, directly in the design for a one-off or in a reusable component); read only the components it uses with `get_component`; build one tree, wiring each Button to a returned action whose description does what the button should do (calling `list_actions` again for one listed under `others`), or, when none fits, still rendering the Button without an action and saying that clicking it won't do anything yet (also when the person names an action `list_actions` didn't return, or only a demo or other unrelated action came back: a stand-in action is never wired, and a missing action is no reason to ask a question or to skip `render_ui`), naming each input after the property it fills, giving an input to each optional property the request implies, and using a Select with a source's values for each dropdown input; putting each form in its own Card (input names are unique within a Card, and a Button sends only its Card's inputs), editing one existing item through a preset, locked Select, and using a reusable item card component or an item dropdown for many repeated forms; Markup inputs and buttons belong only in templates; call `render_ui` and fix reported problems; then reply in one or two short sentences, saying when an action asks before it runs or when a custom component was saved, updated or deleted. The prompt says the people chatting are not technical, so replies use everyday words and never name tools, components, props, JSON or code unless the person did, and nothing is written before or between tool calls. Custom-component rules cover templates (with one short `$each` example), versioning, `delete_component` only when asked, and that template buttons may use only actions `list_actions` returned. It also says that clicks and what the person types never reach the agent, and never to invent action or component names. Problems that `render_ui` or `define_component` report are not failures: the agent fixes them and calls the tool again in the same turn, and the prompt forbids replies promising to try again; only other tool failures are reported as what it couldn't do. It names the tools but not the catalog's contents, and a test fails if the prompt and the registered tools drift apart.
-- The registry checks each call's arguments against the tool's schema before running it. An unknown tool, invalid arguments, or a tool that throws (Postgres down, for example) comes back as an `ok: false` result the model can read; failures are logged.
-- SSE event types: `text`, `tool_call`, `tool_result`, `ui` (`{ id, tree }`), `notice`, `done`, `error` (defined in [shared/api.ts](../shared/api.ts)).
-- **UI trees.** The agent describes a UI as a tree of catalog and custom components, `{ component, props?, children? }` ([shared/ui.ts](../shared/ui.ts)). `render_ui` first refuses a Markup `input`, `select` or `button` in the agent's own tree (designs use catalog components for forms; templates keep Markup controls; other Markup is checked by the same rules as in a template) and checks the agent's tree against the unexpanded size limits (a custom node counts as one). It then runs `expandTree` ([server/customComponents/expand.ts](../server/customComponents/expand.ts)): each custom component becomes its current version's template with instance props and children in `{$children: true}` slots; deleted components, unknown names, loops and more than three levels of custom nesting are reported with paths that name the component and version when the problem is in a template (for example `tree.children.0 (MenuItemCard v3) template.children.1…`). The expanded tree is validated with `validateUiTree` ([server/ui/validateTree.ts](../server/ui/validateTree.ts)) under the expanded limits of 400 nodes and 24 levels (Markup elements don't count toward those), and reports every problem at once (at most 20): malformed nodes, components not in the catalog, props that break the component's `propsSchema`, children on components that take none, and depth or node count past those expanded limits. In each check (`expandTree` for custom components, `validateUiTree` for catalog ones), the first props problem per component ends with `(call get_component <Name> for its props)`. The agent's own tree is also refused past 100 nodes (the message suggests putting the repeated part in a custom component) or 8 levels before expanding. It also checks bindings: two inputs with the same `name` in one Card (or both outside every Card), or in different Cards that one button would send together, a Button or Markup `button` `action` that is not registered, a required property of an action that no named input fills (for each button that isn't disabled, among the inputs it sends), an input of the wrong kind for the property it fills (a boolean needs a Checkbox or Markup checkbox `input`, a string a TextInput, Select or Markup `input`/`select`), and a password TextInput bound to an action property. Dropdowns and edit forms are checked too: before validating, `render_ui` loads the current values of each dropdown source that a Button's action names for an input present in the expanded tree (a source that fails to load is logged and left unchecked). An input filling a property with a loaded source must be a Select or Markup `select` (any other input gets only that message), and each of its options must be one of the source's values. A Select's optional `value` (the option it starts on) must be one of its options, and a `disabled` Select (greyed out, value still sent) needs a `value`. An enabled Button for an `edit` action that has optional properties is refused when the inputs it sends include none of them, since that form could change nothing. If any are found, nothing is shown and the model gets the errors to fix. If none, the tool hands the **expanded** tree to the browser through `ToolContext.showUi`. The run gives the design a server-generated `id` (a random UUID), remembers that expanded tree for the conversation (§5), and emits it as a `ui` event `{ id, tree }` just before the tool result. The browser draws it in the sandbox and sends the `id` back with any click on it (§2, §3). Tools have no other way to emit events. An empty children array on a component whose children is none is removed before the check, and the tree that is shown or saved has no children key. Per-component props validators are compiled once per `updatedAt` and cached.
-- **Custom component definitions.** `define_component` runs `validateDefinition` ([server/customComponents/definition.ts](../server/customComponents/definition.ts)) on the whole definition: name `^[A-Z][A-Za-z0-9]*$` (not a catalog name; unique ignoring case), description at most 300 characters with no control characters, category and `children` like the catalog, `propsSchema` and `exampleProps` like a catalog entry, a template of at most 40 nodes and 6 levels with at most one `{$children: true}` slot when `children` is `any`, Markup only inside the template with the same allowlist and size limits as §3 (200 elements and 12 levels on each Markup root), template buttons whose `action` is registered, no string that looks like a `{{...}}` placeholder (it would be shown as written; use `{"$prop": "<name>"}`), and every declared prop used by a `{"$prop": "<name>"}` in the template. The serialized definition must fit in 8,000 characters. The template is expanded and checked like a design under the 400-node and 24-level limits. On success the repository saves the next version; on failure the model gets every problem and nothing is written. `delete_component` soft-deletes by exact name.
-- If the API has forgotten a conversation the browser is continuing (after a restart, for example), the agent sends a `notice` saying so and answers the message on its own.
+- **Context.** [context.ts](../server/generate/context.ts) reads the catalog (it rejects when the catalog can't be read) and builds the messages that follow the system prompt: the component catalog, the Markup rules, the registered actions (with their input schemas, area, operation and confirm questions), the current values of each dropdown source (first 50 per source, with `truncated` when there are more; a source that fails is logged and listed empty with an error), and up to 40 custom components that aren't deleted and don't share a catalog name (past 40, those sharing a word with the prompt come first, then the most recently updated). A repository failure there is logged and the custom components are left out.
+- **System prompt.** [prompt.ts](../server/generate/prompt.ts) tells the model to reply with one JSON object, `{"tree": ..., "notes": "..."}`, and how to design: catalog components first, then listed custom components, Markup only for looks the components can't produce, each form in its own Card, input names equal to the action property they fill, a Select over a source's values for dropdowns, a preset disabled Select to edit one existing item, a Button wired only to a listed action whose description fits (otherwise left without an action and said so in notes), and no Markup controls in a design. The prompt, catalog, actions and everything else the host sends are data, not instructions. `notes` is a short text in everyday words with no component, prop or tool names, saying when a button has no action, an action asks before it runs, or a saved custom component was reused.
+- **One call, two repairs.** The first call carries the instructions, the context and the prompt as the only user message. A reply that isn't a JSON object with an object `tree` and a string `notes`, a reply cut off by `AGENT_MAX_OUTPUT_TOKENS`, or a tree with problems is sent back with the reply and the problems and the model answers again, up to `MAX_ATTEMPTS` (3) calls. The generator never rejects for a bad design: it returns `ok: false` with the last attempt's problems. It rejects when the catalog can't be read, a model call fails, custom components are unavailable, or the signal aborts.
+- **Design checks.** `checkDesign` ([server/generate/checkDesign.ts](../server/generate/checkDesign.ts)) refuses a Markup `input`, `select` or `button` in the model's own tree (designs use catalog components for forms; templates keep Markup controls; other Markup follows the same rules as in a template) and checks the model's tree against the unexpanded limits (a custom node counts as one): at most 100 nodes and 8 levels. It then runs `expandTree` ([server/customComponents/expand.ts](../server/customComponents/expand.ts)): each custom component becomes its current version's template with instance props and children in `{$children: true}` slots; deleted components, unknown names, loops and more than three levels of custom nesting are reported with paths that name the component and version when the problem is in a template. The expanded tree is validated with `validateUiTree` ([server/ui/validateTree.ts](../server/ui/validateTree.ts)) under the expanded limits of 400 nodes and 24 levels (Markup elements don't count toward those), and reports every problem at once (at most 20): malformed nodes, components not in the catalog, props that break the component's `propsSchema`, children on components that take none, and depth or node count past the limits. The first props problem per component ends with a `(call get_component <Name> for its props)` hint; the generator has no such tool, so the model fixes the props from the catalog in its context. It also checks bindings: two inputs with the same `name` in one Card (or both outside every Card), or in different Cards that one button would send together; a Button or Markup `button` `action` that is not registered; a required property of an action that no named input fills (for each button that isn't disabled, among the inputs it sends); an input of the wrong kind for the property it fills (a boolean needs a Checkbox or Markup checkbox `input`, a string a TextInput, Select or Markup `input`/`select`); and a password TextInput bound to an action property. Dropdowns and edit forms are checked too: `checkDesign` loads the current values of each dropdown source that a Button's action names for an input present in the expanded tree (a source that fails to load is logged and left unchecked). An input filling a property with a loaded source must be a Select or Markup `select`, and each of its options must be one of the source's values. A Select's optional `value` must be one of its options, and a `disabled` Select needs a `value`. An enabled Button for an `edit` action that has optional properties is refused when the inputs it sends include none of them, since that form could change nothing. When the design is valid, the **expanded** tree is what the route returns and remembers; an empty children array on a component whose children is none is removed first. Per-component props validators are compiled once per `updatedAt` and cached.
+
+- **Custom component definitions.** `validateDefinition` ([server/customComponents/definition.ts](../server/customComponents/definition.ts)) checks a whole definition: name `^[A-Z][A-Za-z0-9]*$` (not a catalog name; unique ignoring case), description at most 300 characters with no control characters, category and `children` like the catalog, `propsSchema` and `exampleProps` like a catalog entry, a template of at most 40 nodes and 6 levels with at most one `{$children: true}` slot when `children` is `any`, Markup only inside the template with the same allowlist and size limits as §3 (200 elements and 12 levels on each Markup root), template buttons whose `action` is registered, no string that looks like a `{{...}}` placeholder, and every declared prop used by a `{"$prop": "<name>"}` in the template. The serialized definition must fit in 8,000 characters. The template is expanded and checked like a design under the 400-node and 24-level limits. The generator does not write definitions: they reach Postgres only through the repository, and the eval runner uses `validateDefinition` to check the custom components a case seeds.
 
 ## 5. Data
 
 | Data | Where | Lifetime |
 |---|---|---|
-| Conversation history | API memory | Until the API restarts or `DELETE /api/agent/conversations/:conversationId` removes it. At most 500 conversations; the least recently used is dropped first |
-| Rendered designs | API memory, beside each conversation's history, keyed by `ui` event `id` | The last five per conversation; a sixth evicts the oldest. Lost with the conversation (restart, eviction or delete). The action route checks clicks against them (§3) |
-| Turn traces | Postgres database `genui_traces`, table `agent_traces`, via `TraceRepository` | The last five per conversation; a sixth evicts the oldest. Survive API restart and in-memory conversation eviction or `resetConversation` (§4). One `AgentTrace` per turn; not exposed over HTTP |
-| Demo menu | API memory: one `createInMemoryPosMenu` per API instance, built from [server/adapters/pos/fixtures.ts](../server/adapters/pos/fixtures.ts) (four categories, three modifier groups and seven items, one of them archived; prices in USD) | Reset to the fixtures every time the API starts. Shared by every conversation and everyone using that API instance, so one person's menu actions change what everyone sees; several instances would each have their own |
+| Generated designs | API memory, in the design store, keyed by the `id` the generate route returned | The newest 500; one more evicts the oldest. Lost when the API restarts. The action route checks clicks against them (§3) |
+| Demo menu | API memory: one `createInMemoryPosMenu` per API instance, built from [server/adapters/pos/fixtures.ts](../server/adapters/pos/fixtures.ts) (four categories, three modifier groups and seven items, one of them archived; prices in USD) | Reset to the fixtures every time the API starts. Shared by every design and everyone using that API instance, so one person's menu actions change what everyone sees; several instances would each have their own |
 | UI components | [server/catalog/components.ts](../server/catalog/components.ts), copied to Postgres `components` table by the seed | The file is the source of truth; the table can be dropped and reseeded at any time. Schema changes only through committed Drizzle migrations |
-| Custom components | Postgres `custom_components` and `custom_component_versions` tables via `CustomComponentRepository` | Global to the deployment: every conversation and the Components panel share them. At most 200 not deleted and 500 counting deleted ones; at most 20 versions per name. The seed never reads or writes these tables |
+| Custom components | Postgres `custom_components` and `custom_component_versions` tables via `CustomComponentRepository` | Read-only building blocks: the generator lists them to the model and expands them, and the Components panel can delete, restore and revert them, but nothing creates or edits a definition over HTTP. At most 200 not deleted and 500 counting deleted ones; at most 20 versions per name. The seed never reads or writes these tables |
 
-**`components` table:** a catalog of predefined UI components. Columns: `id`, `name` (unique), `description`, `category` (check: `layout`, `text`, `input`, or `display`), `children` (check: `none` or `any`), `props_schema` (JSON Schema), `example_props` (JSON), and timestamps. Rendering lives in browser code keyed by `name`, so no render spec is stored. The API's `ComponentRepository` is read-only (`list`, `get`, `getByName`); only the seed writes rows. The agent reads it through the `list_components` and `get_component` tools; no HTTP route exposes it (§10).
+**`components` table:** a catalog of predefined UI components. Columns: `id`, `name` (unique), `description`, `category` (check: `layout`, `text`, `input`, or `display`), `children` (check: `none` or `any`), `props_schema` (JSON Schema), `example_props` (JSON), and timestamps. Rendering lives in browser code keyed by `name`, so no render spec is stored. The API's `ComponentRepository` is read-only (`list`, `get`, `getByName`); only the seed writes rows. The generator reads it for its context and checks; no HTTP route exposes it (§10).
 
 **Custom component tables.** `custom_components` holds one row per name (`id`, `name` with a unique index on `lower(name)`, `current_version`, `deleted_at`, timestamps). `custom_component_versions` holds every saved definition (`component_id`, `version`, `description`, `category`, `children`, `props_schema`, `example_props`, `template`, `created_at`); rows are only ever inserted. A save adds the next version and updates `current_version`; a delete sets `deleted_at` without removing versions; restore clears `deleted_at` when under the active limit; revert copies an earlier version's fields into a new save. Limits and refusals are enforced in [server/ports/CustomComponentRepository.ts](../server/ports/CustomComponentRepository.ts) and the Drizzle adapter. Types and limits are in [shared/customComponents.ts](../shared/customComponents.ts).
 
 **Catalog and seed.** `server/catalog/components.ts` exports the thirteen predefined components: the twelve basic ones (`Stack`, `Card`, `Divider`, `Heading`, `Text`, `Button`, `TextInput`, `Checkbox`, `Select`, `Image`, `Badge`, `Alert`) and `Markup` (§3). Text content is a prop, so only `Stack` and `Card` take children. `validateCatalog` (Ajv, the shared strict instance in `server/validation/jsonSchema.ts`) checks that every name matches `^[A-Z][A-Za-z0-9]*$` and is unique, the description is non-empty, `propsSchema` is valid JSON Schema with `type: "object"`, `additionalProperties: false`, and a `description` on every property, and every `default` and `exampleProps` is valid against it. `seedComponents(db, catalog)` (`server/adapters/db/seed.ts`) validates first and, on any problem, throws listing them all and writes nothing. Otherwise, in one transaction, it inserts missing entries, updates rows whose fields differ (setting `updated_at`), deletes rows whose name left the catalog, leaves the rest untouched, and returns `{ added, updated, removed, unchanged }`. Running it twice ends in the same state. It touches only the `components` table.
 
-- **Development:** `npm run db:seed` after `npm run db:migrate` prints `components: N added, N updated, N removed, N unchanged`. Catalog changes reach Postgres only through the seed, so run it again after pulling them; until then `render_ui` checks against the old rows (for example, it rejects the Button `action` and input `name` props until the seed adds them).
+- **Development:** `npm run db:seed` after `npm run db:migrate` prints `components: N added, N updated, N removed, N unchanged`. Catalog changes reach Postgres only through the seed, so run it again after pulling them; until then the generator checks against the old rows (for example, it rejects the Button `action` and input `name` props until the seed adds them).
 - **Production:** the API seeds right after migrating on start, logs the same counts, and exits with status 1 if the seed fails. The catalog is bundled into the API, so the image needs no extra files.
-
-## 6. Environments
 
 | Mode | Command | Web | API | Database | URL |
 |---|---|---|---|---|---|
@@ -243,26 +165,23 @@ flowchart LR
   User["Browser"] -- ":8080" --> Web["web<br/>nginx + built app"]
   Web -- "/api, unbuffered" --> Api["api<br/>Node, bundled server"]
   Api --> Db[("db<br/>Postgres 17")]
-  Api -. "rate-limit counters (optional)" .-> Redis[("redis<br/>Redis 8, no persistence")]
   Api -- "HTTPS" --> OpenAI["OpenAI"]
 ```
 
 - **Images:** the web image builds the app and serves it with nginx. The API image bundles the server with esbuild and ships only production dependencies and the migrations.
-- **SSE through nginx:** buffering is off for `/api/` and reads time out after 300 seconds, so events reach the browser as they are written.
-- **Ports:** `web` (8080), `db` (5432) and `redis` (6379) are published; the API is reached through nginx and uses `redis` in production. If a host port is taken, remap it in an uncommitted `docker-compose.override.yml`.
+- **Generate timeout:** reads from the API time out after 120 seconds in nginx, longer than the 90-second generation cap.
+- **Ports:** `web` (8080) and `db` (5432) are published; the API is reached through nginx. If a host port is taken, remap it in an uncommitted `docker-compose.override.yml`.
 
 ## 7. Configuration
 
 | Variable | Default | Used by |
 |---|---|---|
-| `OPENAI_API_KEY` | none (the agent is off without it) | API |
+| `OPENAI_API_KEY` | none (the generator is off without it) | API |
 | `AGENT_MODEL` | `gpt-4.1` | API |
 | `AGENT_MAX_OUTPUT_TOKENS` | `4096` (output tokens allowed per model call) | API |
-| `DATABASE_URL` | `postgres://genui:genui@localhost:5432/genui` | API, catalog migrations |
-| `TRACE_DATABASE_URL` | `postgres://genui:genui@localhost:5432/genui_traces` | API, traces migrations; must name a different database than `DATABASE_URL` |
-| `AGENT_RATE_LIMIT_PER_MINUTE` | `20` (chat requests per IP per minute, and separately action requests) | API |
+| `DATABASE_URL` | `postgres://genui:genui@localhost:5432/genui` | API, migrations |
+| `AGENT_RATE_LIMIT_PER_MINUTE` | `20` (requests per IP per minute, counted separately on the generate, action and custom components routes) | API |
 | `TRUST_PROXY` | off (number of proxy hops to trust; `1` in the production `api`) | API |
-| `REDIS_URL` | none (rate-limit counters stay in memory) | API |
 | `API_PORT` / `API_HOST` | `3001` / `127.0.0.1` (`0.0.0.0` in containers) | API |
 | `LOG_LEVEL` | `info` | API |
 | `API_PROXY_TARGET` | `http://localhost:3001` | Vite dev server |
@@ -275,11 +194,12 @@ One npm package, no monorepo.
 
 ```
 genui-prototype/
-├── src/            browser app: shell, chat rendering, agent and actions clients, custom components client and panel, SSE parser, sandbox
+├── src/            preview page: shell, generate, actions and custom components clients, Components panel, sandbox
 ├── server/         Fastify API
-│   ├── routes/     health, chat, action and custom-component endpoints
-│   ├── agent/      agent loop, conversations, remembered designs, tool registry, tools
-│   ├── eval/       `server/eval/`: case files, trace checkers, runner, log writer, and CLI (`npm run eval`)
+│   ├── routes/     health, generate, action and custom-component endpoints
+│   ├── generate/   generator, its prompt and context, and the design checks
+│   ├── designs.ts  the in-memory design store
+│   ├── eval/       case files, checks, runner, log writer, and CLI (`npm run eval`)
 │   ├── actions/    action registry, confirm questions, and demo_echo
 │   │   └── menu/   the menu actions, their dropdown sources, name and price parsing
 │   ├── customComponents/  definition checks and expanding custom components into catalog trees
@@ -287,55 +207,55 @@ genui-prototype/
 │   ├── catalog/    component catalog file and its validation
 │   ├── text/       comparing menu names (shared by the demo menu and the menu actions)
 │   ├── ports/      interfaces the app depends on
-│   └── adapters/   OpenAI, catalog Postgres (Drizzle), traces Postgres, seed
-│       ├── traces/ traces Drizzle client, schema, migrations, repository
+│   └── adapters/   OpenAI, Postgres (Drizzle) and seed
 │       └── pos/    the in-memory demo café menu and its fixtures
-├── shared/         types, wire formats, custom component and Markup rules shared by both sides
+├── shared/         types, wire formats, GENERATE_UI_TOOL, custom component and Markup rules shared by both sides
 ├── docs/           this file
 ├── .github/        CI workflow
 ├── Dockerfile      web image (build + nginx)
 ├── Dockerfile.api  API image (esbuild bundle + production dependencies)
-└── docker-compose.yml, nginx.conf, vite.config.ts, drizzle.config.ts, drizzle.traces.config.ts, tsconfig*.json
+└── docker-compose.yml, nginx.conf, vite.config.ts, drizzle.config.ts, tsconfig*.json
 ```
 
-Runtime dependencies are the API's: `fastify`, `openai`, `drizzle-orm`, `pg`, and `ajv` with `ajv-formats`. Everything else (Vite, TypeScript, Tailwind, tsx, esbuild, drizzle-kit) is a development dependency.
+Runtime dependencies are the API's: `fastify`, `@fastify/rate-limit`, `openai`, `drizzle-orm`, `pg`, and `ajv` with `ajv-formats`. Everything else (Vite, TypeScript, Tailwind, tsx, esbuild, drizzle-kit) is a development dependency.
 
 ## 9. Build, test, and CI
 
 | Command | Does |
 |---|---|
 | `npm run dev` | Runs the web dev server and the API together |
-| `npm run build` / `npm run build:api` | Builds the browser app to `dist/` / bundles the API to `server-dist/` |
-| `npm run typecheck` | Type-checks the browser app, the Vite config, and the API |
+| `npm run build` / `npm run build:api` | Builds the preview page to `dist/` / bundles the API to `server-dist/` |
+| `npm run typecheck` | Type-checks the preview page, the Vite config, and the API |
 | `npm test` | Runs the test suite (Node's test runner) |
-| `npm run db:generate` / `npm run db:migrate` | Creates a migration from the catalog schema / applies catalog migrations to `DATABASE_URL` |
-| `npm run db:generate:traces` / `npm run db:migrate:traces` | Creates a migration from the traces schema / ensures `genui_traces` exists and applies traces migrations to `TRACE_DATABASE_URL` |
+| `npm run db:generate` / `npm run db:migrate` | Creates a migration from the schema / applies migrations to `DATABASE_URL` |
 | `npm run db:seed` | Brings the `components` table in line with the catalog file and prints the counts; run it after pulling catalog changes |
-| `npm run eval` | Runs every committed eval case through the live agent (OpenAI, same model and system prompt as chat); writes one JSON file per case under a gitignored `eval-logs` directory (prompt, checks, result, and full turn trace) and prints one result line per case plus the log directory path; add `-- --repeat N` (1 to 10) to run each case N times, with `<id>.<k>.json` logs, `[k/N]` result lines, and a `rate <id> <passes>/<N>` line per case (a plain run is unchanged); needs `OPENAI_API_KEY`, does not write `genui_traces`, and is not run in CI |
+| `npm run eval` | Runs every committed eval case through the generator (OpenAI, same model and prompt as the API); writes one JSON file per case under a gitignored `eval-logs` directory and prints one result line per case, a `first-try` line and the log directory path; add `-- --repeat N` (1 to 10) to run each case N times, with `<id>.<k>.json` logs, `[k/N]` result lines, and a `rate <id> <passes>/<N>` line per case (a plain run is unchanged); needs `OPENAI_API_KEY` and is not run in CI |
 
-- **Tests** use a fake model, so they need no OpenAI key. Catalog database tests run only when `DATABASE_URL` is set; traces database tests run only when `TRACE_DATABASE_URL` is set. They share one database each, so `npm test` runs test files one at a time.
-- **CI** ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs on every pull request and on pushes to `main`: it starts Postgres (creating database `genui_traces` on the same instance) and Redis (so the Redis store tests run), sets `TRACE_DATABASE_URL`, runs catalog and traces migrations, then install, typecheck, tests (including the database tests), and both builds on Node 24. It does not run `npm run eval`. `main` accepts changes only through pull requests that pass it.
+- **Tests** use a fake model, so they need no OpenAI key. Database tests run only when `DATABASE_URL` is set. They share one database, so `npm test` runs test files one at a time.
+- **CI** ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs on every pull request and on pushes to `main`: it starts Postgres, then install, typecheck, tests (including the database tests), and both builds on Node 24. It does not run `npm run eval`. `main` accepts changes only through pull requests that pass it.
 
 ## 10. Current limits and what's next
 
 **Today**
 
-- Each turn is capped at 10 model calls, 20 tool calls and 150,000 tokens.
-- Messages are capped at 4000 characters and request bodies at 32 KB, and the chat and action routes each allow 20 requests per IP per minute by default (§3). The rate limit is per IP, not per user, and it is in memory unless Redis is configured.
-- The agent can look up catalog and custom components and render UI trees (`render_ui`), and the sandbox draws the latest expanded tree. A Button or Markup `button` in it can run a registered backend action with the values of the design's named inputs (§2, §3); clicks and typed values never reach the agent. The agent can define and delete custom components with `define_component` and `delete_component`; the Components panel lists them, previews each version, and can delete, restore or revert, but not edit definitions.
+- A prompt is at most 4000 characters and request bodies at 32 KB. The generate, action and custom components routes each allow 20 requests per IP per minute by default (§3). The rate limit is per IP, not per user, and it is in memory, so each API instance counts on its own.
+- A generation is one model call plus at most two repairs, cut off after 90 seconds. A design that still has problems after three calls is not shown (422).
+- Designs, and the ids that name them, are lost when the API restarts, and past 500 newer designs the oldest is dropped; clicking a design the API no longer remembers asks the person to generate it again.
+- A Button or Markup `button` in a design can run a registered backend action with the values of the design's named inputs (§2, §3); clicks and typed values never reach the model. The Components panel lists custom components, previews each version, and can delete, restore or revert, but not edit definitions. Nothing creates a custom component yet.
 - Custom components are global: at most 200 active, 500 including deleted, and 20 versions per name; a definition's name, description (300 characters), serialized size (8,000 characters), template (40 nodes, 6 levels, three levels of custom nesting), and each Markup root (200 elements, 12 levels) are capped, and an expanded design is capped at 400 nodes and 24 levels (§4, §5).
-- The registered actions are `demo_echo`, which has no side effects, and the fourteen menu actions. Menu actions change only the in-memory demo menu (§5): nothing reaches a real POS, and every change is gone when the API restarts. The agent finds actions with `list_actions` by area and operation, and the three deletes ask in the sandbox before they run.
-- The conversation delete route has no authentication: anyone who knows a conversation id can wipe its history, the same trust the action route relies on. Ids are random UUIDs known only to the browser that made them.
-- Actions run with no authentication: anyone who can reach the API and knows a conversation id and design id can run them, so anyone can change the demo menu, and only actions without lasting effects outside the API are safe to register.
+- The registered actions are `demo_echo`, which has no side effects, and the fourteen menu actions. Menu actions change only the in-memory demo menu (§5): nothing reaches a real POS, and every change is gone when the API restarts. The three deletes ask in the sandbox before they run.
 - Menu actions cannot create or edit modifier groups, and generated forms do not show an item's current values.
-- Conversations, and the designs remembered for them, are lost when the API restarts; clicking a design the API no longer remembers asks the user to have it shown again. Turn traces (last five per conversation) persist in `genui_traces` across restart; there is still no HTTP route for them.
-- The session menu is a placeholder.
-- The `components` catalog table is not exposed over HTTP; custom components are exposed only through `/api/custom-components` for the panel, not for editing definitions.
-- There is no authentication.
-- **`npm run eval`** (§9) runs 27 committed live cases against OpenAI and scores each turn's saved `AgentTrace` with deterministic checks, which can read drawn text (`uiText`), Markup tags (`uiMarkupTag`), the absence of a component (`noUiComponent`), keys in a saved definition (`definedWithKey`) and the reply text (`replyMaxWords` for length in words, `replyExcludes` for words that must not appear); a case can seed `customComponents` into the run's in-memory repository: `archive-item` (archive/restore menu item form); `bullet-list-items` (plain bullet list as Markup `li`); `catalog-layout` (stacked card with catalog components); `closed-alert` (alert with no button); `custom-props-shown` (custom component with props shown); `define-and-use-custom` (define then show custom component); `delete-custom` (define then delete custom component); `echo-form` (form with `demo_echo` action); `export-pdf` (button with no matching action); `framed-note` (custom component with children); `invented-action-name` (button must not use an invented action); `markup-bold-tag` (Markup bold tag); `markup-prop-text` (Markup text from a prop); `menu-create-item` (café menu create form); `menu-delete-category` (menu category delete with confirm); `mockup-no-action` (mockup must not call `list_actions`); `newsletter-no-action` (signup button with no action); `off-topic-refusal` (non-UI question, no design tools); `per-item-edit-cards` (a rename form in each menu item card); `plain-short-reply` (short reply with no tool names or jargon); `price-tag` (Markup price label); `reusable-name-list` (reusable list defined with `$each`); `reuse-saved-card` (seeded `MenuItemCard` reused, not redefined); `revenue-bar-chart` (bar chart drawn with Markup); `simple-heading` (catalog heading via `render_ui`); `sms-no-action` (SMS button with no action); `star-rating` (rating drawn with Markup). `catalog-layout`, `closed-alert`, `echo-form` and `simple-heading` also check that the design has no Markup and that `define_component` isn't called. The CLI writes one JSON log file per case (or per attempt with `--repeat`) under a gitignored `eval-logs` directory; the runner uses in-memory ports and does not write `genui_traces`.
+- There is no authentication. Anyone who can reach the API can generate designs, and anyone who knows a design id can run its actions, so anyone can change the demo menu; only actions without lasting effects outside the API are safe to register.
+- The `components` catalog table is not exposed over HTTP; custom components are exposed only through `/api/custom-components` for the panel.
+- **`npm run eval`** (§9) runs the 22 committed live cases in [server/eval/cases/](../server/eval/cases/) against OpenAI and scores each generation with deterministic checks: `maxAttempts`, `uiComponent`, `noUiComponent`, `uiButtonAction`, `noButtonAction`, `uiNamedInput`, `uiText`, `uiMarkupTag`, `agentComponent` (the component is in the model's own tree, before expansion), `notesMaxWords` and `notesExcludes`. A case can seed `customComponents` into the run's in-memory repository. Each case's log holds the prompt, checks, failures, every attempt, and the final tree and notes.
 
 **Planned**
 
 - Authentication, before any real action ships.
+- The CapheViet POS agent registering `GENERATE_UI_TOOL` and calling the generate and action routes.
 - A live CapheVietPOS adapter for the `PosMenu` port, behind authentication, so the same menu actions change the café's real menu; nothing built on the port changes.
 - Real, side-effecting actions (saving or sending data, for example), registered in `server/actions/` once authentication exists.
+
+## 11. History
+
+genui started as a chat shell: a left-hand chat pane with a tool-using agent that streamed its replies to the browser over server-sent events, kept conversations in memory (identified by a conversation id), could define and delete custom components itself, and saved a trace of every turn to a second Postgres database, `genui_traces`. Redis was added so rate limits and conversations could be shared between instances. All of that was removed when genui became a one-call generator: the chat pane, the agent loop and its per-turn caps, the SSE stream, conversations, the `/api/agent/*` routes, the tool registry, trace storage and Redis are gone. The generator, the design store, the action route, the Components panel and the eval harness replaced them.
