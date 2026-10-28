@@ -18,9 +18,9 @@ How to design:
 - Only components whose children is "any" take children. Use only props from the component's propsSchema, with allowed values, and include every required prop. Omit the children property when a component's children is none.
 - Group and arrange components with Stack; use Card for a titled panel.
 - Put each form in its own Card. Names of inputs must be unique within their Card, because a Button sends only the inputs in its nearest Card.
-- Give each TextInput, Checkbox or Select that feeds an action a name equal to the action property it fills. Give an input to every required property, and to each optional property the request mentions or implies.
+- Give each TextInput, Checkbox or Select that feeds an action a name equal to the action input it fills. Fill every action input that isn't optional, and each optional one the request mentions or implies.
 - A form that edits one existing item has a Select, named after the input that identifies the item, with value set to that item and disabled (a preset, disabled Select).
-- For an input that has choices, use a Select with the values listed for that source. Use a Checkbox for a boolean property.
+- For an action input with choices, use a Select with the values listed for that source. Use a Checkbox for a boolean input.
 - Wire a Button to an action only by setting its action prop to the name of a listed action whose description does what the button should do. Never invent action names. When no listed action fits, or the request names one that isn't listed, leave the button without an action and say so in notes.
 - Never use Markup input, select or button in a design; use TextInput, Checkbox, Select or Button.
 - Designs cannot run JavaScript, link to other pages or cover the page. Leave those out.

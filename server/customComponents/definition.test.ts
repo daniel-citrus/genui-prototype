@@ -230,7 +230,7 @@ describe("validateDefinition", () => {
   it("refuses a Button action that isn't registered and accepts one that is", async () => {
     const button = (action: string) => ({ component: "Button", props: { label: "Add", action } });
     assert.deepEqual(await problems({ template: withChild(button("buy")) }), [
-      'template.children.3.props.action "buy" is not a registered action (call list_actions to see them)',
+      'template.children.3.props.action "buy" is not a registered action (use a listed action, or leave it out)',
     ]);
     assert.equal((await validate({ ...menuItemCard, template: withChild(button("add_to_cart")) })).ok, true);
   });
@@ -238,7 +238,7 @@ describe("validateDefinition", () => {
   it("refuses catalog prop and Markup problems in the expanded example", async () => {
     const heading = { component: "Heading", props: { text: { $prop: "name" }, level: 7 } };
     assert.deepEqual(await problems({ template: withChild(heading) }), [
-      "template.children.3.props.level must be one of 1, 2, 3 (call get_component Heading for its props)",
+      "template.children.3.props.level must be one of 1, 2, 3 (see Heading's propsSchema)",
     ]);
     const script = { tag: "div", children: [{ tag: "script", text: "alert(1)" }] };
     assert.deepEqual(await problems({ template: withChild({ component: "Markup", props: { root: script } }) }), [
@@ -246,7 +246,7 @@ describe("validateDefinition", () => {
     ]);
   });
 
-  it("points guessed Markup props at get_component", async () => {
+  it("points guessed Markup props at its propsSchema", async () => {
     const priceTag = {
       ...withTemplate("PriceTag", {
         component: "Markup",
@@ -266,7 +266,7 @@ describe("validateDefinition", () => {
       errors: [
         'template.props.markup "<span><strong>{{price}}</strong></span>" looks like a {{...}} placeholder, which is shown as written; use {"$prop": "price"}',
         'propsSchema.properties.price is not used by the template; use it with {"$prop": "price"} or remove it',
-        "template.props.root is required (call get_component Markup for its props)",
+        "template.props.root is required (see Markup's propsSchema)",
         "template.props.markup is not allowed",
       ],
     });

@@ -10,6 +10,7 @@ import type { Logger } from "../log";
 import type { CustomComponentRepository } from "../ports/CustomComponentRepository";
 import { collectBindings, isObject } from "../ui/bindings";
 import { omitEmptyChildren } from "../ui/omitEmptyChildren";
+import { tidyDesign } from "./tidyDesign";
 import {
   limitErrors,
   MAX_NODES,
@@ -173,17 +174,19 @@ async function expandDesign(
 }
 
 /**
- * Checks a UI tree against the catalog and the registered actions. When it
- * is valid, returns the checked tree (custom components expanded, empty
- * children arrays dropped) and its stats; otherwise at most 20 problems.
- * Rejects with `CustomComponentsUnavailableError` when the custom component
- * repository fails.
+ * Checks a UI tree against the catalog and the registered actions, after
+ * `tidyDesign` fixes its harmless slips. When it is valid, returns the
+ * checked tree (custom components expanded, empty children arrays dropped)
+ * and its stats; otherwise at most 20 problems. Rejects with
+ * `CustomComponentsUnavailableError` when the custom component repository
+ * fails.
  */
 export async function checkDesign(
-  tree: unknown,
+  untidy: unknown,
   deps: DesignCheckDeps,
 ): Promise<DesignCheck> {
   const { catalog, actions, listChoices, customComponents, log, signal } = deps;
+  const tree = tidyDesign(untidy);
   let design: Design = { tree, problems: [], origins: new Map(), options: {} };
   if (customComponents) {
     try {

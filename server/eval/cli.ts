@@ -69,6 +69,29 @@ function attemptCount(result: EvalCaseResult): number | undefined {
   return result.generation?.attempts.length;
 }
 
+interface UsageTotals {
+  calls: number;
+  promptTokens: number;
+  cachedPromptTokens: number;
+  completionTokens: number;
+  durationMs: number;
+}
+
+function addUsage(totals: UsageTotals, result: EvalCaseResult, durationMs: number): void {
+  for (const attempt of result.generation?.attempts ?? []) {
+    totals.calls++;
+    totals.promptTokens += attempt.usage?.promptTokens ?? 0;
+    totals.cachedPromptTokens += attempt.usage?.cachedPromptTokens ?? 0;
+    totals.completionTokens += attempt.usage?.completionTokens ?? 0;
+  }
+  totals.durationMs += durationMs;
+}
+
+function formatUsage(t: UsageTotals): string {
+  const seconds = (t.durationMs / 1000).toFixed(1);
+  return `usage ${t.calls} calls, ${t.promptTokens} prompt tokens (${t.cachedPromptTokens} cached), ${t.completionTokens} completion tokens, ${seconds}s`;
+}
+
 function formatResult(result: EvalCaseResult, label = ""): string {
   if (result.ok) return `pass ${result.id}${label}`;
   const parts = result.failures.map((f) => f.reason);
@@ -150,15 +173,19 @@ export async function main(options: CliMainOptions = {}): Promise<number> {
   let anyLogFailed = false;
   let runs = 0;
   let firstTry = 0;
+  const usage: UsageTotals = { calls: 0, promptTokens: 0, cachedPromptTokens: 0, completionTokens: 0, durationMs: 0 };
   const passes = new Map<string, number>();
   for (const evalCase of cases) {
     passes.set(evalCase.id, 0);
     for (let attempt = 1; attempt <= repeat; attempt++) {
       const signal = timeoutSignal();
+      const started = performance.now();
       let result = await runEvalCaseFn(evalCase, { llm, signal });
+      const durationMs = Math.round(performance.now() - started);
       if (signal.aborted) {
         result = timeoutResult(evalCase.id, result);
       }
+      addUsage(usage, result, durationMs);
 
       const generation = result.generation;
       const record: EvalCaseLog = {
@@ -168,6 +195,7 @@ export async function main(options: CliMainOptions = {}): Promise<number> {
         ok: result.ok,
         failures: result.failures,
         attempts: generation?.attempts ?? [],
+        durationMs,
       };
       if (generation?.ok) {
         record.tree = generation.tree;
@@ -197,6 +225,7 @@ export async function main(options: CliMainOptions = {}): Promise<number> {
     }
   }
   log(`first-try ${firstTry}/${runs}`);
+  log(formatUsage(usage));
   log(`logs ${resolve(logDir)}`);
 
   return anyFailed || anyLogFailed ? 1 : 0;

@@ -38,6 +38,36 @@ interface ListedChoices {
 
 const section = (title: string, data: unknown) => `${title}\n${JSON.stringify(data)}`;
 
+/**
+ * An action as the model reads it. Its schema's `type: "object"` and
+ * `additionalProperties: false` are the same for every action and left out.
+ * Each input says whether it's optional and where its choices come from, and
+ * drops length limits: no input component takes them, and the action checks
+ * them when it runs.
+ */
+function describeAction(spec: ActionSpec) {
+  const schema = spec.input_schema as { properties?: Record<string, Record<string, unknown>>; required?: string[] };
+  const required = new Set(schema.required ?? []);
+  const inputs = Object.fromEntries(
+    Object.entries(schema.properties ?? {}).map(([name, { maxLength: _max, minLength: _min, ...property }]) => [
+      name,
+      {
+        ...property,
+        ...(required.has(name) ? {} : { optional: true }),
+        ...(spec.choices?.[name] !== undefined ? { choices: spec.choices[name] } : {}),
+      },
+    ]),
+  );
+  return {
+    name: spec.name,
+    description: spec.description,
+    area: spec.area ?? "other",
+    operation: spec.operation ?? "other",
+    inputs,
+    ...(spec.confirm !== undefined ? { confirm: spec.confirm } : {}),
+  };
+}
+
 /** Lowercase words of `text`, also splitting CamelCase names, of three or more letters. */
 function wordsOf(text: string): Set<string> {
   const spaced = text.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
@@ -119,18 +149,7 @@ export async function buildContext(prompt: string, deps: ContextDeps): Promise<G
     section("Markup rules:", markupRules()),
   ];
 
-  const actionsSection = section(
-    "Actions a Button may run:",
-    actions.map((spec) => ({
-      name: spec.name,
-      description: spec.description,
-      input_schema: spec.input_schema,
-      area: spec.area ?? "other",
-      operation: spec.operation ?? "other",
-      ...(spec.confirm !== undefined ? { confirm: spec.confirm } : {}),
-      ...(spec.choices !== undefined ? { choices: spec.choices } : {}),
-    })),
-  );
+  const actionsSection = section("Actions a Button may run:", actions.map(describeAction));
   if (actionsSection.length > ACTIONS_WARN_CHARS) {
     log.warn({ chars: actionsSection.length }, "actions section is very long");
   }

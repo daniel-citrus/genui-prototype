@@ -14,6 +14,8 @@ export interface EvalCaseLog {
   failures: CheckFailure[];
   /** Every model call made, with its raw reply; empty when generation never ran. */
   attempts: GenerationAttempt[];
+  /** Wall time of the case, model calls included. */
+  durationMs?: number;
   tree?: UiNode;
   notes?: string;
   error?: string;
@@ -39,6 +41,7 @@ function buildLogRecord(log: EvalCaseLog): Record<string, unknown> {
     failures: log.failures,
   };
   record.attempts = log.attempts;
+  if (log.durationMs !== undefined) record.durationMs = log.durationMs;
   if (log.tree !== undefined) record.tree = log.tree;
   if (log.notes !== undefined) record.notes = log.notes;
   if (log.error !== undefined) record.error = log.error;

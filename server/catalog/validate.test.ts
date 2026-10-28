@@ -40,7 +40,7 @@ describe("validateCatalog", () => {
     };
     const action = prop("Button", "action");
     assert.deepEqual(action.rest, { type: "string", pattern: "^[a-z][a-z0-9_]*$", maxLength: 64 });
-    assert.match(action.description, /list_actions/);
+    assert.match(action.description, /listed action/);
     for (const component of ["TextInput", "Checkbox", "Select"]) {
       const name = prop(component, "name");
       assert.deepEqual(name.rest, { type: "string", pattern: "^[A-Za-z][A-Za-z0-9_]*$", maxLength: 64 });

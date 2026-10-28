@@ -86,8 +86,9 @@ describe("main", () => {
     assert.equal(out[0], "pass alpha");
     assert.equal(out[1], "pass beta");
     assert.equal(out[2], "first-try 2/2");
-    assert.match(out[3]!, /^logs .*2026-10-24T01-02-03\.004Z$/);
-    assert.equal(out.length, 4);
+    assert.match(out[3]!, /^usage 2 calls, 0 prompt tokens \(0 cached\), 0 completion tokens, \d+\.\ds$/);
+    assert.match(out[4]!, /^logs .*2026-10-24T01-02-03\.004Z$/);
+    assert.equal(out.length, 5);
     assert.ok(existsSync(join(logRoot, "2026-10-24T01-02-03.004Z", "alpha.json")));
     assert.equal(llms.length, 1);
     assert.ok(!("systemPrompt" in (llms[0] as object)));
@@ -115,7 +116,17 @@ describe("main", () => {
     assert.ok(existsSync(join(logRoot, "2026-10-24T01-02-03.004Z", "beta.2.json")));
   });
 
-  it("writes a log with attempts, tree and notes", async () => {
+  it("sums model calls and tokens across cases", async () => {
+    const used = (c: EvalCase): EvalCaseResult => {
+      const call = { ...attempt(), usage: { promptTokens: 100, cachedPromptTokens: 60, completionTokens: 10 } };
+      return { id: c.id, ok: true, failures: [], generation: { ok: true, tree, notes: "", attempts: [call, call] } };
+    };
+    const { done, out } = run([], used);
+    await done;
+    assert.match(out[3]!, /^usage 4 calls, 400 prompt tokens \(240 cached\), 40 completion tokens, \d+\.\ds$/);
+  });
+
+  it("writes a log with attempts, duration, tree and notes", async () => {
     const { done, logRoot } = run([], failBeta);
     await done;
     const dir = join(logRoot, "2026-10-24T01-02-03.004Z");
@@ -123,6 +134,7 @@ describe("main", () => {
     assert.deepEqual(ok.tree, tree);
     assert.equal(ok.notes, "Done.");
     assert.equal(ok.attempts.length, 1);
+    assert.equal(typeof ok.durationMs, "number");
     assert.equal(ok.prompt, "first");
     const bad = JSON.parse(readFileSync(join(dir, "beta.json"), "utf8"));
     assert.equal(bad.ok, false);

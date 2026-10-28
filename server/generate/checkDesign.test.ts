@@ -55,7 +55,7 @@ describe("checkDesign", () => {
   it("returns the problems of an invalid tree", async () => {
     const result = await setup().check(stack({ component: "Button" }, { component: "button" }));
     assert.deepEqual(problemsOf(result), [
-      "tree.children.0.props.label is required (call get_component Button for its props)",
+      "tree.children.0.props.label is required (see Button's propsSchema)",
       'tree.children.1.component "button" is not in the catalog (did you mean Button?)',
     ]);
   });
@@ -77,7 +77,7 @@ describe("checkDesign", () => {
     const go = (action: string) => ({ component: "Button", props: { label: "Go", action } });
 
     assert.deepEqual(problemsOf(await check(go("send_mail"))), [
-      'tree.props.action "send_mail" is not a registered action (call list_actions to see them)',
+      'tree.props.action "send_mail" is not a registered action (use a listed action, or leave it out)',
     ]);
     assert.equal((await check(go("demo_echo"))).ok, true);
   });
@@ -108,7 +108,7 @@ describe("checkDesign with the menu actions", () => {
 
   it("refuses an item option the menu doesn't have", async () => {
     assert.deepEqual(problemsOf(await menu().check(form([...itemNames, "Latte"]))), [
-      'tree.children.0.props.options "Latte" is not one of the menu_items values (call list_actions to get them)',
+      'tree.children.0.props.options "Latte" is not one of the menu_items values (use the listed values)',
     ]);
   });
 
@@ -194,7 +194,7 @@ describe("checkDesign dropdown checks", () => {
     const { check } = setupChoices();
     const result = await check(stack(select("item", "Latte"), select("category", "Tea"), button("menu_update_item")));
     assert.deepEqual(problemsOf(result), [
-      'tree.children.0.props.options "Latte" is not one of the menu_items values (call list_actions to get them)',
+      'tree.children.0.props.options "Latte" is not one of the menu_items values (use the listed values)',
     ]);
   });
 
@@ -202,7 +202,7 @@ describe("checkDesign dropdown checks", () => {
     const { check, errors } = setupChoices(["menu_categories"]);
     const result = await check(stack(select("item", "Latte"), select("category", "Juice"), button("menu_update_item")));
     assert.deepEqual(problemsOf(result), [
-      'tree.children.0.props.options "Latte" is not one of the menu_items values (call list_actions to get them)',
+      'tree.children.0.props.options "Latte" is not one of the menu_items values (use the listed values)',
     ]);
     assert.equal(errors.length, 1);
     assert.equal((errors[0] as { source?: string }).source, "menu_categories");
@@ -315,6 +315,13 @@ describe("checkDesign with custom components", () => {
     assert.match(problemsOf(await draw({ tag: "p", attrs: { onclick: "x()" } }))[0], /onclick/);
   });
 
+  it("accepts a design with null children and a Markup b tag, returning them tidied", async () => {
+    const { check } = await setupCustom();
+    const bold = { component: "Markup", props: { root: { tag: "p", children: [{ tag: "b", text: "A" }, null] } } };
+    const tidied = { component: "Markup", props: { root: { tag: "p", children: [{ tag: "strong", text: "A" }] } } };
+    assert.deepEqual(await shownTree(check(stack(bold, null))), stack(tidied));
+  });
+
   it("refuses Markup input, select and button at any depth in the design", async () => {
     const { check } = await setupCustom();
     for (const tag of ["input", "select", "button"]) {
@@ -334,9 +341,9 @@ describe("checkDesign with custom components", () => {
       ),
     );
     assert.deepEqual(problemsOf(result), [
-      "tree.children.0.props.price is required (call get_component MenuItemCard for its props)",
+      "tree.children.0.props.price is required (see MenuItemCard's propsSchema)",
       'tree.children.1 (MenuItemCard v1) template.children.0.props.src must match pattern "^https?://"' +
-        " (call get_component Image for its props)",
+        " (see Image's propsSchema)",
     ]);
   });
 
@@ -346,7 +353,7 @@ describe("checkDesign with custom components", () => {
 
     assert.deepEqual(problemsOf(await check(stack({ component: "MailForm" }))), [
       'tree.children.0 (MailForm v1) template.props.root.children.1.action "send_mail" is not a registered action' +
-        " (call list_actions to see them)",
+        " (use a listed action, or leave it out)",
     ]);
     const tree = await shownTree(check(stack({ component: "OrderForm" })));
     assert.deepEqual(names(tree), ["Stack", "Markup"]);

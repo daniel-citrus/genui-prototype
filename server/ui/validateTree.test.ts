@@ -74,7 +74,7 @@ describe("validateUiTree", () => {
     ]);
   });
 
-  it("reports props that break the schema, pointing the first at get_component", async () => {
+  it("reports props that break the schema, pointing the first at its propsSchema", async () => {
     const result = await check({
       component: "Stack",
       children: [
@@ -85,14 +85,14 @@ describe("validateUiTree", () => {
       ],
     });
     assert.deepEqual(result.errors, [
-      "tree.children.0.props.label is required (call get_component Button for its props)",
+      "tree.children.0.props.label is required (see Button's propsSchema)",
       "tree.children.1.props.label must be string",
       "tree.children.2.props.variant must be one of primary, secondary, danger",
       "tree.children.3.props.color is not allowed",
     ]);
   });
 
-  it("points each component's first props problem at get_component, enums included", async () => {
+  it("points each component's first props problem at its propsSchema, enums included", async () => {
     const result = await check({
       component: "Stack",
       children: [
@@ -103,14 +103,14 @@ describe("validateUiTree", () => {
       ],
     });
     assert.deepEqual(result.errors, [
-      "tree.children.0.props.variant must be one of primary, secondary, danger (call get_component Button for its props)",
-      "tree.children.1.props.text is required (call get_component Heading for its props)",
+      "tree.children.0.props.variant must be one of primary, secondary, danger (see Button's propsSchema)",
+      "tree.children.1.props.text is required (see Heading's propsSchema)",
       "tree.children.2.props.label is required",
       "tree.children.3.props.text must be string",
     ]);
   });
 
-  it("adds no get_component hint to problems that don't come from the props schema", async () => {
+  it("adds no propsSchema hint to problems that don't come from the props schema", async () => {
     const result = await check({
       component: "Stack",
       children: [
@@ -288,13 +288,13 @@ describe("validateUiTree bindings", () => {
     assert.ok((await check(tree, actions)).errors.includes(expected));
   });
 
-  it("refuses an unregistered action and suggests list_actions", async () => {
+  it("refuses an unregistered action and points at the listed ones", async () => {
     const result = await check(
       form(email, { component: "Button", props: { label: "Go", action: "sign_in" } }),
       actions,
     );
     assert.deepEqual(result.errors, [
-      'tree.children.1.props.action "sign_in" is not a registered action (call list_actions to see them)',
+      'tree.children.1.props.action "sign_in" is not a registered action (use a listed action, or leave it out)',
     ]);
   });
 
@@ -419,8 +419,8 @@ describe("validateUiTree dropdown checks", () => {
   it("refuses a Select option that isn't exactly one of the source's values", async () => {
     const result = await check(editForm(itemSelect("Bạc xỉu", "Latte", "Bac xiu")), menuActions, menuValues);
     assert.deepEqual(result.errors, [
-      'tree.children.0.props.options "Latte" is not one of the menu_items values (call list_actions to get them)',
-      'tree.children.0.props.options "Bac xiu" is not one of the menu_items values (call list_actions to get them)',
+      'tree.children.0.props.options "Latte" is not one of the menu_items values (use the listed values)',
+      'tree.children.0.props.options "Bac xiu" is not one of the menu_items values (use the listed values)',
     ]);
   });
 
@@ -444,14 +444,14 @@ describe("validateUiTree dropdown checks", () => {
       menuValues,
     );
     assert.deepEqual(result.errors, [
-      'tree.children.0.props.options "Latte" is not one of the menu_items values (call list_actions to get them)',
+      'tree.children.0.props.options "Latte" is not one of the menu_items values (use the listed values)',
     ]);
   });
 
   it("reports a bad option once when several actions share its source", async () => {
     const tree = form(itemSelect("Latte"), nameInput, actionButton("menu_update_item"), actionButton("menu_archive_item"));
     assert.deepEqual((await check(tree, menuActions, menuValues)).errors, [
-      'tree.children.0.props.options "Latte" is not one of the menu_items values (call list_actions to get them)',
+      'tree.children.0.props.options "Latte" is not one of the menu_items values (use the listed values)',
     ]);
   });
 
@@ -505,10 +505,10 @@ describe("validateUiTree Markup", () => {
 
   it("checks the root only when it is an object", async () => {
     assert.deepEqual((await check({ component: "Markup" })).errors, [
-      "tree.props.root is required (call get_component Markup for its props)",
+      "tree.props.root is required (see Markup's propsSchema)",
     ]);
     assert.deepEqual((await check(markup("<b>x</b>"))).errors, [
-      "tree.props.root must be object (call get_component Markup for its props)",
+      "tree.props.root must be object (see Markup's propsSchema)",
     ]);
   });
 
@@ -538,7 +538,7 @@ describe("validateUiTree Markup", () => {
     );
     assert.deepEqual((await check(tree, actions)).errors, [
       'tree.children.1.props.root.children.0.attrs.name "email" is already used by tree.children.0',
-      'tree.children.1.props.root.children.2.action "sign_in" is not a registered action (call list_actions to see them)',
+      'tree.children.1.props.root.children.2.action "sign_in" is not a registered action (use a listed action, or leave it out)',
       'tree.children.1.props.root.children.1 Checkbox named "plan" fills a string of action "sign_up": use a TextInput or Select',
     ]);
   });
@@ -551,7 +551,7 @@ describe("validateUiTree Markup", () => {
     };
     const tree = form(markup(select), nameInput, actionButton("menu_update_item"));
     assert.deepEqual((await check(tree, [updateItem], menuValues)).errors, [
-      'tree.children.0.props.root.children "Latte" is not one of the menu_items values (call list_actions to get them)',
+      'tree.children.0.props.root.children "Latte" is not one of the menu_items values (use the listed values)',
     ]);
   });
 });
@@ -575,7 +575,7 @@ describe("validateUiTree options", () => {
     assert.deepEqual((await withOptions(tree, actions, options)).errors, [
       'tree.children.1.props.name "email" is already used by tree.children.0',
       'tree.children.2.props.name "email" is already used by tree.children.0',
-      'tree.children.3.props.action "nope" is not a registered action (call list_actions to see them)',
+      'tree.children.3.props.action "nope" is not a registered action (use a listed action, or leave it out)',
     ]);
     const kinds = form({ component: "Checkbox", props: { label: "Email", name: "email" } }, submit);
     assert.deepEqual((await withOptions(kinds, actions, options)).errors, [
@@ -606,7 +606,7 @@ describe("withPropsHint", () => {
     const hinted = new Set<string>();
     const problems = ["tree.props.label is required", "tree.props.color is not allowed"];
     assert.deepEqual(withPropsHint(problems, "Button", hinted), [
-      "tree.props.label is required (call get_component Button for its props)",
+      "tree.props.label is required (see Button's propsSchema)",
       "tree.props.color is not allowed",
     ]);
     assert.deepEqual(problems, ["tree.props.label is required", "tree.props.color is not allowed"]);

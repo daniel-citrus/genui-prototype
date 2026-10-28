@@ -6,7 +6,7 @@ import { createOpenAIComponentLlm, type JsonChatClient } from "./OpenAIComponent
 function completion(
   content: string | null,
   finish: "stop" | "length" = "stop",
-  usage?: { prompt_tokens: number; completion_tokens: number },
+  usage?: { prompt_tokens: number; completion_tokens: number; prompt_tokens_details?: { cached_tokens: number } },
 ): ChatCompletion {
   return {
     id: "c",
@@ -58,7 +58,19 @@ describe("createOpenAIComponentLlm", () => {
     const { client } = fakeClient(completion('{"a":1}', "stop", { prompt_tokens: 10, completion_tokens: 4 }));
     const llm = createOpenAIComponentLlm({ apiKey: "k", model: "m", client });
     const reply = await llm.complete({ messages, signal: new AbortController().signal });
-    assert.deepEqual(reply, { content: '{"a":1}', truncated: false, usage: { promptTokens: 10, completionTokens: 4 } });
+    assert.deepEqual(reply, {
+      content: '{"a":1}',
+      truncated: false,
+      usage: { promptTokens: 10, cachedPromptTokens: 0, completionTokens: 4 },
+    });
+  });
+
+  it("maps cached prompt tokens", async () => {
+    const usage = { prompt_tokens: 10, completion_tokens: 4, prompt_tokens_details: { cached_tokens: 8 } };
+    const { client } = fakeClient(completion('{"a":1}', "stop", usage));
+    const llm = createOpenAIComponentLlm({ apiKey: "k", model: "m", client });
+    const reply = await llm.complete({ messages, signal: new AbortController().signal });
+    assert.equal(reply.usage?.cachedPromptTokens, 8);
   });
 
   it("marks a reply cut off by the length limit as truncated", async () => {
