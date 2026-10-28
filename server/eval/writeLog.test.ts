@@ -41,11 +41,12 @@ describe("evalLogDirName / createEvalLogDir", () => {
 });
 
 describe("writeEvalCaseLog", () => {
-  it("writes id, prompt, checks, ok, failures, attempts, tree and notes", () => {
+  it("writes id, prompt, checks, ok, failures, attempts, duration, tree and notes", () => {
     const dir = tmp();
-    writeEvalCaseLog(dir, log);
+    writeEvalCaseLog(dir, { ...log, durationMs: 1234 });
     const written = JSON.parse(readFileSync(join(dir, "heading.json"), "utf8"));
-    assert.deepEqual(Object.keys(written), ["id", "prompt", "checks", "ok", "failures", "attempts", "tree", "notes"]);
+    assert.deepEqual(Object.keys(written), ["id", "prompt", "checks", "ok", "failures", "attempts", "durationMs", "tree", "notes"]);
+    assert.equal(written.durationMs, 1234);
     assert.deepEqual(written.attempts, log.attempts);
     assert.deepEqual(written.tree, log.tree);
   });
@@ -67,7 +68,9 @@ describe("writeEvalCaseLog", () => {
   it("refuses a bad id, a bad attempt number, and overwriting", () => {
     const dir = tmp();
     assert.throws(() => writeEvalCaseLog(dir, { ...log, id: "../x" }), /kebab-case/);
-    assert.throws(() => writeEvalCaseLog(dir, log, 11), /from 1 to 10/);
+    for (const attempt of [0, 11, 1.5]) {
+      assert.throws(() => writeEvalCaseLog(dir, log, attempt), /from 1 to 10/);
+    }
     writeEvalCaseLog(dir, log);
     assert.throws(() => writeEvalCaseLog(dir, log));
   });

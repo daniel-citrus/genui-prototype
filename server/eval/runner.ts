@@ -15,7 +15,8 @@ const noopLogger = { debug() {}, error() {}, info() {}, warn() {} };
 
 const neverAborted = new AbortController().signal;
 
-function evalActionRegistry() {
+/** The actions a case may use: the demo actions and the menu actions on an in-memory menu. */
+export function evalActionRegistry() {
   return createActionRegistry([
     ...createActions(),
     ...createMenuActions(createInMemoryPosMenu()),

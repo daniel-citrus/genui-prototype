@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { CustomComponentDefinition } from "shared/customComponents";
+import { categories } from "../adapters/pos/fixtures";
 import type { ComponentLlm, LlmMessage, LlmReply } from "../ports/ComponentLlm";
 import { runEvalCase } from "./runner";
 import type { EvalCase } from "./types";
@@ -99,6 +100,38 @@ describe("runEvalCase", () => {
     const result = await runEvalCase(evalCase, { llm });
     assert.deepEqual(result.failures, []);
     assert.ok(calls[0]!.some((m) => m.content.includes("Tag")));
+  });
+
+  it("lets a seed use one saved before it", async () => {
+    const pill: CustomComponentDefinition = {
+      ...seed,
+      name: "Pill",
+      propsSchema: { type: "object", properties: { label: { type: "string", description: "Label." } }, required: ["label"], additionalProperties: false },
+      exampleProps: { label: "A" },
+      template: { component: "Tag", props: { text: { $prop: "label" } } },
+    };
+    const { llm } = scripted([design({ component: "Pill", props: { label: "New" } })]);
+    const evalCase: EvalCase = { id: "nested", prompt: "Show a pill", checks: [{ uiText: "New" }], customComponents: [seed, pill] };
+    const result = await runEvalCase(evalCase, { llm });
+    assert.equal(result.error, undefined);
+    assert.deepEqual(result.failures, []);
+  });
+
+  it("starts each case without the components an earlier case saved", async () => {
+    const usesTag = design({ component: "Tag", props: { text: "Pinned" } });
+    const seeded: EvalCase = { id: "seeded", prompt: "Show a tag", checks: [{ uiText: "Pinned" }], customComponents: [seed] };
+    assert.equal((await runEvalCase(seeded, { llm: scripted([usesTag]).llm })).ok, true);
+    const result = await runEvalCase({ ...seeded, customComponents: undefined }, { llm: scripted([usesTag]).llm });
+    assert.equal(result.ok, false);
+    assert.equal(result.generation?.ok, false);
+  });
+
+  it("shows the model the menu actions and the menu's current dropdown values", async () => {
+    const { llm, calls } = scripted([design(heading)]);
+    await runEvalCase(headingCase, { llm });
+    const context = calls[0]!.map((m) => m.content).join("\n");
+    assert.ok(context.includes("menu_create_item"));
+    assert.ok(context.includes(categories[0]!.name));
   });
 
   it("fails without calling the model when a seed is invalid", async () => {

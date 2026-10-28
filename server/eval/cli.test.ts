@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -152,6 +152,21 @@ describe("main", () => {
     assert.equal("tree" in log, false);
   });
 
+  it("prints a run error once, and a seed error with no attempts", async () => {
+    const results = (c: EvalCase): EvalCaseResult =>
+      c.id === "alpha"
+        ? { id: c.id, ok: false, failures: [{ reason: "generation error: TypeError" }], error: "generation error: TypeError" }
+        : { id: c.id, ok: false, failures: [], error: "seed Tag: bad template" };
+    const { done, out, logRoot } = run([], results);
+    assert.equal(await done, 1);
+    assert.equal(out[0], "fail alpha generation error: TypeError");
+    assert.equal(out[1], "fail beta error: seed Tag: bad template");
+    assert.match(out[3]!, /^usage 0 calls, /);
+    const log = JSON.parse(readFileSync(join(logRoot, "2026-10-24T01-02-03.004Z", "beta.json"), "utf8"));
+    assert.equal(log.error, "seed Tag: bad template");
+    assert.deepEqual(log.attempts, []);
+  });
+
   it("reports a timed out case", async () => {
     const logRoot = mkdtempSync(join(os.tmpdir(), "eval-cli-"));
     dirs.push(logRoot);
@@ -173,6 +188,20 @@ describe("main", () => {
     assert.equal(out[1], "first-try 0/1");
   });
 
+  it("keeps the abort error of a case that timed out mid-call", async () => {
+    const aborted = "generation error: AbortError";
+    const { done, out } = run([], (c) => pass(c), {
+      inject: {
+        loadCases: () => [cases[0]!],
+        createOpenAIComponentLlm: () => ({}) as ComponentLlm,
+        timeoutSignal: () => AbortSignal.abort(),
+        runEvalCase: async (c) => ({ id: c.id, ok: false, failures: [{ reason: aborted }], error: aborted }),
+      },
+    });
+    assert.equal(await done, 1);
+    assert.equal(out[0], `fail alpha case timed out after 180 seconds; error: ${aborted}`);
+  });
+
   it("refuses without an API key, and on bad arguments", async () => {
     const noKey = run([], (c) => pass(c), { agentAvailable: false });
     assert.equal(await noKey.done, 1);
@@ -182,8 +211,54 @@ describe("main", () => {
     assert.deepEqual(bad.err, ["--repeat must be a whole number from 1 to 10"]);
   });
 
-  it("exits 1 and says so when a log can't be written", async () => {
-    const { done, err } = run([], (c) => pass(c), {
+  it("prints a bad case file's problem on one line and exits 1 before running anything", async () => {
+    let ran = 0;
+    const { done, out, err, logRoot } = run([], (c) => pass(c), {
+      inject: {
+        loadCases: () => {
+          throw new Error("bad.json: unknown field \"extra\"");
+        },
+        createOpenAIComponentLlm: () => ({}) as ComponentLlm,
+        runEvalCase: async (c) => {
+          ran++;
+          return pass(c);
+        },
+      },
+    });
+    assert.equal(await done, 1);
+    assert.deepEqual(err, ['failed to load eval cases: bad.json: unknown field "extra"']);
+    assert.deepEqual(out, []);
+    assert.equal(ran, 0);
+    assert.deepEqual(readdirSync(logRoot), []);
+  });
+
+  it("exits 1 before running any case when the log directory can't be made", async () => {
+    let ran = 0;
+    const failMkdir = (err: Error) =>
+      run([], (c) => pass(c), {
+        inject: {
+          loadCases: () => cases,
+          createOpenAIComponentLlm: () => ({}) as ComponentLlm,
+          runEvalCase: async (c) => {
+            ran++;
+            return pass(c);
+          },
+          createEvalLogDir: () => {
+            throw err;
+          },
+        },
+      });
+    const exists = failMkdir(Object.assign(new Error("x"), { code: "EEXIST" }));
+    assert.equal(await exists.done, 1);
+    assert.deepEqual(exists.err, ["failed to create eval log directory EEXIST"]);
+    const odd = failMkdir(Object.assign(new Error("x"), { code: "../not a code" }));
+    assert.equal(await odd.done, 1);
+    assert.deepEqual(odd.err, ["failed to create eval log directory Error"]);
+    assert.equal(ran, 0);
+  });
+
+  it("exits 1 and says so when a log can't be written, still running every case", async () => {
+    const { done, out, err } = run([], (c) => pass(c), {
       inject: {
         loadCases: () => cases,
         createOpenAIComponentLlm: () => ({}) as ComponentLlm,
@@ -194,6 +269,7 @@ describe("main", () => {
       },
     });
     assert.equal(await done, 1);
-    assert.equal(err[0], "log failed alpha EACCES");
+    assert.deepEqual(err, ["log failed alpha EACCES", "log failed beta EACCES"]);
+    assert.deepEqual(out.slice(0, 2), ["pass alpha", "pass beta"]);
   });
 });
