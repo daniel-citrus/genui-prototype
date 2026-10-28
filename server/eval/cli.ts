@@ -5,7 +5,7 @@ import { createOpenAIComponentLlm } from "../adapters/openai/OpenAIComponentLlm"
 import { agentAvailable, config } from "../config";
 import { loadCases } from "./loadCases";
 import { runEvalCase } from "./runner";
-import type { EvalCaseResult } from "./types";
+import type { EvalCase, EvalCaseResult } from "./types";
 import {
   createEvalLogDir,
   writeEvalCaseLog,
@@ -153,7 +153,13 @@ export async function main(options: CliMainOptions = {}): Promise<number> {
   const nowFn = options.now ?? (() => new Date());
 
   const casesDir = options.casesDir ?? defaultCasesDir;
-  const cases = loadCasesFn(casesDir);
+  let cases: EvalCase[];
+  try {
+    cases = loadCasesFn(casesDir);
+  } catch (err) {
+    error(`failed to load eval cases: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
 
   let logDir: string;
   try {

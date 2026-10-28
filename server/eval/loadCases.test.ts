@@ -27,11 +27,19 @@ describe("loadCases", () => {
     assert.equal(cases.length, 22);
   });
 
-  it("loads valid files sorted by id", () => {
+  it("loads valid files sorted by id, not file name", () => {
     const dir = caseDir();
-    writeCase(dir, "b.json", { id: "case-b", prompt: "second", checks: [{ maxAttempts: 2 }] });
-    writeCase(dir, "a.json", { id: "case-a", prompt: "first", checks: [{ notesMaxWords: 5 }] });
+    writeCase(dir, "a.json", { id: "case-b", prompt: "second", checks: [{ maxAttempts: 2 }] });
+    writeCase(dir, "b.json", { id: "case-a", prompt: "first", checks: [{ notesMaxWords: 5 }] });
     assert.deepEqual(loadCases(dir).map((c) => c.id), ["case-a", "case-b"]);
+  });
+
+  it("reads only .json files", () => {
+    const dir = caseDir();
+    writeCase(dir, "a.json", { id: "a", prompt: "p", checks: [{ uiText: "a" }] });
+    writeFileSync(join(dir, "notes.md"), "{ not a case", "utf8");
+    writeFileSync(join(dir, "a.json.bak"), "{ not a case", "utf8");
+    assert.deepEqual(loadCases(dir).map((c) => c.id), ["a"]);
   });
 
   it("accepts every check type", () => {
@@ -67,9 +75,17 @@ describe("loadCases", () => {
   }
 
   it("refuses bad check values", () => {
-    assert.throws(loadOne({ checks: [{ maxAttempts: 4 }] }), /maxAttempts must be an integer from 1 to 3/);
-    assert.throws(loadOne({ checks: [{ notesMaxWords: 0 }] }), /notesMaxWords must be an integer/);
+    for (const maxAttempts of [0, 4, 1.5, "1"]) {
+      assert.throws(loadOne({ checks: [{ maxAttempts }] }), /maxAttempts must be an integer from 1 to 3/);
+    }
+    for (const notesMaxWords of [0, 501, 2.5, "5"]) {
+      assert.throws(loadOne({ checks: [{ notesMaxWords }] }), /notesMaxWords must be an integer from 1 to 500/);
+    }
+    assert.equal(loadOne({ checks: [{ notesMaxWords: 500 }] })().length, 1);
     assert.throws(loadOne({ checks: [{ notesExcludes: "" }] }), /non-empty string/);
+    assert.throws(loadOne({ checks: [{ uiComponent: 3 }] }), /uiComponent must be a non-empty string/);
+    assert.throws(loadOne({ checks: ["uiText"] }), /c\.json checks\[0\]: expected a JSON object/);
+    assert.throws(loadOne({ checks: [{ uiText: "a" }, null] }), /c\.json checks\[1\]: expected a JSON object/);
     assert.throws(loadOne({ checks: [{ noButtonAction: false }] }), /must be true/);
     assert.throws(loadOne({ checks: [{ bogus: 1 }] }), /unknown field "bogus"/);
     assert.throws(loadOne({ checks: [{ uiText: "a", uiComponent: "B" }] }), /exactly one key/);
@@ -93,7 +109,9 @@ describe("loadCases", () => {
   it("refuses a bad id, an empty prompt, empty checks and duplicate ids", () => {
     assert.throws(loadOne({ id: 3 }), /id must be a string/);
     assert.throws(loadOne({ id: "Not Kebab" }), /kebab-case/);
+    assert.throws(loadOne({ prompt: 5 }), /prompt must be a string/);
     assert.throws(loadOne({ prompt: "" }), /prompt must be non-empty/);
+    assert.throws(loadOne({ checks: {} }), /checks must be an array/);
     assert.throws(loadOne({ checks: [] }), /checks must be non-empty/);
     const dir = caseDir();
     writeCase(dir, "a.json", { id: "same", prompt: "p", checks: [{ uiText: "a" }] });
