@@ -2,6 +2,8 @@ export type LlmMessage = { role: "system" | "user" | "assistant"; content: strin
 
 export interface LlmUsage {
   promptTokens: number;
+  /** Of `promptTokens`, those served from the provider's prompt cache. */
+  cachedPromptTokens?: number;
   completionTokens: number;
 }
 

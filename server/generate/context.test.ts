@@ -79,16 +79,43 @@ describe("buildContext", () => {
       {
         name: "rename_item",
         description: action.description,
-        input_schema: action.input_schema,
         area: "items",
         operation: "edit",
+        inputs: { item: { type: "string", description: "Item.", optional: true, choices: "item_names" } },
         confirm: "Rename {item}?",
-        choices: { item: "item_names" },
       },
     ]);
     assert.deepEqual(parse(sections[3]), { item_names: { values: ["Latte", "Mocha"], truncated: false } });
     const [custom] = parse(sections[4]);
     assert.deepEqual(Object.keys(custom), ["name", "description", "category", "children", "propsSchema", "exampleProps"]);
+  });
+
+  it("lists action inputs with required ones unmarked, without length limits or schema boilerplate", async () => {
+    const spec: ActionSpec = {
+      name: "add_note",
+      description: "Adds a note.",
+      input_schema: {
+        type: "object",
+        properties: {
+          text: { type: "string", maxLength: 100, minLength: 1, description: "Note." },
+          pinned: { type: "boolean", description: "Pin it." },
+        },
+        required: ["text"],
+        additionalProperties: false,
+      },
+    };
+    const { deps } = setup({ actions: [spec] });
+    const [listed] = parse((await buildContext("x", deps)).sections[2]);
+    assert.deepEqual(listed, {
+      name: "add_note",
+      description: "Adds a note.",
+      area: "other",
+      operation: "other",
+      inputs: {
+        text: { type: "string", description: "Note." },
+        pinned: { type: "boolean", description: "Pin it.", optional: true },
+      },
+    });
   });
 
   it("omits the optional sections without their ports", async () => {

@@ -59,6 +59,7 @@ export const generateRouter: FastifyPluginAsync<GenerateRouterOptions> = async (
       attempts: number;
       problems: number;
       promptTokens: number;
+      cachedPromptTokens: number;
       completionTokens: number;
     }) => req.log.info({ ...fields, durationMs: Math.round(performance.now() - started) }, "design generated");
 
@@ -74,7 +75,7 @@ export const generateRouter: FastifyPluginAsync<GenerateRouterOptions> = async (
         signal,
       });
     } catch (err) {
-      logGenerated({ ok: false, attempts: 0, problems: 0, promptTokens: 0, completionTokens: 0 });
+      logGenerated({ ok: false, attempts: 0, problems: 0, promptTokens: 0, cachedPromptTokens: 0, completionTokens: 0 });
       if (controller.signal.aborted) return reply;
       if (err instanceof CustomComponentsUnavailableError) {
         return reply.status(503).send(fail("Custom components are unavailable."));
@@ -86,6 +87,7 @@ export const generateRouter: FastifyPluginAsync<GenerateRouterOptions> = async (
     const counts = {
       attempts,
       promptTokens: result.attempts.reduce((sum, a) => sum + (a.usage?.promptTokens ?? 0), 0),
+      cachedPromptTokens: result.attempts.reduce((sum, a) => sum + (a.usage?.cachedPromptTokens ?? 0), 0),
       completionTokens: result.attempts.reduce((sum, a) => sum + (a.usage?.completionTokens ?? 0), 0),
     };
     if (!result.ok) {

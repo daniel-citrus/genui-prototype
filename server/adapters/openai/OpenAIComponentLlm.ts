@@ -50,6 +50,7 @@ export function createOpenAIComponentLlm(opts: {
           ? {
               usage: {
                 promptTokens: completion.usage.prompt_tokens,
+                cachedPromptTokens: completion.usage.prompt_tokens_details?.cached_tokens ?? 0,
                 completionTokens: completion.usage.completion_tokens,
               },
             }

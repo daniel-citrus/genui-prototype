@@ -42,11 +42,11 @@ describe("catalog", () => {
     const root = (markup.propsSchema.properties as Record<string, { description: string }>).root;
     assert.equal(
       markup.description,
-      "Draws allowlisted HTML and SVG elements from a JSON tree, for what no other component can show, such as a bar chart, a star rating, or a bullet or numbered list. Call get_component for Markup's full rules.",
+      "Draws allowlisted HTML and SVG elements from a JSON tree, for what no other component can show, such as a bar chart, a star rating, or a bullet or numbered list. Follow the Markup rules listed with the catalog.",
     );
     assert.ok(!markup.description.includes("Only used inside custom component templates"));
     assert.ok(!root.description.includes("Only used inside custom component templates"));
-    assert.match(markup.description, /get_component/);
+    assert.match(markup.description, /Markup rules/);
     assert.match(
       root.description,
       /The root element: \{ "tag", "attrs"\?, "style"\?, "text"\?, "action"\?, "children"\? \}, a JSON tree, never an HTML string/,

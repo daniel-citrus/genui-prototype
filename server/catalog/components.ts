@@ -136,7 +136,7 @@ export const catalog: CatalogComponent[] = [
           pattern: "^[a-z][a-z0-9_]*$",
           maxLength: 64,
           description:
-            "Backend action run when the button is clicked. Use only a name from list_actions; leave it out if none fits.",
+            "Backend action run when the button is clicked. Use only a listed action's name; leave it out if none fits.",
         },
       },
       required: ["label"],
@@ -307,7 +307,7 @@ export const catalog: CatalogComponent[] = [
   {
     name: "Markup",
     description:
-      "Draws allowlisted HTML and SVG elements from a JSON tree, for what no other component can show, such as a bar chart, a star rating, or a bullet or numbered list. Call get_component for Markup's full rules.",
+      "Draws allowlisted HTML and SVG elements from a JSON tree, for what no other component can show, such as a bar chart, a star rating, or a bullet or numbered list. Follow the Markup rules listed with the catalog.",
     category: "display",
     children: "none",
     propsSchema: {
