@@ -21,20 +21,27 @@ function inputsOf(action: string): string[] {
   return Object.keys(schema?.properties ?? {});
 }
 
-/** `<id>: <check>` for each check naming a component, action, input or tag a design can't have. */
+/** `<id>: <check>` for each check naming a component, prop, action, input or tag a design can't have. */
 function staleChecks(evalCase: EvalCase): string[] {
-  const components = new Set([...catalog, ...(evalCase.customComponents ?? [])].map((c) => c.name));
+  const propsOf = new Map(
+    [...catalog, ...(evalCase.customComponents ?? [])].map((c) => [
+      c.name,
+      Object.keys((c.propsSchema as { properties?: object }).properties ?? {}),
+    ]),
+  );
   const buttonActions = evalCase.checks.flatMap((check) => ("uiButtonAction" in check ? [check.uiButtonAction] : []));
   const inputs = new Set(buttonActions.flatMap(inputsOf));
   return evalCase.checks.flatMap((check) => {
     const [key, value] = Object.entries(check)[0] as [string, unknown];
     const name = String(value);
     const stale =
-      (componentChecks.has(key) && !components.has(name)) ||
+      (componentChecks.has(key) && !propsOf.has(name)) ||
+      ("uiProps" in check &&
+        !Object.keys(check.uiProps.props).every((prop) => propsOf.get(check.uiProps.component)?.includes(prop))) ||
       (key === "uiButtonAction" && !actions.has(name)) ||
       (key === "uiNamedInput" && buttonActions.length > 0 && !inputs.has(name)) ||
       (key === "uiMarkupTag" && !markupTags.has(name));
-    return stale ? [`${evalCase.id}: ${key} "${name}"`] : [];
+    return stale ? [`${evalCase.id}: ${key} ${JSON.stringify(value)}`] : [];
   });
 }
 
@@ -46,7 +53,7 @@ describe("committed eval cases", () => {
     }
   });
 
-  it("check only for components, actions, action inputs and Markup tags that exist", () => {
+  it("check only for components, props, actions, action inputs and Markup tags that exist", () => {
     assert.deepEqual(cases.flatMap(staleChecks), []);
   });
 

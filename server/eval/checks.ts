@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { UiNode } from "shared/ui";
 import type { Generation } from "../generate/generate";
 import { collectBindings, isObject } from "../ui/bindings";
@@ -5,11 +6,22 @@ import type { CheckFailure, EvalCheck } from "./types";
 
 type Designed = Extract<Generation, { ok: true }>;
 
-function treeHasComponent(tree: unknown, name: string): boolean {
+/** Whether `tree` or any node under it passes `test`. */
+function someNode(tree: unknown, test: (node: Record<string, unknown>) => boolean): boolean {
   if (!isObject(tree)) return false;
-  if (tree.component === name) return true;
-  if (!Array.isArray(tree.children)) return false;
-  return tree.children.some((child) => treeHasComponent(child, name));
+  if (test(tree)) return true;
+  return Array.isArray(tree.children) && tree.children.some((child) => someNode(child, test));
+}
+
+function treeHasComponent(tree: unknown, name: string): boolean {
+  return someNode(tree, (node) => node.component === name);
+}
+
+function treeHasProps(tree: unknown, component: string, props: Record<string, unknown>): boolean {
+  return someNode(tree, (node) => {
+    const own = node.props;
+    return node.component === component && isObject(own) && Object.entries(props).every(([key, value]) => isDeepStrictEqual(own[key], value));
+  });
 }
 
 function stringsIn(value: unknown): string[] {
@@ -33,18 +45,13 @@ function elementHasTag(element: unknown, tag: string): boolean {
 }
 
 function treeHasMarkupTag(tree: unknown, tag: string): boolean {
-  if (!isObject(tree)) return false;
-  if (tree.component === "Markup" && isObject(tree.props) && elementHasTag(tree.props.root, tag)) {
-    return true;
-  }
-  if (!Array.isArray(tree.children)) return false;
-  return tree.children.some((child) => treeHasMarkupTag(child, tag));
+  return someNode(tree, (node) => node.component === "Markup" && isObject(node.props) && elementHasTag(node.props.root, tag));
 }
 
 function checkLabel(check: EvalCheck): string {
   if ("noButtonAction" in check) return "noButtonAction";
-  const [name, value] = Object.entries(check)[0] as [string, string | number];
-  return typeof value === "number" ? `${name} ${value}` : `${name} "${value}"`;
+  const [name, value] = Object.entries(check)[0] as [string, unknown];
+  return typeof value === "string" ? `${name} "${value}"` : `${name} ${JSON.stringify(value)}`;
 }
 
 function evaluateCheck(generation: Designed, check: EvalCheck): CheckFailure | undefined {
@@ -64,6 +71,11 @@ function evaluateCheck(generation: Designed, check: EvalCheck): CheckFailure | u
 
   if ("notesExcludes" in check) {
     return generation.notes.includes(check.notesExcludes) ? fail("notes contain the excluded text") : undefined;
+  }
+
+  if ("notesMentions" in check) {
+    const notes = generation.notes.toLowerCase();
+    return check.notesMentions.some((text) => notes.includes(text.toLowerCase())) ? undefined : fail("notes mention none of them");
   }
 
   if ("agentComponent" in check) {
@@ -86,6 +98,11 @@ function evaluateCheck(generation: Designed, check: EvalCheck): CheckFailure | u
 
   if ("uiMarkupTag" in check) {
     return treeHasMarkupTag(tree, check.uiMarkupTag) ? undefined : fail("Markup tag not found in the tree");
+  }
+
+  if ("uiProps" in check) {
+    const { component, props } = check.uiProps;
+    return treeHasProps(tree, component, props) ? undefined : fail("no node of that component has those props");
   }
 
   const bindings = collectBindings(tree);

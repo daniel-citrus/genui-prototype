@@ -4,7 +4,10 @@
   "checks": [
     { "agentComponent": "StatusDot" },
     { "uiMarkupTag": "circle" },
-    { "uiText": "Online" }
+    { "uiText": "Online" },
+    { "notesMentions": ["saved"] },
+    { "notesExcludes": "StatusDot" },
+    { "notesExcludes": "Markup" }
   ],
   "customComponents": [
     {

@@ -3,7 +3,8 @@
   "prompt": "Show the Latte at $4.50 using our saved menu item design.",
   "checks": [
     { "agentComponent": "MenuItemCard" },
-    { "uiText": "$4.50" }
+    { "uiText": "$4.50" },
+    { "notesMentions": ["saved"] }
   ],
   "customComponents": [
     {
