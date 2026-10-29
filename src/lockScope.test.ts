@@ -34,6 +34,34 @@ describe("lockScope", () => {
     assert.equal(lockScope(cards, "tree.children.1.children.1", ["tree"]), "tree");
   });
 
+  it("ignores a stale Card an earlier success locked", () => {
+    // Card 0 was saved first; its preset dropdown still names the old value, so every later answer lists it.
+    assert.equal(
+      lockScope(cards, "tree.children.1.children.1", ["tree.children.0", "tree.children.1"], ["tree.children.0"]),
+      "tree.children.1",
+    );
+  });
+
+  it("ignores a stale Card nested in a locked Card", () => {
+    const outer: UiNode = { component: "Card", children: [card] };
+    const tree: UiNode = { component: "Stack", children: [outer, card] };
+    assert.equal(
+      lockScope(tree, "tree.children.1.children.1", ["tree.children.0.children.0"], ["tree.children.0"]),
+      "tree.children.1",
+    );
+  });
+
+  it("still locks the whole design when a Card that is not locked went stale", () => {
+    const three: UiNode = { component: "Stack", children: [card, card, card] };
+    assert.equal(
+      lockScope(three, "tree.children.1.children.1", ["tree.children.0", "tree.children.2"], ["tree.children.0"]),
+      "tree",
+    );
+    // "tree.children.1" being locked says nothing about "tree.children.10".
+    assert.equal(lockScope(cards, "tree.children.0.children.1", ["tree.children.10"], ["tree.children.1"]), "tree");
+    assert.equal(lockScope(cards, "tree.children.1.children.1", ["tree"], ["tree.children.0"]), "tree");
+  });
+
   it("locks the Card holding a Markup button", () => {
     const markup: UiNode = {
       component: "Card",
