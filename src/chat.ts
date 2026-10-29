@@ -90,10 +90,13 @@ function isHidden(control: Element): boolean {
   );
 }
 
-/** Disables and dims every control in `root` for good: without `data-action`, `syncActionButtons` leaves a button off. */
+/**
+ * Disables and dims every control in `root` for good: without `data-action`, `syncActionButtons` leaves a button off.
+ * Tabs keep switching (`data-view-control`), since they only change what is shown.
+ */
 function disableControls(root: HTMLElement) {
   for (const control of root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>(
-    "input, select, button",
+    ":is(input, select, button):not([data-view-control])",
   )) {
     control.disabled = true;
     delete control.dataset.action;
