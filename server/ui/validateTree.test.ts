@@ -36,7 +36,11 @@ describe("validateUiTree", () => {
       component: "Stack",
       children: catalog
         .filter((c) => c.name !== "Stack")
-        .map((c) => ({ component: c.name, props: c.exampleProps })),
+        .map((c) =>
+          c.name === "Tabs"
+            ? { component: c.name, props: c.exampleProps, children: (c.exampleProps.labels as string[]).map(() => button) }
+            : { component: c.name, props: c.exampleProps },
+        ),
     };
     const result = await check(tree);
     assert.deepEqual(result.errors, []);
@@ -690,5 +694,101 @@ describe("validateUiTree Card-scoped checks", () => {
     assert.deepEqual((await check(form(cardSubmit), actions)).errors, [
       'tree.children.0.children.0 action "sign_up" needs an input named "email" in its Card, and none has that name',
     ]);
+  });
+});
+
+describe("validateUiTree Tabs and Collapsible", () => {
+  const tabs = (labels: string[], ...children: unknown[]) => ({ component: "Tabs", props: { labels }, children });
+  const collapsible = (props: Record<string, unknown>, ...children: unknown[]) => ({
+    component: "Collapsible",
+    props: { title: "More", ...props },
+    children,
+  });
+  const card = (...children: unknown[]) => ({ component: "Card", children });
+  const editButton = actionButton("menu_update_item");
+  const errors = async (tree: unknown) => (await check(tree, [updateItem], menuValues)).errors;
+  const split = (input: string, panel: string, button: string) =>
+    `${input} is in the Tabs panel or Collapsible at ${panel}, but the button at ${button} (action "menu_update_item") that sends it is outside, and the page won't send a field the person can't see; put the form's inputs and its button in the same tab or section`;
+
+  it("refuses a Tabs whose children count differs from its labels count, and accepts one child per label", async () => {
+    const labels = ["Coffee", "Tea", "Juice"];
+    assert.deepEqual(await errors(tabs(labels, button, button)), [
+      "tree Tabs has 3 labels and 2 children: give exactly one child per label, in the same order",
+    ]);
+    assert.deepEqual(await errors({ component: "Tabs", props: { labels } }), [
+      "tree Tabs has 3 labels and 0 children: give exactly one child per label, in the same order",
+    ]);
+    assert.deepEqual(await errors(tabs(labels, button, button, button)), []);
+  });
+
+  it("counts a Tabs' children only when its props are otherwise valid", async () => {
+    assert.deepEqual(await errors(tabs(["Coffee"], button, button)), [
+      "tree.props.labels must NOT have fewer than 2 items (see Tabs's propsSchema)",
+    ]);
+    assert.deepEqual(await errors({ component: "Tabs", props: { labels: ["A", "B"] }, children: {} }), [
+      "tree.children must be an array",
+    ]);
+  });
+
+  it("refuses a Card's button outside the Tabs holding its inputs, naming each hidden input", async () => {
+    const tree = card(tabs(["Pick", "Rename"], form(itemSelect("Bạc xỉu")), form(nameInput)), editButton);
+    assert.deepEqual(await errors(tree), [
+      split("tree.children.0.children.0.children.0", "tree.children.0.children.0", "tree.children.1"),
+      split("tree.children.0.children.1.children.0", "tree.children.0.children.1", "tree.children.1"),
+    ]);
+  });
+
+  it("accepts a Tabs whose every panel holds its own Card with its inputs and button", async () => {
+    const itemCard = (item: string) => card(itemSelect(item), nameInput, editButton);
+    assert.deepEqual(await errors(tabs(["Coffee", "Tea"], itemCard("Bạc xỉu"), itemCard("Cà phê sữa đá"))), []);
+  });
+
+  it("refuses an input in a Collapsible whose button is outside it, open or not", async () => {
+    for (const open of [{}, { open: false }, { open: true }]) {
+      const tree = card(itemSelect("Bạc xỉu"), collapsible(open, nameInput), editButton);
+      assert.deepEqual(await errors(tree), [split("tree.children.1.children.0", "tree.children.1", "tree.children.2")]);
+    }
+  });
+
+  it("accepts a form wholly inside a Collapsible", async () => {
+    assert.deepEqual(await errors(collapsible({}, card(itemSelect("Bạc xỉu"), nameInput, editButton))), []);
+  });
+
+  it("refuses an input in a Collapsible in a Tabs panel whose button is in the panel but outside the Collapsible", async () => {
+    const panel = card(itemSelect("Bạc xỉu"), collapsible({}, nameInput), editButton);
+    const tree = tabs(["Coffee", "Tea"], panel, button);
+    assert.deepEqual(await errors(tree), [
+      split("tree.children.0.children.1.children.0", "tree.children.0.children.1", "tree.children.0.children.2"),
+    ]);
+  });
+
+  it("finds no split form for a disabled button or a button that doesn't send the hidden input", async () => {
+    const hidden = tabs(["Pick", "Rename"], form(itemSelect("Bạc xỉu")), form(nameInput));
+    assert.deepEqual(await errors(card(hidden, actionButton("menu_update_item", true))), []);
+    const otherCard = card(itemSelect("Cà phê sữa đá"), nameInput, editButton);
+    assert.deepEqual(await errors(form(card(hidden), otherCard)), []);
+  });
+
+  it("applies to Markup inputs and buttons", async () => {
+    const tree = card(
+      itemSelect("Bạc xỉu"),
+      collapsible({}, markup({ tag: "input", attrs: { name: "name" } })),
+      markup({ tag: "button", action: "menu_update_item", text: "Save" }),
+    );
+    assert.deepEqual(await errors(tree), [
+      'tree.children.1.children.0.props.root is in the Tabs panel or Collapsible at tree.children.1, but the button at tree.children.2.props.root (action "menu_update_item") that sends it is outside, and the page won\'t send a field the person can\'t see; put the form\'s inputs and its button in the same tab or section',
+    ]);
+  });
+
+  it("runs both checks without actions and with designChecks: false", async () => {
+    const tree = card(tabs(["Pick", "Rename", "Extra"], form(itemSelect("Bạc xỉu")), form(nameInput)), editButton);
+    const expected = [
+      "tree.children.0 Tabs has 3 labels and 2 children: give exactly one child per label, in the same order",
+      split("tree.children.0.children.0.children.0", "tree.children.0.children.0", "tree.children.1"),
+      split("tree.children.0.children.1.children.0", "tree.children.0.children.1", "tree.children.1"),
+    ];
+    assert.deepEqual((await check(tree)).errors, expected);
+    const template = validateUiTree(tree, await stored(), [updateItem], menuValues, { designChecks: false });
+    assert.deepEqual(template.errors, expected);
   });
 });

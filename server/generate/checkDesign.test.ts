@@ -123,6 +123,24 @@ describe("checkDesign with the menu actions", () => {
     const result = await menu().check(tree);
     assert.equal(result.ok, false);
   });
+
+  it("accepts Tabs whose every panel holds its own edit form", async () => {
+    const tabs = { component: "Tabs", props: { labels: ["Coffee", "Tea"] }, children: [form(itemNames), form(itemNames)] };
+    const result = await menu().check(tabs);
+    assert.equal(result.ok, true, JSON.stringify(result));
+  });
+
+  it("refuses an edit form whose button is outside the Tabs holding its inputs", async () => {
+    const [item, name, description, save] = form(itemNames).children;
+    const tabs = { component: "Tabs", props: { labels: ["Item", "Name", "About"] }, children: [item, name, description] };
+    const hidden = (i: number) =>
+      `tree.children.0.children.${i} is in the Tabs panel or Collapsible at tree.children.0.children.${i}, but the button at tree.children.1 (action "menu_update_item") that sends it is outside, and the page won't send a field the person can't see; put the form's inputs and its button in the same tab or section`;
+    assert.deepEqual(problemsOf(await menu().check({ component: "Card", children: [tabs, save] })), [
+      hidden(0),
+      hidden(1),
+      hidden(2),
+    ]);
+  });
 });
 
 describe("checkDesign dropdown checks", () => {

@@ -98,6 +98,41 @@ describe("collectBindings", () => {
     ]);
   });
 
+  it("records the Tabs panels and Collapsibles around each binding, outermost first", () => {
+    const named = (name: string) => ({ component: "TextInput", props: { label: name, name } });
+    const tabs = {
+      component: "Tabs",
+      props: { labels: ["One", "Two"] },
+      children: [
+        named("first"),
+        {
+          component: "Card",
+          children: [
+            {
+              component: "Collapsible",
+              props: { title: "More" },
+              children: [{ component: "Markup", props: { root: { tag: "input", attrs: { name: "note" } } } }],
+            },
+            { component: "Button", props: { label: "Go", action: "go" } },
+          ],
+        },
+      ],
+    };
+    const { inputs, buttons } = collectBindings({ component: "Stack", children: [tabs, named("outside")] });
+    assert.deepEqual(
+      [...inputs, ...buttons].map(({ path, panels }) => ({ path, panels })),
+      [
+        { path: "tree.children.0.children.0", panels: ["tree.children.0.children.0"] },
+        {
+          path: "tree.children.0.children.1.children.0.children.0.props.root",
+          panels: ["tree.children.0.children.1", "tree.children.0.children.1.children.0"],
+        },
+        { path: "tree.children.1", panels: undefined },
+        { path: "tree.children.0.children.1.children.1", panels: ["tree.children.0.children.1"] },
+      ],
+    );
+  });
+
   it("skips unbound nodes, other components and malformed values", () => {
     const tree = {
       component: "Stack",
