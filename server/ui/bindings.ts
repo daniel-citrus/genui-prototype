@@ -21,6 +21,12 @@ export interface NamedInput {
   disabled?: true;
   /** Path of the nearest Card around it, if any. */
   card?: string;
+  /**
+   * Paths of what can hide it, outermost first, when anything can: each Tabs
+   * panel (`<tabsPath>.children.<i>`) it is or is in, and each Collapsible it
+   * is in.
+   */
+  panels?: string[];
 }
 
 /** A Button, or a Markup `button` element, with an `action`. */
@@ -32,6 +38,8 @@ export interface ActionButton {
   disabled: boolean;
   /** Path of the nearest Card around it, if any. */
   card?: string;
+  /** As for `NamedInput`. */
+  panels?: string[];
 }
 
 export interface TreeBindings {
@@ -117,6 +125,25 @@ export function collectBindings(tree: unknown): TreeBindings {
   for (const binding of [...bindings.inputs, ...bindings.buttons]) {
     const card = nearestCard(tree, binding.path);
     if (card) binding.card = card;
+    const panels = panelsAround(tree, binding.path);
+    if (panels.length > 0) binding.panels = panels;
   }
   return bindings;
+}
+
+/** `NamedInput.panels` for the node or Markup element at `path`, empty when nothing can hide it. */
+function panelsAround(tree: unknown, path: string): string[] {
+  const [, ...keys] = path.split(".");
+  const panels: string[] = [];
+  let current: unknown = tree;
+  let at = "tree";
+  for (const [i, key] of keys.entries()) {
+    if (typeof current !== "object" || current === null) break;
+    const { component } = current as { component?: unknown };
+    if (component === "Collapsible") panels.push(at);
+    if (component === "Tabs" && key === "children" && i + 1 < keys.length) panels.push(`${at}.children.${keys[i + 1]}`);
+    current = (current as Record<string, unknown>)[key];
+    at += `.${key}`;
+  }
+  return panels;
 }

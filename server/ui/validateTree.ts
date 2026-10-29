@@ -126,6 +126,16 @@ function selectValueProblems(props: Record<string, unknown>, path: string): stri
   return disabled === true ? [`${path} a disabled Select needs a value`] : [];
 }
 
+/** A Tabs needs one child per label. Children that aren't an array have their own problem. */
+function tabsPanelProblems(props: Record<string, unknown>, children: unknown, path: string): string[] {
+  const panels = children === undefined ? [] : children;
+  if (!Array.isArray(panels)) return [];
+  const labels = (props.labels as string[]).length;
+  return panels.length === labels
+    ? []
+    : [`${path} Tabs has ${labels} labels and ${panels.length} children: give exactly one child per label, in the same order`];
+}
+
 /** Where a binding's key is set: a catalog prop, or the part of a Markup element that holds it. */
 const MARKUP_KEY_PATHS = { name: "attrs.name", action: "action", options: "children" };
 function keyPath(binding: NamedInput | ActionButton, key: keyof typeof MARKUP_KEY_PATHS): string {
@@ -148,13 +158,14 @@ function bindingMismatch(input: NamedInput, action: string, type: unknown): stri
 }
 
 /**
- * Problems with a tree's `name` and `action` props: duplicate names always (in
- * one Card, or in different Cards that one button would send together);
- * with `actions`, also unregistered actions, required action properties no
- * input fills and `edit` actions with no input for any optional property (both
- * for Buttons that aren't disabled, against the inputs each one sends, and only
- * with `designChecks`), inputs of
- * the wrong kind for the action property they fill, and, for dropdown sources
+ * Problems with a tree's `name` and `action` props: always duplicate names (in
+ * one Card, or in different Cards that one button would send together) and
+ * inputs in a Tabs panel or Collapsible that a Button outside it sends (for
+ * Buttons that aren't disabled); with `actions`, also unregistered actions,
+ * required action properties no input fills and `edit` actions with no input
+ * for any optional property (both for Buttons that aren't disabled, against the
+ * inputs each one sends, and only with `designChecks`), inputs of the wrong
+ * kind for the action property they fill, and, for dropdown sources
  * in `choiceValues`, inputs that aren't a Select or list an option the source
  * doesn't have.
  */
@@ -187,6 +198,16 @@ function bindingProblems(
       }
     }
   });
+  for (const button of enabled) {
+    for (const input of inputs) {
+      const panel = input.panels?.find((p) => !button.panels?.includes(p));
+      if (panel && sendsInput(tree, button.path, input.path)) {
+        problems.push(
+          `${input.path} is in the Tabs panel or Collapsible at ${panel}, but the button at ${button.path} (action "${button.action}") that sends it is outside, and the page won't send a field the person can't see; put the form's inputs and its button in the same tab or section`,
+        );
+      }
+    }
+  }
   if (!actions) return problems;
 
   const specs = new Map(actions.map((a) => [a.name, a]));
@@ -320,6 +341,9 @@ export function validateUiTree(
         const problems = propsErrors(propsValidator(component), node.props, path);
         errors.push(...withPropsHint(problems, component.name, hinted));
         if (component.name === "Select" && problems.length === 0) errors.push(...selectValueProblems(node.props, path));
+        if (component.name === "Tabs" && problems.length === 0) {
+          errors.push(...tabsPanelProblems(node.props, node.children, path));
+        }
         if (component.name === "Markup" && isObject(node.props.root)) {
           errors.push(...validateMarkup(node.props.root, `${path}.props.root`));
         }
