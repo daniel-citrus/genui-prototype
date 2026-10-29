@@ -59,7 +59,7 @@ curl -s localhost:5173/api/actions/run \
   -d '{"designId":"<id from generate>","action":"demo_echo","values":{"text":"hi"}}'
 ```
 
-The answer is `{ ok, message }`. An action with a confirm question answers `{ ok: false, message, confirm }` first; send the same request again with `"confirmed": true` once the person says yes. A design the API no longer remembers (after a restart, or past 500 newer ones) answers 409: generate it again.
+The answer is `{ ok, message }`. A success also carries `stale`: the parts of the design with a dropdown that can now send a value that no longer exists (for example a category that was just renamed), each a Card's tree path (`"tree.children.1"`) or `"tree"` for dropdowns outside every Card; `[]` when there are none. An action with a confirm question answers `{ ok: false, message, confirm }` first; send the same request again with `"confirmed": true` once the person says yes. A design the API no longer remembers (after a restart, or past 500 newer ones) answers 409: generate it again.
 
 ### Registering the tool in a host agent
 
