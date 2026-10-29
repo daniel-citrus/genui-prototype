@@ -16,6 +16,8 @@ export const RENDERED_COMPONENTS = [
   "Badge",
   "Alert",
   "Markup",
+  "Tabs",
+  "Collapsible",
 ] as const;
 
 export type RenderedComponentName = (typeof RENDERED_COMPONENTS)[number];
