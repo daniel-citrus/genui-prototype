@@ -19,7 +19,7 @@ The catalog and renderer land together first: `src/sandbox/componentNames.test.t
 | components | Tabs and Collapsible in the catalog and sandbox | server/catalog/components.ts, server/catalog/components.test.ts, server/catalog/validate.test.ts, src/sandbox/components.ts, src/sandbox/componentNames.ts, src/sandbox/tabs.ts, src/sandbox/tabs.test.ts, src/chat.ts, src/style.css | - | medium |
 | checks | Tabs label count and forms split across hidden panels | server/ui/validateTree.ts, server/ui/validateTree.test.ts, server/ui/bindings.ts, server/ui/bindings.test.ts, server/generate/checkDesign.test.ts | components | medium |
 | grouping | grouped dropdown values in the generator context | server/actions/types.ts, server/actions/registry.ts, server/actions/registry.test.ts, server/actions/menu/choices.ts, server/actions/menu/menu.test.ts, server/generate/context.ts, server/generate/context.test.ts, server/generate/generate.ts, server/routes/generate.ts, server/eval/runner.ts | - | medium |
-| prompt | compact-design rule, eval cases, docs | server/generate/prompt.ts, server/generate/prompt.test.ts, server/eval/cases/large-list-tabs.json, server/eval/cases/short-list-flat.json, docs/ARCHITECTURE.md | components, checks, grouping | small |
+| prompt | compact-design rule, eval cases, docs | server/generate/prompt.ts, server/generate/prompt.test.ts, server/eval/cases/large-list-tabs.json, server/eval/cases/short-list-flat.json, server/eval/loadCases.test.ts, docs/ARCHITECTURE.md | components, checks, grouping | small |
 
 ## components
 
