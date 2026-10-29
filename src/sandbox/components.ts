@@ -61,7 +61,7 @@ function field(label: string, control: HTMLElement, labelFor: string): HTMLEleme
 }
 
 const inputClass =
-  "w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none placeholder:text-zinc-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20";
+  "w-full rounded-lg border border-zinc-500 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm outline-none placeholder:text-zinc-500 focus:border-sky-700 focus:ring-1 focus:ring-sky-700";
 
 const stackDirection = {
   vertical: "flex-col",
@@ -138,7 +138,7 @@ const actionName = /^[a-z][a-z0-9_]*$/;
 const Button: Renderer = (props, _children, path) => {
   const node = el(
     "button",
-    `inline-flex items-center justify-center self-start rounded-lg font-medium shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${pick(props, "variant", buttonVariant, "primary")} ${pick(props, "size", buttonSize, "md")}`,
+    `pressable inline-flex items-center justify-center self-start rounded-lg font-medium shadow-sm disabled:cursor-not-allowed disabled:opacity-50 ${pick(props, "variant", buttonVariant, "primary")} ${pick(props, "size", buttonSize, "md")}`,
     str(props, "label") ?? "",
   );
   node.type = "button";
@@ -253,8 +253,8 @@ const alertTone = {
 };
 
 const Alert: Renderer = (props) => {
+  // No role="alert": a design is static content, and the transcript's log already announces a new one.
   const node = el("div", `rounded-lg border px-4 py-3 text-sm ${pick(props, "tone", alertTone, "info")}`);
-  node.setAttribute("role", "alert");
   const title = str(props, "title");
   if (title) node.append(el("p", "font-semibold", title));
   node.append(el("p", "", str(props, "message") ?? ""));
