@@ -3,7 +3,7 @@ import type { ComponentLlm, LlmMessage, LlmUsage } from "../ports/ComponentLlm";
 import type { ComponentRepository } from "../ports/ComponentRepository";
 import { isObject } from "../ui/bindings";
 import { checkDesign, type DesignCheckDeps } from "./checkDesign";
-import { buildContext } from "./context";
+import { buildContext, type ContextDeps } from "./context";
 import { buildMessages, repairMessages } from "./prompt";
 
 /** Model calls at most: the first try and two repairs. */
@@ -17,6 +17,8 @@ const CUT_OFF = "Reply was cut off; make the design smaller";
 export interface GenerateDeps extends Omit<DesignCheckDeps, "catalog"> {
   llm: ComponentLlm;
   components: ComponentRepository;
+  /** With it, the context also lists dropdown values grouped, for sources that have groups. */
+  listChoiceGroups?: ContextDeps["listChoiceGroups"];
   /** An empty list each attempt is appended to as it is made, so the caller keeps them when the generation rejects. */
   attempts?: GenerationAttempt[];
 }
@@ -57,7 +59,7 @@ function parseReply(content: string | null): { tree: unknown; notes: string } | 
  * (with an `AbortError`).
  */
 export async function generateComponent(prompt: string, deps: GenerateDeps): Promise<Generation> {
-  const { llm, components, signal, attempts = [], ...checkDeps } = deps;
+  const { llm, components, listChoiceGroups, signal, attempts = [], ...checkDeps } = deps;
   const context = await buildContext(prompt, deps);
   const messages: LlmMessage[] = buildMessages(context, prompt);
   let repairPrompt: string | undefined;

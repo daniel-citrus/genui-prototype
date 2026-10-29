@@ -1,7 +1,7 @@
 import type { Component } from "shared/components";
 import type { StoredCustomComponent } from "shared/customComponents";
 import { markupRules } from "shared/markup";
-import type { ActionRegistry, ActionSpec } from "../actions/types";
+import type { ActionRegistry, ActionSpec, ChoiceGroup } from "../actions/types";
 import type { Logger } from "../log";
 import type { ComponentRepository } from "../ports/ComponentRepository";
 import type { CustomComponentRepository } from "../ports/CustomComponentRepository";
@@ -19,6 +19,8 @@ export interface ContextDeps {
   components: ComponentRepository;
   actions: ActionSpec[];
   listChoices?: ActionRegistry["listChoices"];
+  /** With it and `listChoices`, sources that have groups also list their values grouped. */
+  listChoiceGroups?: ActionRegistry["listChoiceGroups"];
   customComponents?: CustomComponentRepository;
   log: Logger;
   signal: AbortSignal;
@@ -33,6 +35,8 @@ export interface GenerateContext {
 interface ListedChoices {
   values: string[];
   truncated: boolean;
+  /** Exactly the listed values, grouped. */
+  groups?: ChoiceGroup[];
   error?: string;
 }
 
@@ -105,23 +109,48 @@ async function listCustomComponents(
   }
 }
 
-/** Each source's first `MAX_CHOICES` values; a source that fails is logged by name and listed empty. */
+/**
+ * `groups` cut to the listed `values`, each value kept in the first group
+ * naming it; undefined when a listed value is in no group.
+ */
+function groupsOf(groups: ChoiceGroup[], values: string[]): ChoiceGroup[] | undefined {
+  const ungrouped = new Set(values);
+  const cut = groups
+    .map((group) => ({ name: group.name, values: group.values.filter((value) => ungrouped.delete(value)) }))
+    .filter((group) => group.values.length > 0);
+  return ungrouped.size === 0 ? cut : undefined;
+}
+
+/**
+ * Each source's first `MAX_CHOICES` values, and its groups cut to them. A
+ * source that fails is logged by name and listed empty; one whose groups fail
+ * or miss a listed value is logged by name and listed without them.
+ */
 async function loadChoices(
   actions: ActionSpec[],
   listChoices: ActionRegistry["listChoices"],
+  listChoiceGroups: ActionRegistry["listChoiceGroups"] | undefined,
   log: Logger,
   signal: AbortSignal,
 ): Promise<Record<string, ListedChoices>> {
   const sources = [...new Set(actions.flatMap((spec) => Object.values(spec.choices ?? {})))];
   const entries = await Promise.all(
     sources.map(async (source): Promise<[string, ListedChoices]> => {
-      try {
-        const values = await listChoices(source, signal);
-        return [source, { values: values.slice(0, MAX_CHOICES), truncated: values.length > MAX_CHOICES }];
-      } catch {
-        log.error({ source }, "loading dropdown values failed");
-        return [source, { values: [], truncated: false, error: CHOICES_ERROR }];
-      }
+      const [all, groups] = await Promise.all([
+        listChoices(source, signal).catch(() => {
+          log.error({ source }, "loading dropdown values failed");
+          return undefined;
+        }),
+        listChoiceGroups?.(source, signal).catch(() => {
+          log.warn({ source }, "loading dropdown groups failed; listing values only");
+          return undefined;
+        }),
+      ]);
+      if (!all) return [source, { values: [], truncated: false, error: CHOICES_ERROR }];
+      const values = all.slice(0, MAX_CHOICES);
+      const grouped = groups && groupsOf(groups, values);
+      if (groups && !grouped) log.warn({ source }, "dropdown groups miss a listed value; listing values only");
+      return [source, { values, truncated: all.length > MAX_CHOICES, ...(grouped && { groups: grouped }) }];
     }),
   );
   return Object.fromEntries(entries);
@@ -132,7 +161,7 @@ async function loadChoices(
  * catalog can't be read.
  */
 export async function buildContext(prompt: string, deps: ContextDeps): Promise<GenerateContext> {
-  const { components, actions, listChoices, customComponents, log, signal } = deps;
+  const { components, actions, listChoices, listChoiceGroups, customComponents, log, signal } = deps;
   const catalog = await components.list();
   const sections = [
     section(
@@ -156,7 +185,9 @@ export async function buildContext(prompt: string, deps: ContextDeps): Promise<G
   sections.push(actionsSection);
 
   if (listChoices) {
-    sections.push(section("Dropdown values by source:", await loadChoices(actions, listChoices, log, signal)));
+    sections.push(
+      section("Dropdown values by source:", await loadChoices(actions, listChoices, listChoiceGroups, log, signal)),
+    );
   }
   if (customComponents) {
     const custom = await listCustomComponents(customComponents, catalog, prompt, log);

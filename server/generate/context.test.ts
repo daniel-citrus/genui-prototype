@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { StoredCustomComponent } from "shared/customComponents";
-import type { ActionSpec } from "../actions/types";
+import { createMenuActions } from "../actions/menu";
+import { createActionRegistry } from "../actions/registry";
+import type { ActionSpec, ChoiceGroup } from "../actions/types";
+import { createInMemoryPosMenu } from "../adapters/pos/InMemoryPosMenu";
 import { catalog } from "../catalog/components";
 import { menuItemCard } from "../customComponents/testDefinitions";
 import type { CustomComponentRepository } from "../ports/CustomComponentRepository";
@@ -143,6 +146,64 @@ describe("buildContext", () => {
     assert.deepEqual(item_names.values, []);
     assert.ok(item_names.error);
     assert.deepEqual(logged, [{ level: "error", obj: { source: "item_names" } }]);
+  });
+
+  it("lists the fixture menu's items grouped by category beside their values", async () => {
+    const registry = createActionRegistry(createMenuActions(createInMemoryPosMenu()));
+    const { deps } = setup({
+      actions: registry.specs,
+      listChoices: registry.listChoices,
+      listChoiceGroups: registry.listChoiceGroups,
+    });
+    const choices = parse((await buildContext("x", deps)).sections[3]);
+    const items: { values: string[]; groups: ChoiceGroup[] } = choices.menu_items;
+    const coffee = items.groups.find((g) => g.name === "Cà phê");
+    assert.ok(coffee);
+    assert.ok(coffee.values.includes("Cà phê sữa đá"));
+    assert.ok(coffee.values.includes("Cà phê đen đá"));
+    assert.deepEqual(items.groups.flatMap((g) => g.values).sort(), [...items.values].sort());
+    assert.deepEqual(Object.keys(choices.menu_categories), ["values", "truncated"]);
+  });
+
+  it("names only the 50 listed values in a source's groups", async () => {
+    const many = Array.from({ length: MAX_CHOICES + 5 }, (_, i) => `v${String(i).padStart(2, "0")}`);
+    const { deps } = setup({
+      listChoices: async () => many,
+      listChoiceGroups: async () => [
+        { name: "Even", values: many.filter((_, i) => i % 2 === 0) },
+        { name: "Odd", values: many.filter((_, i) => i % 2 === 1) },
+        { name: "Past the cut", values: many.slice(MAX_CHOICES) },
+      ],
+    });
+    const { item_names } = parse((await buildContext("x", deps)).sections[3]);
+    const groups: ChoiceGroup[] = item_names.groups;
+    assert.deepEqual(Object.keys(item_names), ["values", "truncated", "groups"]);
+    assert.deepEqual(groups.map((g) => g.name), ["Even", "Odd"]);
+    assert.deepEqual(groups.flatMap((g) => g.values).sort(), many.slice(0, MAX_CHOICES));
+  });
+
+  it("lists sources without groups exactly as without the groups port", async () => {
+    const before = (await buildContext("x", setup().deps)).sections[3];
+    const { deps } = setup({ listChoiceGroups: async () => undefined });
+    assert.equal((await buildContext("x", deps)).sections[3], before);
+  });
+
+  it("lists a source whose groups fail with its values only, and logs only its name", async () => {
+    const { deps, logged } = setup({
+      listChoiceGroups: async () => {
+        throw new Error("secret detail");
+      },
+    });
+    const { item_names } = parse((await buildContext("x", deps)).sections[3]);
+    assert.deepEqual(item_names, { values: ["Latte", "Mocha"], truncated: false });
+    assert.deepEqual(logged, [{ level: "warn", obj: { source: "item_names" } }]);
+  });
+
+  it("lists a source without groups, and warns, when its groups miss a listed value", async () => {
+    const { deps, logged } = setup({ listChoiceGroups: async () => [{ name: "Coffee", values: ["Latte"] }] });
+    const { item_names } = parse((await buildContext("x", deps)).sections[3]);
+    assert.deepEqual(item_names, { values: ["Latte", "Mocha"], truncated: false });
+    assert.deepEqual(logged, [{ level: "warn", obj: { source: "item_names" } }]);
   });
 
   it("leaves out components named like a catalog component ignoring case", async () => {
