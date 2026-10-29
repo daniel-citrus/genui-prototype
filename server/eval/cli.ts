@@ -61,7 +61,7 @@ export function parseCliArgs(argv: string[]): CliArgs {
     return { ok: false, error: `unexpected argument ${parsed.positionals[0]}` };
   }
   const cases = [...new Set(parsed.values.case ?? [])];
-  if (cases.some((id) => id === "")) return { ok: false, error: CASE_ERROR };
+  if (cases.includes("")) return { ok: false, error: CASE_ERROR };
   const value = parsed.values.repeat;
   if (value === undefined) return { ok: true, repeat: 1, cases };
   const repeat = /^\d+$/.test(value) ? Number(value) : 0;
