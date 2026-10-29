@@ -1,5 +1,5 @@
 import type { CustomComponentDefinition } from "shared/customComponents";
-import type { Generation } from "../generate/generate";
+import type { Generation, GenerationAttempt } from "../generate/generate";
 
 export type EvalCheck =
   | { maxAttempts: number }
@@ -37,5 +37,7 @@ export interface EvalCaseResult {
   ok: boolean;
   failures: CheckFailure[];
   generation?: Generation;
+  /** The model calls completed before the generation rejected. */
+  attempts?: GenerationAttempt[];
   error?: string;
 }

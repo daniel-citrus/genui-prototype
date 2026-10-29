@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createOpenAIComponentLlm } from "../adapters/openai/OpenAIComponentLlm";
 import { agentAvailable, config } from "../config";
+import type { GenerationAttempt } from "../generate/generate";
 import { loadCases } from "./loadCases";
 import { runEvalCase } from "./runner";
 import type { EvalCase, EvalCaseResult } from "./types";
@@ -69,8 +70,9 @@ export function parseCliArgs(argv: string[]): CliArgs {
   return { ok: true, repeat, cases };
 }
 
-function attemptCount(result: EvalCaseResult): number | undefined {
-  return result.generation?.attempts.length;
+/** Every model call the case made, including those completed before the generation rejected. */
+function attemptsOf(result: EvalCaseResult): GenerationAttempt[] {
+  return result.generation?.attempts ?? result.attempts ?? [];
 }
 
 interface UsageTotals {
@@ -82,7 +84,7 @@ interface UsageTotals {
 }
 
 function addUsage(totals: UsageTotals, result: EvalCaseResult, durationMs: number): void {
-  for (const attempt of result.generation?.attempts ?? []) {
+  for (const attempt of attemptsOf(result)) {
     totals.calls++;
     totals.promptTokens += attempt.usage?.promptTokens ?? 0;
     totals.cachedPromptTokens += attempt.usage?.cachedPromptTokens ?? 0;
@@ -99,8 +101,8 @@ function formatUsage(t: UsageTotals): string {
 function formatResult(result: EvalCaseResult, label = ""): string {
   if (result.ok) return `pass ${result.id}${label}`;
   const parts = result.failures.map((f) => f.reason);
-  const attempts = attemptCount(result);
-  if (attempts !== undefined) parts.push(`attempts: ${attempts}`);
+  const attempts = attemptsOf(result).length;
+  if (attempts > 0) parts.push(`attempts: ${attempts}`);
   if (result.error !== undefined && !parts.includes(result.error)) parts.push(`error: ${result.error}`);
   return `fail ${result.id}${label} ${parts.join("; ")}`;
 }
@@ -111,6 +113,7 @@ function timeoutResult(id: string, partial: EvalCaseResult): EvalCaseResult {
     ok: false,
     failures: [{ reason: "case timed out after 180 seconds" }],
     ...(partial.generation !== undefined ? { generation: partial.generation } : {}),
+    ...(partial.attempts !== undefined ? { attempts: partial.attempts } : {}),
     ...(partial.error !== undefined ? { error: partial.error } : {}),
   };
 }
@@ -212,7 +215,7 @@ export async function main(options: CliMainOptions = {}): Promise<number> {
         checks: evalCase.checks,
         ok: result.ok,
         failures: result.failures,
-        attempts: generation?.attempts ?? [],
+        attempts: attemptsOf(result),
         durationMs,
       };
       if (generation?.ok) {
@@ -230,7 +233,7 @@ export async function main(options: CliMainOptions = {}): Promise<number> {
       }
 
       runs++;
-      if (result.ok && attemptCount(result) === 1) firstTry++;
+      if (result.ok && attemptsOf(result).length === 1) firstTry++;
       if (result.ok) passes.set(evalCase.id, (passes.get(evalCase.id) ?? 0) + 1);
       else anyFailed = true;
       log(formatResult(result, repeat > 1 ? ` [${attempt}/${repeat}]` : ""));
