@@ -39,7 +39,7 @@ Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
    npm run dev
    ```
 
-Open http://localhost:5173, type what you want in the prompt box and click Generate. The design appears in the sandbox, with the generator's notes under the prompt, and the Components button lists the saved custom components. `curl -s localhost:5173/api/health` should show `{"ok":true,"db":true,"agent":true}` when Postgres is up. Without a key the app still runs, with `"agent":false`, and generating answers with an error asking for `OPENAI_API_KEY`.
+Open http://localhost:5173, type what you want in the prompt box and click Generate. The design appears in the chat under your prompt, with the generator's notes directly below it; a newer design replaces the older ones, and a form whose action succeeds is marked Done. The Components button lists the saved custom components. `curl -s localhost:5173/api/health` should show `{"ok":true,"db":true,"agent":true}` when Postgres is up. Without a key the app still runs, with `"agent":false`, and generating answers with an error asking for `OPENAI_API_KEY`.
 
 ## Generate a UI
 
