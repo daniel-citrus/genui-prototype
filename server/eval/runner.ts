@@ -4,7 +4,7 @@ import { createActionRegistry } from "../actions/registry";
 import { createInMemoryPosMenu } from "../adapters/pos/InMemoryPosMenu";
 import { catalog } from "../catalog/components";
 import { validateDefinition } from "../customComponents/definition";
-import { generateComponent } from "../generate/generate";
+import { generateComponent, type GenerationAttempt } from "../generate/generate";
 import type { ComponentLlm } from "../ports/ComponentLlm";
 import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
 import { InMemoryCustomComponentRepository } from "../ports/fakes/InMemoryCustomComponentRepository";
@@ -57,6 +57,7 @@ export async function runEvalCase(
   }
 
   const registry = evalActionRegistry();
+  const attempts: GenerationAttempt[] = [];
   try {
     const generation = await generateComponent(evalCase.prompt, {
       llm: opts.llm,
@@ -66,6 +67,7 @@ export async function runEvalCase(
       listChoices: registry.listChoices,
       log: noopLogger,
       signal: opts.signal ?? neverAborted,
+      attempts,
     });
     if (!generation.ok) {
       const reason = `generation failed: ${generation.problems.length} problems`;
@@ -75,6 +77,6 @@ export async function runEvalCase(
     return { id: evalCase.id, ok: failures.length === 0, failures, generation };
   } catch (err) {
     const reason = `generation error: ${err instanceof Error ? err.name : "Error"}`;
-    return { id: evalCase.id, ok: false, failures: [{ reason }], error: reason };
+    return { id: evalCase.id, ok: false, failures: [{ reason }], attempts, error: reason };
   }
 }

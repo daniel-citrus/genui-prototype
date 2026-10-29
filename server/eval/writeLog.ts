@@ -12,7 +12,7 @@ export interface EvalCaseLog {
   checks: EvalCheck[];
   ok: boolean;
   failures: CheckFailure[];
-  /** Every model call made, with its raw reply; empty when generation never ran. */
+  /** Every model call completed, with its raw reply, even when the generation then rejected; empty when none completed. */
   attempts: GenerationAttempt[];
   /** Wall time of the case, model calls included. */
   durationMs?: number;

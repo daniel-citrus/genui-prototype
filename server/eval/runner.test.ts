@@ -69,6 +69,34 @@ describe("runEvalCase", () => {
     assert.deepEqual(result.failures, [{ reason: "generation error: TypeError" }]);
     assert.equal(result.error, "generation error: TypeError");
     assert.equal(result.generation, undefined);
+    assert.deepEqual(result.attempts, []);
+  });
+
+  it("keeps the attempts made before a repair call rejects", async () => {
+    const { llm } = scripted([design({ component: "Nope" }), new TypeError("boom")]);
+    const result = await runEvalCase(headingCase, { llm });
+    assert.equal(result.error, "generation error: TypeError");
+    assert.ok(result.attempts);
+    assert.equal(result.attempts.length, 1);
+    assert.ok(result.attempts[0]!.problems.length > 0);
+  });
+
+  it("keeps the attempts made before an abort during a repair", async () => {
+    const controller = new AbortController();
+    const { llm, calls } = scripted([design({ component: "Nope" })]);
+    const aborting: ComponentLlm = {
+      async complete(input) {
+        const reply = await llm.complete(input);
+        controller.abort();
+        return reply;
+      },
+    };
+    const result = await runEvalCase(headingCase, { llm: aborting, signal: controller.signal });
+    assert.deepEqual(result.failures, [{ reason: "generation error: AbortError" }]);
+    assert.equal(calls.length, 1);
+    assert.ok(result.attempts);
+    assert.equal(result.attempts.length, 1);
+    assert.ok(result.attempts[0]!.problems.length > 0);
   });
 
   it("reports an abort as a generation error", async () => {
