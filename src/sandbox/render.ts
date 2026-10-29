@@ -23,7 +23,7 @@ function draw(node: UiNode, path: string): HTMLElement {
 /** Replaces the container's contents with the empty-state message. */
 export function renderEmpty(container: HTMLElement): void {
   const message = document.createElement("p");
-  message.className = "p-6 text-center text-sm text-zinc-400";
+  message.className = "p-6 text-center text-sm text-zinc-500";
   message.textContent = emptyMessage;
   container.replaceChildren(message);
 }

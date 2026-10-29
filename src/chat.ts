@@ -10,7 +10,7 @@ import { components, el } from "./sandbox/components";
 import { renderEmpty, renderUi } from "./sandbox/render";
 
 const promptClass =
-  "max-w-[80%] self-end whitespace-pre-wrap rounded-2xl bg-sky-600 px-3 py-2 text-sm leading-snug text-white";
+  "max-w-[80%] self-end whitespace-pre-wrap rounded-2xl bg-sky-700 px-3 py-2 text-sm leading-snug text-white";
 const canvasClass = "rounded-xl border border-dashed border-zinc-300 bg-white p-4 shadow-inner";
 const notesClass = {
   notes: "whitespace-pre-wrap rounded-lg bg-zinc-100 px-3 py-2 text-sm leading-snug text-zinc-900",
@@ -22,14 +22,15 @@ const replyClass = {
   confirm: "rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900",
 };
 const confirmButtonClass = {
-  yes: "rounded-md bg-amber-600 px-3 py-1 text-sm font-medium text-white shadow-sm hover:bg-amber-700",
-  cancel: "rounded-md border border-zinc-300 bg-white px-3 py-1 text-sm font-medium text-zinc-700 hover:bg-zinc-50",
+  yes: "pressable rounded-md bg-amber-700 px-3 py-1 text-sm font-medium text-white shadow-sm hover:bg-amber-800",
+  cancel: "pressable rounded-md border border-zinc-300 bg-white px-3 py-1 text-sm font-medium text-zinc-700 hover:bg-zinc-50",
 };
 const lockedClass = ["cursor-not-allowed", "opacity-50"];
 
 const hiddenFieldMessage = "This design has a hidden field, so the action was not sent.";
 const liveFormsNote = "The other forms here still work.";
 const staleFormsNote = "The other forms here are out of date now, so ask again for a fresh one.";
+const invalidMessage = "The design still had problems after 3 tries. Try rewording the prompt.";
 
 /** One design in the transcript. Only the newest is live. */
 interface Design {
@@ -53,8 +54,8 @@ interface Design {
 export interface Chat {
   /** Set while a prompt's design is being generated. */
   readonly generating: boolean;
-  /** Adds the prompt to the transcript, then its design with notes, or an error. */
-  send(prompt: string): Promise<void>;
+  /** Adds the prompt to the transcript, then its design with notes, or an error. Resolves false after an error. */
+  send(prompt: string): Promise<boolean>;
 }
 
 function badge(text: string, tone: "success" | "neutral"): HTMLElement {
@@ -144,19 +145,32 @@ export function createChat(container: HTMLElement): Chat {
   }
 
   /**
+   * Puts focus back after `button`'s action when the control that had it was
+   * disabled or removed: on `button` while it still works, else on the reply.
+   * It never takes focus from elsewhere, or for a replaced design.
+   */
+  function restoreFocus(design: Design, button: HTMLButtonElement) {
+    const active = document.activeElement;
+    const lost = !active || active === document.body || active === button || design.reply.contains(active);
+    if (design.replaced || !lost) return;
+    (button.isConnected && !button.disabled ? button : design.reply).focus({ preventScroll: true });
+  }
+
+  /**
    * Asks an action's confirm question under the design. Yes resends `request`,
    * with the values read for the first click, as confirmed; Cancel sends nothing.
    */
-  function askConfirm(design: Design, request: ActionRunRequest, buttonPath: string, question: string) {
+  function askConfirm(design: Design, request: ActionRunRequest, button: HTMLButtonElement, question: string) {
     const buttons = el("div", "mt-2 flex gap-2");
     buttons.append(
       replyButton("Yes", confirmButtonClass.yes, () => {
         showReply(design);
-        void postAction(design, { ...request, confirmed: true }, buttonPath);
+        void postAction(design, { ...request, confirmed: true }, button);
       }),
       replyButton("Cancel", confirmButtonClass.cancel, () => {
         showReply(design);
         syncActionButtons(design);
+        restoreFocus(design, button);
       }),
     );
     showReply(design, "confirm", el("p", "", question), buttons);
@@ -180,21 +194,23 @@ export function createChat(container: HTMLElement): Chat {
     showReply(design, "ok", ["Done!", result.message, note].filter(Boolean).join(" "));
   }
 
-  /** Posts an action request and shows its result, or asks its confirm question. */
-  async function postAction(design: Design, request: ActionRunRequest, buttonPath: string) {
+  /** Posts `button`'s action request and shows its result, or asks its confirm question. */
+  async function postAction(design: Design, request: ActionRunRequest, button: HTMLButtonElement) {
+    const buttonPath = button.dataset.path ?? "";
     design.actionInFlight = true;
     syncActionButtons(design);
     try {
       const result = await runAction(request);
       if (result.confirm !== undefined) {
         // Nothing ran; a question for a design the person has left is dropped.
-        if (!design.replaced) askConfirm(design, request, buttonPath, result.confirm);
+        if (!design.replaced) askConfirm(design, request, button, result.confirm);
         return;
       }
       showResult(design, result, buttonPath);
     } finally {
       design.actionInFlight = false;
       syncActionButtons(design);
+      restoreFocus(design, button);
     }
   }
 
@@ -214,7 +230,7 @@ export function createChat(container: HTMLElement): Chat {
       invalid.reportValidity();
       return;
     }
-    void postAction(design, { designId: design.id, action, values: actionValues(readFields(controls)) }, buttonPath);
+    void postAction(design, { designId: design.id, action, values: actionValues(readFields(controls)) }, button);
   }
 
   /** Draws `success` into its reply entry: labels, the design, its notes, then room for action replies. */
@@ -231,6 +247,8 @@ export function createChat(container: HTMLElement): Chat {
       confirmShown: false,
     };
     design.reply.setAttribute("role", "status");
+    // Takes focus when the clicked button can't keep it.
+    design.reply.tabIndex = -1;
     renderUi(success.tree, design.canvas);
     design.canvas.addEventListener("click", (e) => {
       const button = (e.target as Element).closest<HTMLButtonElement>("button[data-action]");
@@ -243,14 +261,14 @@ export function createChat(container: HTMLElement): Chat {
     return design;
   }
 
-  async function send(prompt: string) {
+  async function send(prompt: string): Promise<boolean> {
     generating = true;
     if (latest) syncActionButtons(latest);
     if (!started) container.replaceChildren();
     started = true;
     const message = el("p", promptClass, prompt);
     const entry = el("article", "flex flex-col gap-2");
-    entry.append(el("p", notesClass.notes, "Generating…"));
+    entry.append(el("p", notesClass.notes, "Generating… This can take a minute."));
     container.append(message, entry);
     message.scrollIntoView({ block: "start" });
     try {
@@ -259,10 +277,11 @@ export function createChat(container: HTMLElement): Chat {
         if (latest) replace(latest);
         latest = showDesign(entry, outcome.design);
       } else {
-        const error = outcome.kind === "invalid" ? "The design still had problems after 3 tries." : outcome.message;
+        const error = outcome.kind === "invalid" ? invalidMessage : outcome.message;
         entry.replaceChildren(el("p", notesClass.error, error));
       }
       message.scrollIntoView({ block: "start" });
+      return outcome.kind === "ok";
     } finally {
       generating = false;
       if (latest) syncActionButtons(latest);
