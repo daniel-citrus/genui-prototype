@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { cleanName, foldName, sizeLabel } from "./names";
+import { cleanName, foldName, optionLabel, sizeLabel } from "./names";
 
 describe("cleanName", () => {
   it("trims and stores one Unicode form", () => {
@@ -31,5 +31,11 @@ describe("sizeLabel", () => {
     assert.equal(sizeLabel("X", ""), "X");
     assert.equal(sizeLabel("X", "  "), "X");
     assert.equal(sizeLabel("X", undefined), "X");
+  });
+});
+
+describe("optionLabel", () => {
+  it("puts the option after its group and a colon", () => {
+    assert.equal(optionLabel("Mức đá (Ice level)", "Ít đá"), "Mức đá (Ice level): Ít đá");
   });
 });

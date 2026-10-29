@@ -3,10 +3,11 @@ import {
   type Category,
   type Item,
   type ModifierGroup,
+  type ModifierOption,
   type PosMenu,
   type Variation,
 } from "../../ports/PosMenu";
-import { cleanName, foldName, sizeLabel } from "../../text/names";
+import { cleanName, foldName, optionLabel, sizeLabel } from "../../text/names";
 
 /**
  * Turning submitted values into menu entries. A problem the person can fix
@@ -19,6 +20,7 @@ const KINDS = {
   size: { one: "size", many: "sizes", a: "a size" },
   category: { one: "category", many: "categories", a: "a category" },
   group: { one: "modifier group", many: "modifier groups", a: "a modifier group" },
+  option: { one: "option", many: "options", a: "an option" },
 } as const;
 
 export type MenuInput = keyof typeof KINDS;
@@ -27,6 +29,13 @@ export type MenuInput = keyof typeof KINDS;
 export interface FoundSize {
   item: Item;
   size: Variation;
+  label: string;
+}
+
+/** One option of one modifier group, with its "Group: Option" label. */
+export interface FoundOption {
+  group: ModifierGroup;
+  option: ModifierOption;
   label: string;
 }
 
@@ -80,4 +89,12 @@ export async function findCategory(menu: PosMenu, name: string): Promise<Categor
 
 export async function findGroup(menu: PosMenu, name: string): Promise<ModifierGroup> {
   return pick(await menu.listModifierGroups(), (g) => g.name, name, "group");
+}
+
+/** `label` is "Group: Option", matched against every option of every modifier group. */
+export async function findOption(menu: PosMenu, label: string): Promise<FoundOption> {
+  const options = (await menu.listModifierGroups()).flatMap((group) =>
+    group.options.map((option) => ({ group, option, label: optionLabel(group.name, option.name) })),
+  );
+  return pick(options, (o) => o.label, label, "option");
 }

@@ -65,6 +65,7 @@ const ITEMS = "menu_items";
 const SIZES = "menu_item_sizes";
 const CATEGORIES = "menu_categories";
 const GROUPS = "menu_modifier_groups";
+const OPTIONS = "menu_modifier_options";
 
 /** name, area/operation, inputs (`*` = required), dropdown sources, confirm. */
 const TABLE: [string, string, string, Record<string, string>, string?][] = [
@@ -94,6 +95,18 @@ const TABLE: [string, string, string, Record<string, string>, string?][] = [
     { group: GROUPS },
     "Delete the modifier group {group}? This can't be undone.",
   ],
+  ["menu_create_modifier_group", "modifier_groups/create", "name* options* required max_select", {}],
+  ["menu_update_modifier_group", "modifier_groups/edit", "group* name max_select", { group: GROUPS }],
+  ["menu_set_modifier_group_required", "modifier_groups/edit", "group* required*", { group: GROUPS }],
+  ["menu_add_modifier_option", "modifier_options/create", "group* name* price", { group: GROUPS }],
+  ["menu_update_modifier_option", "modifier_options/edit", "option* name price", { option: OPTIONS }],
+  [
+    "menu_remove_modifier_option",
+    "modifier_options/delete",
+    "option*",
+    { option: OPTIONS },
+    "Remove the option {option}? This can't be undone.",
+  ],
 ];
 
 /** Each action with values it runs on, and the PosMenu methods it then calls. */
@@ -120,6 +133,16 @@ const CALLS: [string, Record<string, string | boolean>, string[]][] = [
   ["menu_rename_category", { category: "Trà", name: "Tea" }, ["listCategories", "renameCategory"]],
   ["menu_delete_category", { category: "Trà" }, ["listCategories", "deleteCategory"]],
   ["menu_delete_modifier_group", { group: "Topping" }, ["listModifierGroups", "deleteModifierGroup"]],
+  ["menu_create_modifier_group", { name: "Sốt", options: "Mayo" }, ["createModifierGroup"]],
+  ["menu_update_modifier_group", { group: "Topping", name: "Toppings" }, ["listModifierGroups", "updateModifierGroup"]],
+  [
+    "menu_set_modifier_group_required",
+    { group: "Topping", required: true },
+    ["listModifierGroups", "updateModifierGroup"],
+  ],
+  ["menu_add_modifier_option", { group: "Topping", name: "Pudding" }, ["listModifierGroups", "updateModifierGroup"]],
+  ["menu_update_modifier_option", { option: "Topping: Thạch", price: "1" }, ["listModifierGroups", "updateModifierGroup"]],
+  ["menu_remove_modifier_option", { option: "Mức đá (Ice level): Ít đá" }, ["listModifierGroups", "updateModifierGroup"]],
 ];
 
 describe("menu actions: specs", () => {
@@ -161,7 +184,7 @@ describe("menu actions: specs", () => {
       for (const [key, prop] of Object.entries(schema.properties)) {
         const where = `${spec.name}.${key}`;
         assert.equal(typeof prop.description, "string", where);
-        if (key === "archived") {
+        if (key === "archived" || key === "required") {
           assert.equal(prop.type, "boolean", where);
           continue;
         }
@@ -181,7 +204,7 @@ describe("menu actions: specs", () => {
         sources.set(source.name, (sources.get(source.name) ?? new Set()).add(source));
       }
     }
-    assert.deepEqual([...sources.keys()].sort(), [CATEGORIES, SIZES, ITEMS, GROUPS]);
+    assert.deepEqual([...sources.keys()].sort(), [CATEGORIES, SIZES, ITEMS, GROUPS, OPTIONS]);
     for (const [name, objects] of sources) assert.equal(objects.size, 1, name);
   });
 });
@@ -217,6 +240,19 @@ describe("menu actions: dropdown sources", () => {
       "Mức đá (Ice level)",
       "Mức đường (Sugar level)",
       "Topping",
+    ]);
+    assert.deepEqual(await list("menu_modifier_options"), [
+      "Mức đá (Ice level): Đá bình thường",
+      "Mức đá (Ice level): Ít đá",
+      "Mức đá (Ice level): Không đá",
+      "Mức đường (Sugar level): 0%",
+      "Mức đường (Sugar level): 100%",
+      "Mức đường (Sugar level): 30%",
+      "Mức đường (Sugar level): 50%",
+      "Mức đường (Sugar level): 70%",
+      "Topping: Kem cheese",
+      "Topping: Thạch",
+      "Topping: Trân châu",
     ]);
   });
 
@@ -443,6 +479,127 @@ describe("menu actions: happy paths", () => {
       ["MG-sugar", "MG-ice"],
     );
   });
+
+  it("menu_create_modifier_group creates a group from a comma-separated option list", async () => {
+    const { menu, run } = setup();
+    assert.deepEqual(
+      await run("menu_create_modifier_group", {
+        name: "Sốt",
+        options: " Tương ớt, Mayo +0.50 ,, Phô mai + $1 ",
+        required: true,
+        max_select: "2",
+      }),
+      ok('Created the modifier group "Sốt" (pick up to 2, required): Tương ớt, Mayo +$0.50, Phô mai +$1.00.'),
+    );
+    const group = (await menu.listModifierGroups()).at(-1);
+    assert.deepEqual(
+      group?.options.map((o) => [o.name, o.priceDelta.amount]),
+      [
+        ["Tương ớt", 0],
+        ["Mayo", 50],
+        ["Phô mai", 100],
+      ],
+    );
+    assert.deepEqual(
+      await run("menu_create_modifier_group", { name: "Đá", options: "Ít đá, Nhiều đá", max_select: "" }),
+      ok('Created the modifier group "Đá" (pick one): Ít đá, Nhiều đá.'),
+    );
+  });
+
+  it("menu_update_modifier_group renames a group and changes its pick limit, naming what changed", async () => {
+    const { menu, run } = setup();
+    assert.deepEqual(
+      await run("menu_update_modifier_group", { group: "topping", name: "Toppings", max_select: "2" }),
+      ok('Updated "Topping" (now "Toppings"): name, pick limit.'),
+    );
+    assert.deepEqual(
+      await run("menu_update_modifier_group", { group: "Toppings", name: "", max_select: "1" }),
+      ok('Updated "Toppings": pick limit.'),
+    );
+    const group = (await menu.listModifierGroups()).find((g) => g.id === "MG-topping");
+    assert.deepEqual([group?.name, group?.maxSelect], ["Toppings", 1]);
+  });
+
+  it("menu_set_modifier_group_required makes a group required or optional", async () => {
+    const { menu, run } = setup();
+    assert.deepEqual(
+      await run("menu_set_modifier_group_required", { group: "Topping", required: true }),
+      ok('"Topping" is now required: customers must pick at least one.'),
+    );
+    assert.deepEqual(
+      await run("menu_set_modifier_group_required", { group: "Mức đá (Ice level)", required: false }),
+      ok('"Mức đá (Ice level)" is now optional.'),
+    );
+    const groups = await menu.listModifierGroups();
+    assert.deepEqual(
+      groups.map((g) => [g.id, g.required, g.minSelect]),
+      [
+        ["MG-sugar", true, 1],
+        ["MG-ice", false, 0],
+        ["MG-topping", true, 1],
+      ],
+    );
+  });
+
+  it("menu_add_modifier_option adds an option, free when the price is empty", async () => {
+    const { menu, run } = setup();
+    assert.deepEqual(
+      await run("menu_add_modifier_option", { group: "Topping", name: "Pudding", price: "0.75" }),
+      ok('Added the option "Topping: Pudding" at +$0.75.'),
+    );
+    assert.deepEqual(
+      await run("menu_add_modifier_option", { group: "Topping", name: "Không topping", price: "" }),
+      ok('Added the option "Topping: Không topping" at no extra charge.'),
+    );
+    const group = (await menu.listModifierGroups()).find((g) => g.id === "MG-topping");
+    assert.deepEqual(
+      group?.options.map((o) => [o.name, o.priceDelta.amount]),
+      [
+        ["Trân châu", 75],
+        ["Thạch", 75],
+        ["Kem cheese", 125],
+        ["Pudding", 75],
+        ["Không topping", 0],
+      ],
+    );
+    assert.deepEqual(
+      group?.options.slice(0, 3).map((o) => o.id),
+      ["MO-top-boba", "MO-top-jelly", "MO-top-cheese"],
+    );
+  });
+
+  it("menu_update_modifier_option renames an option and changes its extra charge", async () => {
+    const { menu, run } = setup();
+    assert.deepEqual(
+      await run("menu_update_modifier_option", { option: "topping: thach", name: "Thạch dừa", price: "1" }),
+      ok('Updated "Topping: Thạch" (now "Topping: Thạch dừa"): name, price.'),
+    );
+    assert.deepEqual(
+      await run("menu_update_modifier_option", { option: "Topping: Trân châu", name: "", price: "0" }),
+      ok('Updated "Topping: Trân châu": price.'),
+    );
+    const options = (await menu.listModifierGroups()).find((g) => g.id === "MG-topping")?.options;
+    assert.deepEqual(
+      options?.map((o) => [o.id, o.name, o.priceDelta.amount]),
+      [
+        ["MO-top-boba", "Trân châu", 0],
+        ["MO-top-jelly", "Thạch dừa", 100],
+        ["MO-top-cheese", "Kem cheese", 125],
+      ],
+    );
+  });
+
+  it("menu_remove_modifier_option removes an option", async () => {
+    const { menu, run } = setup();
+    assert.deepEqual(
+      await run("menu_remove_modifier_option", { option: "Mức đá (Ice level): Ít đá" }),
+      ok('Removed the option "Mức đá (Ice level): Ít đá".'),
+    );
+    assert.deepEqual(
+      (await menu.listModifierGroups()).find((g) => g.id === "MG-ice")?.options.map((o) => o.id),
+      ["MO-ice-0", "MO-ice-100"],
+    );
+  });
 });
 
 describe("menu actions: refusals", () => {
@@ -460,6 +617,11 @@ describe("menu actions: refusals", () => {
       ["menu_rename_category", { category: "", name: "X" }, "Choose a category first."],
       ["menu_delete_category", { category: "" }, "Choose a category first."],
       ["menu_delete_modifier_group", { group: "" }, "Choose a modifier group first."],
+      ["menu_update_modifier_group", { group: "", name: "X" }, "Choose a modifier group first."],
+      ["menu_set_modifier_group_required", { group: "", required: true }, "Choose a modifier group first."],
+      ["menu_add_modifier_option", { group: "", name: "X" }, "Choose a modifier group first."],
+      ["menu_update_modifier_option", { option: "", name: "X" }, "Choose an option first."],
+      ["menu_remove_modifier_option", { option: "" }, "Choose an option first."],
     ];
     for (const [action, values, message] of cases) {
       const { menu, calls } = spied(createInMemoryPosMenu());
@@ -512,11 +674,40 @@ describe("menu actions: refusals", () => {
     }
   });
 
+  it("refuse an extra charge, pick limit or option list that can't be read, without calling the menu", async () => {
+    const cases: [string, Record<string, string>, string][] = [
+      ["menu_add_modifier_option", { group: "Topping", name: "X", price: "free" }, "Extra charge must look like 0.75."],
+      ["menu_update_modifier_option", { option: "Topping: Thạch", price: "-1" }, "Extra charge must look like 0.75."],
+      [
+        "menu_update_modifier_group",
+        { group: "Topping", max_select: "two" },
+        "How many a customer may pick must be a whole number, e.g. 1.",
+      ],
+      [
+        "menu_create_modifier_group",
+        { name: "Sốt", options: "Mayo", max_select: "1.5" },
+        "How many a customer may pick must be a whole number, e.g. 1.",
+      ],
+      [
+        "menu_create_modifier_group",
+        { name: "Sốt", options: "Mayo +fifty, Tương" },
+        '"Mayo +fifty": write its extra charge like +0.75.',
+      ],
+    ];
+    for (const [action, values, message] of cases) {
+      const { menu, calls } = spied(createInMemoryPosMenu());
+      assert.deepEqual(await setup(menu).run(action, values), refused(message), action);
+      assert.deepEqual(calls, [], action);
+    }
+  });
+
   it("refuse an update with nothing to change, without calling the menu", async () => {
     for (const [action, values] of [
       ["menu_update_item", { item: "Bạc xỉu", name: "", description: " ", category: "" }],
       ["menu_update_item", { item: "Bạc xỉu" }],
       ["menu_update_size", { size: "Bạc xỉu (L)", name: "", sku: "" }],
+      ["menu_update_modifier_group", { group: "Topping", name: "", max_select: " " }],
+      ["menu_update_modifier_option", { option: "Topping: Thạch", name: "", price: "" }],
     ] as const) {
       const { menu, calls } = spied(createInMemoryPosMenu());
       assert.deepEqual(
@@ -550,6 +741,46 @@ describe("menu actions: refusals", () => {
     );
     assert.equal((await menu.listCategories()).length, 4);
     assert.equal((await item(menu, "Cà phê cốt dừa")).variations.length, 1);
+  });
+
+  it("pass on the menu's reason for a refused modifier group change, and change nothing", async () => {
+    const { menu, run } = setup();
+    const before = await menu.listModifierGroups();
+    assert.deepEqual(
+      await run("menu_create_modifier_group", { name: "Sốt", options: " , " }),
+      refused("A modifier group needs at least one option"),
+    );
+    assert.deepEqual(
+      await run("menu_create_modifier_group", { name: "Sốt", options: "Mayo", max_select: "2" }),
+      refused("Customers can pick between 1 and 1 options here"),
+    );
+    assert.deepEqual(
+      await run("menu_update_modifier_group", { group: "Topping", max_select: "4" }),
+      refused("Customers can pick between 1 and 3 options here"),
+    );
+    assert.deepEqual(
+      await run("menu_add_modifier_option", { group: "Topping", name: "thach" }),
+      refused('"thach" and "Thạch" are the same option ignoring accents.'),
+    );
+    assert.deepEqual(await menu.listModifierGroups(), before);
+  });
+
+  it("menu_remove_modifier_option keeps a group's last option and asks to lower its pick limit first", async () => {
+    const { menu, run } = setup();
+    await menu.createModifierGroup({ name: "Sốt", required: false, maxSelect: 1, options: [{ name: "Mayo", priceDelta: { amount: 0, currency: "USD" } }] });
+    assert.deepEqual(
+      await run("menu_remove_modifier_option", { option: "Sốt: Mayo" }),
+      refused("A modifier group needs at least one option"),
+    );
+    assert.deepEqual(
+      await run("menu_remove_modifier_option", { option: "Topping: Thạch" }),
+      refused('"Topping" lets customers pick up to 3; lower that to 2 first.'),
+    );
+    await run("menu_update_modifier_group", { group: "Topping", max_select: "2" });
+    assert.deepEqual(
+      await run("menu_remove_modifier_option", { option: "Topping: Thạch" }),
+      ok('Removed the option "Topping: Thạch".'),
+    );
   });
 
   it("let any other error through, so the registry answers that the action failed and logs it", async () => {
@@ -593,5 +824,30 @@ describe("menu actions: a generated edit-item form", () => {
     const values = { item: "Bạc xỉu", name: "", description: "Sweeter", category: "" };
     assert.deepEqual(checkActionRequest(tree, "menu_update_item", values), { ok: true });
     assert.deepEqual(await run("menu_update_item", values), ok('Updated "Bạc xỉu": description.'));
+  });
+});
+
+describe("menu actions: a generated new-modifier-group form", () => {
+  it("passes validateUiTree with a Checkbox for required, and a click on it passes checkActionRequest", async () => {
+    const { registry, run } = setup();
+    const tree: UiNode = {
+      component: "Card",
+      children: [
+        { component: "TextInput", props: { label: "Name", name: "name" } },
+        { component: "TextInput", props: { label: "Options", name: "options" } },
+        { component: "Checkbox", props: { label: "Customers must pick one", name: "required" } },
+        { component: "TextInput", props: { label: "Most picks", name: "max_select" } },
+        { component: "Button", props: { label: "Create", action: "menu_create_modifier_group" } },
+      ],
+    };
+    const components = await new InMemoryComponentRepository(catalog).list();
+    assert.deepEqual(validateUiTree(tree, components, registry.specs).errors, []);
+
+    const values = { name: "Sốt", options: "Tương ớt, Mayo +0.50", required: false, max_select: "" };
+    assert.deepEqual(checkActionRequest(tree, "menu_create_modifier_group", values), { ok: true });
+    assert.deepEqual(
+      await run("menu_create_modifier_group", values),
+      ok('Created the modifier group "Sốt" (pick one): Tương ớt, Mayo +$0.50.'),
+    );
   });
 });

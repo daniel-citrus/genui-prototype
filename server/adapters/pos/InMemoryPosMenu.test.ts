@@ -20,12 +20,13 @@ const findItem = async (menu: PosMenu, id: string) =>
   (await menu.listItems({ includeArchived: true })).find((i) => i.id === id);
 
 describe("createInMemoryPosMenu", () => {
-  it("has exactly the fifteen PosMenu methods", () => {
+  it("has exactly the seventeen PosMenu methods", () => {
     const menu: PosMenu = createInMemoryPosMenu();
     assert.deepEqual(Object.keys(menu).sort(), [
       "addVariation",
       "createCategory",
       "createItem",
+      "createModifierGroup",
       "deleteCategory",
       "deleteModifierGroup",
       "listCategories",
@@ -37,6 +38,7 @@ describe("createInMemoryPosMenu", () => {
       "setItemImage",
       "setVariationPrice",
       "updateItem",
+      "updateModifierGroup",
       "updateVariation",
     ]);
   });
@@ -135,6 +137,92 @@ describe("categories", () => {
 });
 
 describe("modifier groups", () => {
+  const option = (name: string, amount = 0) => ({ name, priceDelta: usd(amount) });
+
+  it("creates a group with cleaned names, new ids, and minSelect from required", async () => {
+    const menu = createInMemoryPosMenu();
+    const group = await menu.createModifierGroup({
+      name: " Sốt ",
+      required: true,
+      maxSelect: 2,
+      options: [option(" Tương ớt "), option("Mayo", 50)],
+    });
+    assert.equal(group.name, "Sốt");
+    assert.deepEqual([group.required, group.minSelect, group.maxSelect], [true, 1, 2]);
+    assert.deepEqual(
+      group.options.map(({ modifierGroupId, name, priceDelta }) => ({ modifierGroupId, name, priceDelta })),
+      [
+        { modifierGroupId: group.id, name: "Tương ớt", priceDelta: usd(0) },
+        { modifierGroupId: group.id, name: "Mayo", priceDelta: usd(50) },
+      ],
+    );
+    assert.notEqual(group.options[0]?.id, group.options[1]?.id);
+    assert.deepEqual((await menu.listModifierGroups()).at(-1), group);
+
+    const optional = await menu.createModifierGroup({ name: "Đá", required: false, maxSelect: 1, options: [option("Ít")] });
+    assert.deepEqual([optional.required, optional.minSelect], [false, 0]);
+  });
+
+  it("refuses a group that breaks the rules, and changes nothing", async () => {
+    const menu = createInMemoryPosMenu();
+    const base = { name: "Sốt", required: false, maxSelect: 1, options: [option("Mayo")] };
+    const cases: [Parameters<PosMenu["createModifierGroup"]>[0], string][] = [
+      [{ ...base, name: " " }, "Modifier group name is required"],
+      [{ ...base, options: [] }, "A modifier group needs at least one option"],
+      [{ ...base, options: [option(" ")] }, "Every option needs a name"],
+      [{ ...base, options: [option("Mayo", -1)] }, '"Mayo" needs a price of $0.00 or more'],
+      [{ ...base, options: [option("Mayo", 0.5)] }, '"Mayo" needs a price of $0.00 or more'],
+      [{ ...base, options: [option("Ớt"), option("ot")] }, '"ot" and "Ớt" are the same option ignoring accents.'],
+      [{ ...base, maxSelect: 0 }, "Customers can pick between 1 and 1 options here"],
+      [{ ...base, maxSelect: 2 }, "Customers can pick between 1 and 1 options here"],
+      [{ ...base, name: "topping" }, 'A modifier group named "Topping" already exists.'],
+    ];
+    for (const [input, message] of cases) await refused(menu.createModifierGroup(input), "validation", message);
+    assert.deepEqual(await menu.listModifierGroups(), fixtures.modifierGroups);
+  });
+
+  it("updates a group by the same rules, keeping option ids and adding and removing options", async () => {
+    const menu = createInMemoryPosMenu();
+    const renamed = await menu.updateModifierGroup("MG-topping", { name: "Toppings", required: true, maxSelect: 2 });
+    assert.deepEqual([renamed.name, renamed.required, renamed.minSelect, renamed.maxSelect], ["Toppings", true, 1, 2]);
+    assert.deepEqual(renamed.options, fixtures.modifierGroups[2]?.options);
+
+    const edited = await menu.updateModifierGroup("MG-topping", {
+      options: [{ id: "MO-top-jelly", name: "Thạch dừa", priceDelta: usd(100) }, option("Pudding", 75)],
+    });
+    assert.equal(edited.options[0]?.id, "MO-top-jelly");
+    assert.deepEqual(
+      edited.options.map((o) => [o.name, o.priceDelta.amount]),
+      [
+        ["Thạch dừa", 100],
+        ["Pudding", 75],
+      ],
+    );
+    assert.deepEqual(await menu.listModifierGroups().then((groups) => groups[2]), edited);
+  });
+
+  it("refuses an update that breaks the rules, and changes nothing", async () => {
+    const menu = createInMemoryPosMenu();
+    await refused(
+      menu.updateModifierGroup("MG-topping", { options: [option("Thạch")] }),
+      "validation",
+      "Customers can pick between 1 and 1 options here",
+    );
+    await refused(
+      menu.updateModifierGroup("MG-topping", { options: [{ id: "MO-sugar-0", name: "0%", priceDelta: usd(0) }] }),
+      "validation",
+      'Option MO-sugar-0 isn\'t in "Topping"',
+    );
+    await refused(
+      menu.updateModifierGroup("MG-topping", { name: "MUC DA (ice level)" }),
+      "validation",
+      'A modifier group named "Mức đá (Ice level)" already exists.',
+    );
+    assert.equal((await menu.updateModifierGroup("MG-topping", { name: "topping" })).name, "topping");
+    await menu.updateModifierGroup("MG-topping", { name: "Topping" });
+    assert.deepEqual(await menu.listModifierGroups(), fixtures.modifierGroups);
+  });
+
   it("refuses to delete a group any item uses", async () => {
     const menu = createInMemoryPosMenu();
     await refused(
@@ -297,6 +385,7 @@ describe("unknown ids", () => {
     const calls: [() => Promise<unknown>, string][] = [
       [() => menu.renameCategory("CAT-nope", "X"), "Category not found: CAT-nope"],
       [() => menu.deleteCategory("CAT-nope"), "Category not found: CAT-nope"],
+      [() => menu.updateModifierGroup("MG-nope", {}), "Modifier group not found: MG-nope"],
       [() => menu.deleteModifierGroup("MG-nope"), "Modifier group not found: MG-nope"],
       [() => menu.createItem({ name: "X", categoryId: "CAT-nope", variations: [size] }), "Category not found: CAT-nope"],
       [() => menu.createItem({ name: "X", modifierGroupIds: ["MG-nope"], variations: [size] }), "Modifier group not found: MG-nope"],
