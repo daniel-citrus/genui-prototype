@@ -17,9 +17,13 @@ const CUT_OFF = "Reply was cut off; make the design smaller";
 export interface GenerateDeps extends Omit<DesignCheckDeps, "catalog"> {
   llm: ComponentLlm;
   components: ComponentRepository;
+  /** An empty list each attempt is appended to as it is made, so the caller keeps them when the generation rejects. */
+  attempts?: GenerationAttempt[];
 }
 
 export interface GenerationAttempt {
+  /** The user message that asked for this attempt; absent on the first. */
+  repairPrompt?: string;
   content: string | null;
   truncated: boolean;
   usage?: LlmUsage;
@@ -53,15 +57,16 @@ function parseReply(content: string | null): { tree: unknown; notes: string } | 
  * (with an `AbortError`).
  */
 export async function generateComponent(prompt: string, deps: GenerateDeps): Promise<Generation> {
-  const { llm, components, signal, ...checkDeps } = deps;
+  const { llm, components, signal, attempts = [], ...checkDeps } = deps;
   const context = await buildContext(prompt, deps);
   const messages: LlmMessage[] = buildMessages(context, prompt);
-  const attempts: GenerationAttempt[] = [];
+  let repairPrompt: string | undefined;
 
   for (;;) {
     if (signal.aborted) throw new DOMException("The generation was aborted", "AbortError");
     const reply = await llm.complete({ messages, signal });
     const attempt: GenerationAttempt = {
+      ...(repairPrompt !== undefined ? { repairPrompt } : {}),
       content: reply.content,
       truncated: reply.truncated,
       ...(reply.usage ? { usage: reply.usage } : {}),
@@ -82,6 +87,8 @@ export async function generateComponent(prompt: string, deps: GenerateDeps): Pro
     }
 
     if (attempts.length >= MAX_ATTEMPTS) return { ok: false, problems: attempt.problems, attempts };
-    messages.push(...repairMessages(reply.content, attempt.problems));
+    const repair = repairMessages(reply.content, attempt.problems);
+    messages.push(...repair);
+    repairPrompt = repair.at(-1)!.content;
   }
 }

@@ -233,6 +233,42 @@ describe("main", () => {
     assert.equal(out[0], `fail alpha case timed out after 180 seconds; error: ${aborted}`);
   });
 
+  const used = { promptTokens: 100, cachedPromptTokens: 60, completionTokens: 10 };
+  const partial = [
+    { ...attempt(["bad"]), usage: used },
+    { ...attempt(), repairPrompt: "That reply has problems:\n- bad\nReply again.", usage: used },
+  ];
+
+  it("logs and counts the attempts made before a generation error", async () => {
+    const failed = "generation error: TypeError";
+    const { done, out, logRoot } = run([], (c) => ({ id: c.id, ok: false, failures: [{ reason: failed }], attempts: partial, error: failed }));
+    assert.equal(await done, 1);
+    assert.equal(out[0], `fail alpha ${failed}; attempts: 2`);
+    assert.match(out[3]!, /^usage 4 calls, 400 prompt tokens \(240 cached\), 40 completion tokens, /);
+    const log = JSON.parse(readFileSync(join(logRoot, "2026-10-24T01-02-03.004Z", "alpha.json"), "utf8"));
+    assert.deepEqual(log.attempts, partial);
+    assert.equal(log.error, failed);
+  });
+
+  it("logs and counts the attempts of a case that timed out during a repair", async () => {
+    const aborted = "generation error: AbortError";
+    const { done, out, logRoot } = run([], (c) => pass(c), {
+      inject: {
+        loadCases: () => [cases[0]!],
+        createOpenAIComponentLlm: () => ({}) as ComponentLlm,
+        timeoutSignal: () => AbortSignal.abort(),
+        runEvalCase: async (c) => ({ id: c.id, ok: false, failures: [{ reason: aborted }], attempts: partial, error: aborted }),
+      },
+    });
+    assert.equal(await done, 1);
+    assert.equal(out[0], `fail alpha case timed out after 180 seconds; attempts: 2; error: ${aborted}`);
+    assert.match(out[2]!, /^usage 2 calls, 200 prompt tokens \(120 cached\), 20 completion tokens, /);
+    const log = JSON.parse(readFileSync(join(logRoot, "2026-10-24T01-02-03.004Z", "alpha.json"), "utf8"));
+    assert.deepEqual(log.failures, [{ reason: "case timed out after 180 seconds" }]);
+    assert.deepEqual(log.attempts, partial);
+    assert.equal(log.error, aborted);
+  });
+
   it("refuses without an API key, and on bad arguments", async () => {
     const noKey = run([], (c) => pass(c), { agentAvailable: false });
     assert.equal(await noKey.done, 1);
