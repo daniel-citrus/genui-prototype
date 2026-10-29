@@ -16,7 +16,8 @@ const CASE_TIMEOUT_MS = 180_000;
 
 const defaultCasesDir = join(dirname(fileURLToPath(import.meta.url)), "cases");
 
-export type CliArgs = { ok: true; repeat: number } | { ok: false; error: string };
+/** `cases` lists the case ids to run; empty runs every case. */
+export type CliArgs = { ok: true; repeat: number; cases: string[] } | { ok: false; error: string };
 
 export type CliMainOptions = {
   argv?: string[];
@@ -37,13 +38,14 @@ export type CliMainOptions = {
 };
 
 const REPEAT_ERROR = "--repeat must be a whole number from 1 to 10";
+const CASE_ERROR = "--case needs a case id";
 
 export function parseCliArgs(argv: string[]): CliArgs {
   let parsed;
   try {
     parsed = parseArgs({
       args: argv,
-      options: { repeat: { type: "string" } },
+      options: { repeat: { type: "string" }, case: { type: "string", multiple: true } },
       strict: true,
       allowPositionals: true,
     });
@@ -53,16 +55,18 @@ export function parseCliArgs(argv: string[]): CliArgs {
       const name = /'?(--?[^\s',]+)/.exec((err as Error).message)?.[1] ?? "option";
       return { ok: false, error: `unknown option ${name}` };
     }
-    return { ok: false, error: REPEAT_ERROR };
+    return { ok: false, error: (err as Error).message.includes("--case") ? CASE_ERROR : REPEAT_ERROR };
   }
   if (parsed.positionals.length > 0) {
     return { ok: false, error: `unexpected argument ${parsed.positionals[0]}` };
   }
+  const cases = [...new Set(parsed.values.case ?? [])];
+  if (cases.includes("")) return { ok: false, error: CASE_ERROR };
   const value = parsed.values.repeat;
-  if (value === undefined) return { ok: true, repeat: 1 };
+  if (value === undefined) return { ok: true, repeat: 1, cases };
   const repeat = /^\d+$/.test(value) ? Number(value) : 0;
   if (repeat < 1 || repeat > 10) return { ok: false, error: REPEAT_ERROR };
-  return { ok: true, repeat };
+  return { ok: true, repeat, cases };
 }
 
 function attemptCount(result: EvalCaseResult): number | undefined {
@@ -134,7 +138,7 @@ export async function main(options: CliMainOptions = {}): Promise<number> {
     error(args.error);
     return 1;
   }
-  const { repeat } = args;
+  const { repeat, cases: only } = args;
 
   if (!available) {
     error("OPENAI_API_KEY is required to run eval cases.");
@@ -159,6 +163,14 @@ export async function main(options: CliMainOptions = {}): Promise<number> {
   } catch (err) {
     error(`failed to load eval cases: ${err instanceof Error ? err.message : String(err)}`);
     return 1;
+  }
+  if (only.length > 0) {
+    const unknown = only.filter((id) => !cases.some((c) => c.id === id));
+    if (unknown.length > 0) {
+      error(`unknown case ${unknown.join(", ")}`);
+      return 1;
+    }
+    cases = cases.filter((c) => only.includes(c.id));
   }
 
   let logDir: string;

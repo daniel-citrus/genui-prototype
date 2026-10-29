@@ -65,9 +65,19 @@ const failBeta = (c: EvalCase): EvalCaseResult =>
     : pass(c);
 
 describe("parseCliArgs", () => {
-  it("defaults to one run and accepts 1 to 10", () => {
-    assert.deepEqual(parseCliArgs([]), { ok: true, repeat: 1 });
-    assert.deepEqual(parseCliArgs(["--repeat", "10"]), { ok: true, repeat: 10 });
+  it("defaults to one run of every case and accepts 1 to 10", () => {
+    assert.deepEqual(parseCliArgs([]), { ok: true, repeat: 1, cases: [] });
+    assert.deepEqual(parseCliArgs(["--repeat", "10"]), { ok: true, repeat: 10, cases: [] });
+  });
+
+  it("collects each --case once, alongside --repeat", () => {
+    assert.deepEqual(parseCliArgs(["--case", "b", "--repeat", "2", "--case=a", "--case", "b"]), { ok: true, repeat: 2, cases: ["b", "a"] });
+  });
+
+  it("refuses --case without an id", () => {
+    for (const bad of [["--case"], ["--case="], ["--case", "--repeat", "2"]]) {
+      assert.deepEqual(parseCliArgs(bad), { ok: false, error: "--case needs a case id" }, bad.join(" "));
+    }
   });
 
   it("refuses bad repeats, unknown options and positionals", () => {
@@ -150,6 +160,27 @@ describe("main", () => {
     const log = JSON.parse(readFileSync(join(logRoot, "2026-10-24T01-02-03.004Z", "alpha.json"), "utf8"));
     assert.equal(log.attempts.length, 3);
     assert.equal("tree" in log, false);
+  });
+
+  it("with --case runs only the named cases", async () => {
+    const { done, out, logRoot } = run(["--case", "beta"], (c) => pass(c));
+    assert.equal(await done, 0);
+    assert.equal(out[0], "pass beta");
+    assert.equal(out[1], "first-try 1/1");
+    assert.deepEqual(readdirSync(join(logRoot, "2026-10-24T01-02-03.004Z")), ["beta.json"]);
+  });
+
+  it("refuses an unknown --case before running anything", async () => {
+    let ran = 0;
+    const { done, out, err, logRoot } = run(["--case", "alpha", "--case", "nope", "--case", "gone"], (c) => {
+      ran++;
+      return pass(c);
+    });
+    assert.equal(await done, 1);
+    assert.deepEqual(err, ["unknown case nope, gone"]);
+    assert.deepEqual(out, []);
+    assert.equal(ran, 0);
+    assert.deepEqual(readdirSync(logRoot), []);
   });
 
   it("prints a run error once, and a seed error with no attempts", async () => {

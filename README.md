@@ -82,7 +82,7 @@ npm run preview       # serve dist/ on :4173
 npm run db:generate   # new migration after editing server/adapters/db/schema.ts
 npm run db:seed       # sync the components table with server/catalog/components.ts (rerun after pulling catalog changes)
 npm run db:studio     # browse the database
-npm run eval          # live OpenAI eval cases through the generator; gitignored eval-logs JSON per case; `-- --repeat N` (1-10) reruns each case, logs <id>.<k>.json (needs OPENAI_API_KEY; same model as the API; not run in CI)
+npm run eval          # live OpenAI eval cases through the generator; gitignored eval-logs JSON per case; `-- --repeat N` (1-10) reruns each case, logs <id>.<k>.json; `-- --case <id>` (repeatable) runs only those cases (needs OPENAI_API_KEY; same model as the API; not run in CI)
 ```
 
 ## Docker
