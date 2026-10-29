@@ -1,6 +1,6 @@
 import type { PosMenu } from "../../ports/PosMenu";
 import { foldName, optionLabel, sizeLabel } from "../../text/names";
-import type { ChoiceSource } from "../types";
+import type { ChoiceGroup, ChoiceSource } from "../types";
 
 /** The dropdown sources of the menu actions; actions using one share the object. */
 export interface MenuChoices {
@@ -19,12 +19,38 @@ function byFoldedName(names: string[]): string[] {
     .map(({ name }) => name);
 }
 
-/** The five sources over `menu`, each listing current names sorted by folded name. */
+/** The last item group: items with no category, or one the menu no longer has. */
+export const NO_CATEGORY = "No category";
+
+/** Item names grouped by category name, both sorted by folded name, with `NO_CATEGORY` last. */
+async function itemGroups(menu: PosMenu): Promise<ChoiceGroup[]> {
+  const [items, categories] = await Promise.all([menu.listItems({ includeArchived: true }), menu.listCategories()]);
+  const categoryNames = new Map(categories.map((c) => [c.id, c.name]));
+  const byCategory = new Map<string, string[]>();
+  const uncategorized: string[] = [];
+  for (const item of items) {
+    const category = item.categoryId === undefined ? undefined : categoryNames.get(item.categoryId);
+    if (category === undefined) uncategorized.push(item.name);
+    else if (byCategory.has(category)) byCategory.get(category)!.push(item.name);
+    else byCategory.set(category, [item.name]);
+  }
+  const groups = byFoldedName([...byCategory.keys()]).map((name) => ({
+    name,
+    values: byFoldedName(byCategory.get(name)!),
+  }));
+  return uncategorized.length > 0 ? [...groups, { name: NO_CATEGORY, values: byFoldedName(uncategorized) }] : groups;
+}
+
+/**
+ * The five sources over `menu`, each listing current names sorted by folded
+ * name. Items are also listed grouped by category.
+ */
 export function createMenuChoices(menu: PosMenu): MenuChoices {
   return {
     items: {
       name: "menu_items",
       list: async () => byFoldedName((await menu.listItems({ includeArchived: true })).map((i) => i.name)),
+      listGroups: () => itemGroups(menu),
     },
     sizes: {
       name: "menu_item_sizes",

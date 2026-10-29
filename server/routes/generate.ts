@@ -70,6 +70,7 @@ export const generateRouter: FastifyPluginAsync<GenerateRouterOptions> = async (
         components: opts.components,
         actions: opts.actions.specs,
         listChoices: opts.actions.listChoices,
+        listChoiceGroups: opts.actions.listChoiceGroups,
         customComponents: opts.customComponents,
         log: req.log,
         signal,
