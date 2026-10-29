@@ -1,0 +1,8 @@
+{
+  "id": "large-list-tabs",
+  "prompt": "Show our whole drinks list on one page. Coffee: Espresso, Americano, Latte, Cappuccino, Flat White, Mocha. Tea: Green Tea, Black Tea, Chai Latte, Jasmine Tea, Oolong, Matcha Latte. Smoothies: Mango Smoothie, Strawberry Smoothie, Banana Smoothie, Berry Blast, Green Detox, Peach Smoothie. Juices: Orange Juice, Apple Juice, Carrot Juice, Watermelon Juice, Pineapple Juice, Lemonade.",
+  "checks": [
+    { "uiComponent": "Tabs" },
+    { "uiText": "Lemonade" }
+  ]
+}

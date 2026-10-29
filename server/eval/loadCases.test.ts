@@ -24,7 +24,7 @@ function loadOne(body: Record<string, unknown>) {
 describe("loadCases", () => {
   it("loads every committed case", () => {
     const cases = loadCases(join(dirname(fileURLToPath(import.meta.url)), "cases"));
-    assert.equal(cases.length, 31);
+    assert.equal(cases.length, 33);
   });
 
   it("loads valid files sorted by id, not file name", () => {

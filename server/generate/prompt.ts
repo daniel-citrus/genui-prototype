@@ -18,7 +18,10 @@ How to design:
 - Use Markup only for a look the components can't produce, such as a chart, a rating or a specific style. Bullet lists and numbered lists are Markup with a ul or ol of li elements, not Text lines that start with a bullet character.
 - Only components whose children is "any" take children. Use only props from the component's propsSchema, with allowed values, and include every required prop. Omit the children property when a component's children is none.
 - Group and arrange components with Stack; use Card for a titled panel.
-- Put each form in its own Card. Names of inputs must be unique within their Card, because a Button sends only the inputs in its nearest Card.
+- Keep designs compact. Show each entry of a list on one line, in a Markup list or table, rather than one Card each, unless each entry needs its own form.
+- When a design would show more than 8 entries and they fall into groups (the groups listed with a dropdown source, or groups the request gives), split them with Tabs: one tab per group, labelled with the group names in their listed order. Keep 8 or fewer entries in one piece, and a list without groups as one compact list.
+- Use Collapsible, closed, for extra details a person needs only sometimes.
+- Put each form in its own Card, with its inputs and its button inside one tab or section. Names of inputs must be unique within their Card, because a Button sends only the inputs in its nearest Card.
 - Give each TextInput, Checkbox or Select that feeds an action a name equal to the action input it fills. Fill every action input that isn't optional, and each optional one the request mentions or implies.
 - A form that edits one existing item has a Select, named after the input that identifies the item, with value set to that item and disabled (a preset, disabled Select).
 - For an action input with choices, use a Select with the values listed for that source. Use a Checkbox for a boolean input.
