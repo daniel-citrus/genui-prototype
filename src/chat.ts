@@ -43,6 +43,8 @@ interface Design {
   /** An action's result or confirm question, under the notes. */
   reply: HTMLElement;
   replaced: boolean;
+  /** The Cards earlier successes locked; their stale dropdowns can send nothing. */
+  lockedCards: string[];
   actionInFlight: boolean;
   /** Set while the reply asks an action's confirm question. */
   confirmShown: boolean;
@@ -102,8 +104,10 @@ function disableControls(root: HTMLElement) {
 function lock(design: Design, scope: string) {
   const card = scope === "tree" ? null : design.canvas.querySelector<HTMLElement>(`[data-card="${scope}"]`);
   disableControls(card ?? design.canvas);
-  if (card) card.prepend(badge("Done", "success"));
-  else design.labels.append(badge("Done", "success"));
+  if (card) {
+    card.prepend(badge("Done", "success"));
+    design.lockedCards.push(scope);
+  } else design.labels.append(badge("Done", "success"));
 }
 
 /** Shows a reply under the design's notes in place of the last one; no `tone` clears it. Either drops a confirm question. */
@@ -166,7 +170,7 @@ export function createChat(container: HTMLElement): Chat {
       return;
     }
     const card = nearestCard(design.tree, buttonPath);
-    const scope = lockScope(design.tree, buttonPath, result.stale);
+    const scope = lockScope(design.tree, buttonPath, result.stale, design.lockedCards);
     lock(design, scope);
     let note = "";
     if (!design.replaced) {
@@ -222,6 +226,7 @@ export function createChat(container: HTMLElement): Chat {
       labels: el("div", "flex flex-wrap gap-2 empty:hidden"),
       reply: el("div", ""),
       replaced: false,
+      lockedCards: [],
       actionInFlight: false,
       confirmShown: false,
     };
