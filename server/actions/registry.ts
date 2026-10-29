@@ -6,6 +6,7 @@ import {
   type ActionContext,
   type ActionDefinition,
   type ActionRegistry,
+  type ChoiceGroup,
   type ChoiceSource,
 } from "./types";
 
@@ -107,6 +108,12 @@ export function createActionRegistry(
     byName.set(def.name, { def, validate: compileSchema(schema) });
   }
 
+  const sourceNamed = (name: string): ChoiceSource => {
+    const found = sources.get(name);
+    if (!found) throw new Error(`Unknown choice source: ${name}`);
+    return found;
+  };
+
   return {
     specs: definitions.map(({ name, description, input_schema, area, operation, choices, confirm }) => ({
       name,
@@ -162,9 +169,11 @@ export function createActionRegistry(
     },
 
     async listChoices(source: string, signal: AbortSignal): Promise<string[]> {
-      const found = sources.get(source);
-      if (!found) throw new Error(`Unknown choice source: ${source}`);
-      return found.list(signal);
+      return sourceNamed(source).list(signal);
+    },
+
+    async listChoiceGroups(source: string, signal: AbortSignal): Promise<ChoiceGroup[] | undefined> {
+      return sourceNamed(source).listGroups?.(signal);
     },
   };
 }

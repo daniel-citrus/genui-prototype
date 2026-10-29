@@ -11,6 +11,7 @@ import { validateUiTree } from "../../ui/validateTree";
 import { createActions } from "../index";
 import { createActionRegistry } from "../registry";
 import type { ActionContext } from "../types";
+import { NO_CATEGORY } from "./choices";
 import { createMenuActions } from "./index";
 
 const signal = new AbortController().signal;
@@ -272,6 +273,41 @@ describe("menu actions: dropdown sources", () => {
     const { registry, run } = setup();
     await run("menu_rename_category", { category: "Bánh", name: "Ăn vặt" });
     assert.deepEqual(await registry.listChoices(CATEGORIES, signal), ["Ăn vặt", "Cà phê", "Đá xay", "Trà"]);
+  });
+
+  it("group the demo menu's items by category, both sorted by folded name, archived items included", async () => {
+    const { registry } = setup();
+    assert.deepEqual(await registry.listChoiceGroups(ITEMS, signal), [
+      { name: "Bánh", values: ["Bánh mì thịt", "Chè ba màu"] },
+      { name: "Cà phê", values: ["Bạc xỉu", "Cà phê đen đá", "Cà phê sữa đá"] },
+      { name: "Đá xay", values: ["Cà phê cốt dừa"] },
+      { name: "Trà", values: ["Trà đào cam sả"] },
+    ]);
+  });
+
+  it("group items without a known category last, leaving out empty categories", async () => {
+    const base = createInMemoryPosMenu();
+    const [first] = await base.listItems();
+    assert.ok(first);
+    const menu: PosMenu = {
+      ...base,
+      listCategories: async () => [...(await base.listCategories()), { id: "CAT-empty", name: "Ăn vặt" }],
+      listItems: async (opts) => [
+        ...(await base.listItems(opts)),
+        { ...first, id: "ITEM-x", name: "Nước cam", categoryId: undefined },
+        { ...first, id: "ITEM-y", name: "Bánh flan", categoryId: "CAT-gone" },
+      ],
+    };
+    const groups = await setup(menu).registry.listChoiceGroups(ITEMS, signal);
+    assert.deepEqual(groups?.map((g) => g.name), ["Bánh", "Cà phê", "Đá xay", "Trà", NO_CATEGORY]);
+    assert.deepEqual(groups?.at(-1)?.values, ["Bánh flan", "Nước cam"]);
+  });
+
+  it("have no groups for the other sources", async () => {
+    const { registry } = setup();
+    for (const source of [CATEGORIES, SIZES, GROUPS, OPTIONS]) {
+      assert.equal(await registry.listChoiceGroups(source, signal), undefined, source);
+    }
   });
 });
 

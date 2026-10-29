@@ -65,6 +65,7 @@ export async function runEvalCase(
       customComponents,
       actions: registry.specs,
       listChoices: registry.listChoices,
+      listChoiceGroups: registry.listChoiceGroups,
       log: noopLogger,
       signal: opts.signal ?? neverAborted,
       attempts,
