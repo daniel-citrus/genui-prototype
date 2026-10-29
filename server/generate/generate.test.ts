@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { catalog } from "../catalog/components";
 import type { ComponentLlm, LlmMessage, LlmReply } from "../ports/ComponentLlm";
 import { InMemoryComponentRepository } from "../ports/fakes/InMemoryComponentRepository";
-import { generateComponent, MAX_ATTEMPTS, MAX_NOTES_CHARS, type GenerateDeps } from "./generate";
+import { generateComponent, MAX_ATTEMPTS, MAX_NOTES_CHARS, type GenerateDeps, type GenerationAttempt } from "./generate";
 
 const components = new InMemoryComponentRepository(catalog);
 
@@ -90,6 +90,36 @@ describe("generateComponent", () => {
     assert.equal(calls.length, 3);
     assert.ok(result.attempts[0]!.problems.length > 0);
     assert.equal(calls[2]!.length, calls[0]!.length + 4);
+  });
+
+  it("records on each attempt after the first the repair message that asked for it", async () => {
+    const { llm, calls } = scripted([badDesign, "not json", good]);
+    const { attempts } = await generateComponent("x", deps(llm));
+    assert.equal(attempts.length, 3);
+    assert.equal("repairPrompt" in attempts[0]!, false);
+    for (const n of [1, 2]) {
+      const sent = calls[n]!.at(-1)!;
+      assert.equal(sent.role, "user");
+      assert.equal(attempts[n]!.repairPrompt, sent.content);
+      const head = `That reply has problems:\n${attempts[n - 1]!.problems.map((p) => `- ${p}\n`).join("")}`;
+      assert.equal(sent.content.slice(0, head.length), head);
+      assert.match(sent.content.slice(head.length), /^Reply again [^\n]+$/);
+    }
+  });
+
+  it("appends each attempt to the caller's list and returns that list", async () => {
+    const attempts: GenerationAttempt[] = [];
+    const result = await generateComponent("x", deps(scripted([badDesign, good]).llm, { attempts }));
+    assert.equal(result.attempts, attempts);
+    assert.equal(attempts.length, 2);
+  });
+
+  it("keeps the completed attempts in the caller's list when a repair call fails", async () => {
+    const attempts: GenerationAttempt[] = [];
+    await assert.rejects(generateComponent("x", deps(scripted([badDesign, new Error("503")]).llm, { attempts })), /503/);
+    assert.equal(attempts.length, 1);
+    assert.equal(attempts[0]!.content, badDesign);
+    assert.ok(attempts[0]!.problems.length > 0);
   });
 
   it("gives up after three bad designs without a fourth call", async () => {

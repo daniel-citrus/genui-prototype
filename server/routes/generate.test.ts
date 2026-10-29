@@ -256,7 +256,7 @@ describe("POST /api/generate", () => {
     const marker = "MARKER-7f3a9";
     const logLines: string[] = [];
     const reply = JSON.stringify({ tree: { component: "Heading", props: { text: marker, level: 1 } }, notes: marker });
-    const { llm } = scripted([{ content: reply, usage: { promptTokens: 7, completionTokens: 3 } }]);
+    const { llm } = scripted([{ content: reply, usage: { promptTokens: 7, cachedPromptTokens: 5, completionTokens: 3 } }]);
     const { app } = await build({ llm, logLines });
     const a = app;
     const res = await post(a, { prompt: `show ${marker}` });
@@ -273,6 +273,7 @@ describe("POST /api/generate", () => {
     assert.equal(entry.attempts, 1);
     assert.equal(entry.problems, 0);
     assert.equal(entry.promptTokens, 7);
+    assert.equal(entry.cachedPromptTokens, 5);
     assert.equal(entry.completionTokens, 3);
     assert.equal(typeof entry.durationMs, "number");
   });

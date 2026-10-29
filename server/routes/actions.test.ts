@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import type { UiNode } from "shared/ui";
+import { createInMemoryPosMenu } from "../adapters/pos/InMemoryPosMenu";
+import { createMenuActions } from "../actions/menu";
 import { createActionRegistry } from "../actions/registry";
+import type { ActionRegistry, ChoiceSource } from "../actions/types";
 import { createDesignStore } from "../designs";
 import { buildApp } from "../app";
 import { DESIGN_GONE_MESSAGE } from "./actions";
@@ -74,9 +77,9 @@ const actions = createActionRegistry([
   },
 ]);
 
-const build = (opts: { max?: number; logLines?: string[] } = {}) =>
+const build = (opts: { max?: number; logLines?: string[]; actions?: ActionRegistry } = {}) =>
   buildApp({
-    actions,
+    actions: opts.actions ?? actions,
     designs,
     rateLimit: { max: opts.max ?? 1000 },
     logLevel: opts.logLines ? "info" : undefined,
@@ -116,7 +119,7 @@ describe("POST /api/actions/run", () => {
     const res = await run(app, body({ values: { note: "hi", search: "shoes", size: "M", gift: true } }));
     await app.close();
     assert.equal(res.statusCode, 200);
-    assert.deepEqual(res.json(), { ok: true, message: "Saved." });
+    assert.deepEqual(res.json(), { ok: true, message: "Saved.", stale: [] });
     assert.deepEqual(received, [{ note: "hi", size: "M", gift: true }]);
   });
 
@@ -285,7 +288,7 @@ describe("POST /api/actions/run", () => {
       const res = await run(app, remove({ confirmed: true }));
       await app.close();
       assert.equal(res.statusCode, 200);
-      assert.deepEqual(res.json(), { ok: true, message: "Removed." });
+      assert.deepEqual(res.json(), { ok: true, message: "Removed.", stale: [] });
       assert.deepEqual(removed, [{ note: "hi" }]);
     });
 
@@ -319,7 +322,7 @@ describe("POST /api/actions/run", () => {
       const app = await build();
       for (const confirmed of [true, false]) {
         const res = await run(app, body({ values: { note: "hi" }, confirmed }));
-        assert.deepEqual(res.json(), { ok: true, message: "Saved." });
+        assert.deepEqual(res.json(), { ok: true, message: "Saved.", stale: [] });
       }
       await app.close();
       assert.deepEqual(received, [{ note: "hi" }, { note: "hi" }]);
@@ -385,6 +388,160 @@ describe("POST /api/actions/run", () => {
       assert.equal(res.statusCode, 400);
       assert.equal(res.json().error.message, 'This design has no input named "search" next to a "save_note" button.');
       assert.deepEqual(received, []);
+    });
+  });
+
+  describe("stale scopes on the demo menu", () => {
+    const ITEMS = ["Bạc xỉu", "Bánh mì thịt"];
+    const CATEGORIES = ["Bánh", "Cà phê", "Đá xay", "Trà"];
+    const nameInput = { component: "TextInput", props: { label: "New name", name: "name" } };
+    const categorySelect = { component: "Select", props: { label: "Category", name: "category", options: CATEGORIES } };
+    const menuApp = () => build({ actions: createActionRegistry(createMenuActions(createInMemoryPosMenu())) });
+
+    it("names only the renamed item's Card when each Card is locked to its item", async () => {
+      const itemCard = (item: string) => ({
+        component: "Card",
+        children: [
+          { component: "Select", props: { label: "Item", name: "item", options: ITEMS, value: item, disabled: true } },
+          nameInput,
+          { component: "Button", props: { label: "Save", action: "menu_update_item" } },
+        ],
+      });
+      designs.remember(DESIGN_ID, { component: "Stack", children: ITEMS.map(itemCard) });
+      const app = await menuApp();
+      const res = await run(app, body({ action: "menu_update_item", values: { item: "Bạc xỉu", name: "Bạc xỉu nóng" } }));
+      await app.close();
+      assert.equal(res.json().ok, true, res.json().message);
+      assert.deepEqual(res.json().stale, ["tree.children.0"]);
+    });
+
+    const categoryForms: UiNode = {
+      component: "Stack",
+      children: [
+        {
+          component: "Card",
+          children: [nameInput, { component: "Button", props: { label: "Create", action: "menu_create_category" } }],
+        },
+        {
+          component: "Card",
+          children: [
+            categorySelect,
+            nameInput,
+            { component: "Button", props: { label: "Rename", action: "menu_rename_category" } },
+          ],
+        },
+        {
+          component: "Card",
+          children: [
+            { component: "Select", props: { label: "Item", name: "item", options: ITEMS } },
+            categorySelect,
+            { component: "Button", props: { label: "Move", action: "menu_update_item" } },
+          ],
+        },
+      ],
+    };
+
+    it("answers stale: [] when a new category leaves every option in place", async () => {
+      designs.remember(DESIGN_ID, categoryForms);
+      const app = await menuApp();
+      const res = await run(app, body({ action: "menu_create_category", values: { name: "Bánh ngọt" } }));
+      await app.close();
+      assert.equal(res.json().ok, true, res.json().message);
+      assert.deepEqual(res.json().stale, []);
+    });
+
+    it("names every Card whose enabled Select still offers a renamed category", async () => {
+      designs.remember(DESIGN_ID, categoryForms);
+      const app = await menuApp();
+      const res = await run(app, body({ action: "menu_rename_category", values: { category: "Trà", name: "Trà sữa" } }));
+      await app.close();
+      assert.equal(res.json().ok, true, res.json().message);
+      assert.deepEqual(res.json().stale, ["tree.children.1", "tree.children.2"]);
+    });
+  });
+
+  describe("a dropdown source that fails to list", () => {
+    const broken: ChoiceSource = {
+      name: "broken_sizes",
+      async list() {
+        throw new Error("source down");
+      },
+    };
+    const sizeSchema = {
+      type: "object",
+      properties: { size: { type: "string", description: "Size." } },
+      additionalProperties: false,
+    };
+    const sizeActions = createActionRegistry([
+      {
+        name: "pick_size",
+        description: "Picks a size.",
+        input_schema: sizeSchema,
+        choices: { size: broken },
+        async run(values) {
+          return values.size === "S" ? { ok: false, message: "S is sold out." } : { ok: true, message: "Picked." };
+        },
+      },
+      {
+        name: "drop_size",
+        description: "Drops a size.",
+        input_schema: sizeSchema,
+        choices: { size: broken },
+        confirm: "Drop {size}?",
+        async run() {
+          return { ok: true, message: "Dropped." };
+        },
+      },
+    ]);
+    const sizeDesign: UiNode = {
+      component: "Stack",
+      children: [
+        { component: "Heading", props: { text: "Sizes" } },
+        {
+          component: "Card",
+          children: [
+            { component: "Select", props: { label: "Size", name: "size", options: ["S", "private-size"] } },
+            { component: "Button", props: { label: "Pick", action: "pick_size" } },
+            { component: "Button", props: { label: "Drop", action: "drop_size" } },
+          ],
+        },
+      ],
+    };
+
+    it("still answers ok: true with its message, with the scopes bound to it stale", async () => {
+      designs.remember(DESIGN_ID, sizeDesign);
+      const logLines: string[] = [];
+      const app = await build({ actions: sizeActions, logLines });
+      const res = await run(app, body({ action: "pick_size", values: { size: "private-size" } }));
+      await app.close();
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(res.json(), { ok: true, message: "Picked.", stale: ["tree.children.1"] });
+      const all = logLines.join("");
+      assert.match(all, /loading dropdown values failed/);
+      assert.match(all, /broken_sizes/);
+      assert.ok(!all.includes("private-size"));
+    });
+
+    it("carries no stale on a failed action, a confirm question, a 400 or a 409", async () => {
+      designs.remember(DESIGN_ID, sizeDesign);
+      const app = await build({ actions: sizeActions });
+      const answers = [
+        await run(app, body({ action: "pick_size", values: { size: "S" } })),
+        await run(app, body({ action: "drop_size", values: { size: "S" } })),
+        await run(app, body({ action: "pick_size", values: { size: "XL" } })),
+        await run(app, body({ action: "pick_size", designId: "design-2" })),
+      ];
+      await app.close();
+      assert.deepEqual(
+        answers.map((res) => [res.statusCode, res.json().ok, res.json().confirm]),
+        [
+          [200, false, undefined],
+          [200, false, "Drop S?"],
+          [400, undefined, undefined],
+          [409, undefined, undefined],
+        ],
+      );
+      for (const res of answers) assert.ok(!("stale" in res.json()), res.body);
     });
   });
 });

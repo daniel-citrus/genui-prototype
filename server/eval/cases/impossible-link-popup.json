@@ -1,0 +1,8 @@
+{
+  "id": "impossible-link-popup",
+  "prompt": "Show our opening hours, Monday to Friday 7am to 6pm, with a link to our website and a button that opens a popup with the full menu.",
+  "checks": [
+    { "uiText": "Monday" },
+    { "maxAttempts": 1 }
+  ]
+}

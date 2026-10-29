@@ -3,6 +3,7 @@
   "prompt": "Show a Download CSV button that runs the export_csv action.",
   "checks": [
     { "uiComponent": "Button" },
-    { "noButtonAction": true }
+    { "noButtonAction": true },
+    { "notesMentions": ["yet", "do anything", "action", "for looks", "for show"] }
   ]
 }

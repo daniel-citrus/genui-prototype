@@ -3,9 +3,10 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createOpenAIComponentLlm } from "../adapters/openai/OpenAIComponentLlm";
 import { agentAvailable, config } from "../config";
+import type { GenerationAttempt } from "../generate/generate";
 import { loadCases } from "./loadCases";
 import { runEvalCase } from "./runner";
-import type { EvalCaseResult } from "./types";
+import type { EvalCase, EvalCaseResult } from "./types";
 import {
   createEvalLogDir,
   writeEvalCaseLog,
@@ -16,7 +17,8 @@ const CASE_TIMEOUT_MS = 180_000;
 
 const defaultCasesDir = join(dirname(fileURLToPath(import.meta.url)), "cases");
 
-export type CliArgs = { ok: true; repeat: number } | { ok: false; error: string };
+/** `cases` lists the case ids to run; empty runs every case. */
+export type CliArgs = { ok: true; repeat: number; cases: string[] } | { ok: false; error: string };
 
 export type CliMainOptions = {
   argv?: string[];
@@ -37,13 +39,14 @@ export type CliMainOptions = {
 };
 
 const REPEAT_ERROR = "--repeat must be a whole number from 1 to 10";
+const CASE_ERROR = "--case needs a case id";
 
 export function parseCliArgs(argv: string[]): CliArgs {
   let parsed;
   try {
     parsed = parseArgs({
       args: argv,
-      options: { repeat: { type: "string" } },
+      options: { repeat: { type: "string" }, case: { type: "string", multiple: true } },
       strict: true,
       allowPositionals: true,
     });
@@ -53,27 +56,53 @@ export function parseCliArgs(argv: string[]): CliArgs {
       const name = /'?(--?[^\s',]+)/.exec((err as Error).message)?.[1] ?? "option";
       return { ok: false, error: `unknown option ${name}` };
     }
-    return { ok: false, error: REPEAT_ERROR };
+    return { ok: false, error: (err as Error).message.includes("--case") ? CASE_ERROR : REPEAT_ERROR };
   }
   if (parsed.positionals.length > 0) {
     return { ok: false, error: `unexpected argument ${parsed.positionals[0]}` };
   }
+  const cases = [...new Set(parsed.values.case ?? [])];
+  if (cases.includes("")) return { ok: false, error: CASE_ERROR };
   const value = parsed.values.repeat;
-  if (value === undefined) return { ok: true, repeat: 1 };
+  if (value === undefined) return { ok: true, repeat: 1, cases };
   const repeat = /^\d+$/.test(value) ? Number(value) : 0;
   if (repeat < 1 || repeat > 10) return { ok: false, error: REPEAT_ERROR };
-  return { ok: true, repeat };
+  return { ok: true, repeat, cases };
 }
 
-function attemptCount(result: EvalCaseResult): number | undefined {
-  return result.generation?.attempts.length;
+/** Every model call the case made, including those completed before the generation rejected. */
+function attemptsOf(result: EvalCaseResult): GenerationAttempt[] {
+  return result.generation?.attempts ?? result.attempts ?? [];
+}
+
+interface UsageTotals {
+  calls: number;
+  promptTokens: number;
+  cachedPromptTokens: number;
+  completionTokens: number;
+  durationMs: number;
+}
+
+function addUsage(totals: UsageTotals, result: EvalCaseResult, durationMs: number): void {
+  for (const attempt of attemptsOf(result)) {
+    totals.calls++;
+    totals.promptTokens += attempt.usage?.promptTokens ?? 0;
+    totals.cachedPromptTokens += attempt.usage?.cachedPromptTokens ?? 0;
+    totals.completionTokens += attempt.usage?.completionTokens ?? 0;
+  }
+  totals.durationMs += durationMs;
+}
+
+function formatUsage(t: UsageTotals): string {
+  const seconds = (t.durationMs / 1000).toFixed(1);
+  return `usage ${t.calls} calls, ${t.promptTokens} prompt tokens (${t.cachedPromptTokens} cached), ${t.completionTokens} completion tokens, ${seconds}s`;
 }
 
 function formatResult(result: EvalCaseResult, label = ""): string {
   if (result.ok) return `pass ${result.id}${label}`;
   const parts = result.failures.map((f) => f.reason);
-  const attempts = attemptCount(result);
-  if (attempts !== undefined) parts.push(`attempts: ${attempts}`);
+  const attempts = attemptsOf(result).length;
+  if (attempts > 0) parts.push(`attempts: ${attempts}`);
   if (result.error !== undefined && !parts.includes(result.error)) parts.push(`error: ${result.error}`);
   return `fail ${result.id}${label} ${parts.join("; ")}`;
 }
@@ -84,6 +113,7 @@ function timeoutResult(id: string, partial: EvalCaseResult): EvalCaseResult {
     ok: false,
     failures: [{ reason: "case timed out after 180 seconds" }],
     ...(partial.generation !== undefined ? { generation: partial.generation } : {}),
+    ...(partial.attempts !== undefined ? { attempts: partial.attempts } : {}),
     ...(partial.error !== undefined ? { error: partial.error } : {}),
   };
 }
@@ -111,7 +141,7 @@ export async function main(options: CliMainOptions = {}): Promise<number> {
     error(args.error);
     return 1;
   }
-  const { repeat } = args;
+  const { repeat, cases: only } = args;
 
   if (!available) {
     error("OPENAI_API_KEY is required to run eval cases.");
@@ -130,7 +160,21 @@ export async function main(options: CliMainOptions = {}): Promise<number> {
   const nowFn = options.now ?? (() => new Date());
 
   const casesDir = options.casesDir ?? defaultCasesDir;
-  const cases = loadCasesFn(casesDir);
+  let cases: EvalCase[];
+  try {
+    cases = loadCasesFn(casesDir);
+  } catch (err) {
+    error(`failed to load eval cases: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+  if (only.length > 0) {
+    const unknown = only.filter((id) => !cases.some((c) => c.id === id));
+    if (unknown.length > 0) {
+      error(`unknown case ${unknown.join(", ")}`);
+      return 1;
+    }
+    cases = cases.filter((c) => only.includes(c.id));
+  }
 
   let logDir: string;
   try {
@@ -150,15 +194,19 @@ export async function main(options: CliMainOptions = {}): Promise<number> {
   let anyLogFailed = false;
   let runs = 0;
   let firstTry = 0;
+  const usage: UsageTotals = { calls: 0, promptTokens: 0, cachedPromptTokens: 0, completionTokens: 0, durationMs: 0 };
   const passes = new Map<string, number>();
   for (const evalCase of cases) {
     passes.set(evalCase.id, 0);
     for (let attempt = 1; attempt <= repeat; attempt++) {
       const signal = timeoutSignal();
+      const started = performance.now();
       let result = await runEvalCaseFn(evalCase, { llm, signal });
+      const durationMs = Math.round(performance.now() - started);
       if (signal.aborted) {
         result = timeoutResult(evalCase.id, result);
       }
+      addUsage(usage, result, durationMs);
 
       const generation = result.generation;
       const record: EvalCaseLog = {
@@ -167,7 +215,8 @@ export async function main(options: CliMainOptions = {}): Promise<number> {
         checks: evalCase.checks,
         ok: result.ok,
         failures: result.failures,
-        attempts: generation?.attempts ?? [],
+        attempts: attemptsOf(result),
+        durationMs,
       };
       if (generation?.ok) {
         record.tree = generation.tree;
@@ -184,7 +233,7 @@ export async function main(options: CliMainOptions = {}): Promise<number> {
       }
 
       runs++;
-      if (result.ok && attemptCount(result) === 1) firstTry++;
+      if (result.ok && attemptsOf(result).length === 1) firstTry++;
       if (result.ok) passes.set(evalCase.id, (passes.get(evalCase.id) ?? 0) + 1);
       else anyFailed = true;
       log(formatResult(result, repeat > 1 ? ` [${attempt}/${repeat}]` : ""));
@@ -197,6 +246,7 @@ export async function main(options: CliMainOptions = {}): Promise<number> {
     }
   }
   log(`first-try ${firstTry}/${runs}`);
+  log(formatUsage(usage));
   log(`logs ${resolve(logDir)}`);
 
   return anyFailed || anyLogFailed ? 1 : 0;

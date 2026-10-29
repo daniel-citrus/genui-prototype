@@ -1,0 +1,11 @@
+{
+  "id": "product-card-image-badge",
+  "prompt": "Show a product card for the Latte with its photo from https://example.com/latte.jpg, a New badge, a divider, and the price $4.50 under the divider.",
+  "checks": [
+    { "uiProps": { "component": "Image", "props": { "src": "https://example.com/latte.jpg" } } },
+    { "uiProps": { "component": "Badge", "props": { "text": "New" } } },
+    { "uiComponent": "Divider" },
+    { "uiText": "$4.50" },
+    { "noUiComponent": "Markup" }
+  ]
+}

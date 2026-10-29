@@ -4,6 +4,7 @@
   "checks": [
     { "uiComponent": "TextInput" },
     { "uiComponent": "Button" },
-    { "noButtonAction": true }
+    { "noButtonAction": true },
+    { "notesMentions": ["yet", "do anything", "action", "for looks", "for show"] }
   ]
 }

@@ -3,6 +3,7 @@
   "prompt": "Show a button labeled Export PDF that exports this page as a PDF.",
   "checks": [
     { "uiComponent": "Button" },
-    { "noButtonAction": true }
+    { "noButtonAction": true },
+    { "notesMentions": ["yet", "do anything", "action", "for looks", "for show"] }
   ]
 }

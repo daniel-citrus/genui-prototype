@@ -84,6 +84,20 @@ describe("collectBindings", () => {
     });
   });
 
+  it("keeps a Select's preset value and its disabled flag", () => {
+    const tree = {
+      component: "Stack",
+      children: [
+        { component: "Select", props: { label: "Item", name: "item", options: ["Tea"], value: "Tea", disabled: true } },
+        { component: "Select", props: { label: "Size", name: "size", options: ["S"], value: 3, disabled: false } },
+      ],
+    };
+    assert.deepEqual(collectBindings(tree).inputs, [
+      { path: "tree.children.0", component: "Select", name: "item", options: ["Tea"], value: "Tea", disabled: true },
+      { path: "tree.children.1", component: "Select", name: "size", options: ["S"] },
+    ]);
+  });
+
   it("skips unbound nodes, other components and malformed values", () => {
     const tree = {
       component: "Stack",

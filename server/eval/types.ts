@@ -1,5 +1,5 @@
 import type { CustomComponentDefinition } from "shared/customComponents";
-import type { Generation } from "../generate/generate";
+import type { Generation, GenerationAttempt } from "../generate/generate";
 
 export type EvalCheck =
   | { maxAttempts: number }
@@ -10,9 +10,13 @@ export type EvalCheck =
   | { uiNamedInput: string }
   | { uiText: string }
   | { uiMarkupTag: string }
+  /** A node of `component` whose props include each of `props`, compared as JSON. */
+  | { uiProps: { component: string; props: Record<string, unknown> } }
   | { agentComponent: string }
   | { notesMaxWords: number }
-  | { notesExcludes: string };
+  | { notesExcludes: string }
+  /** The notes contain at least one of these, ignoring case. */
+  | { notesMentions: string[] };
 
 export interface EvalCase {
   id: string;
@@ -33,5 +37,7 @@ export interface EvalCaseResult {
   ok: boolean;
   failures: CheckFailure[];
   generation?: Generation;
+  /** The model calls completed before the generation rejected. */
+  attempts?: GenerationAttempt[];
   error?: string;
 }

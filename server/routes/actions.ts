@@ -6,6 +6,7 @@ import type { ActionRegistry, ActionSpec } from "../actions/types";
 import type { DesignStore } from "../designs";
 import { isObject } from "../ui/bindings";
 import { checkActionRequest } from "../ui/checkAction";
+import { staleScopes } from "../ui/staleScopes";
 import { MAX_NODES } from "../ui/validateTree";
 
 /** Same cap as chat: an action click is a few ids plus at most MAX_NODES short values. */
@@ -55,8 +56,9 @@ export const actionsRouter: FastifyPluginAsync<ActionsRouterOptions> = async (ap
   /**
    * Run the action a Button click names, if the remembered design allows it.
    * An action with a `confirm` question runs only with `confirmed: true`;
-   * otherwise the answer is the question. Values may be personal data: they
-   * are never logged, and neither is the question that holds them.
+   * otherwise the answer is the question. A success also lists the design's
+   * `stale` scopes. Values may be personal data: they are never logged, and
+   * neither is the question that holds them.
    */
   app.post("/run", { bodyLimit: ACTIONS_BODY_LIMIT_BYTES, config: { rateLimit: {} } }, async (req, reply) => {
     const problem = bodyProblem(req.body);
@@ -93,6 +95,14 @@ export const actionsRouter: FastifyPluginAsync<ActionsRouterOptions> = async (ap
           log: req.log,
           signal: controller.signal,
         });
+        if (outcome.ok) {
+          const list = (source: string) =>
+            opts.actions.listChoices(source, controller.signal).catch((err: unknown) => {
+              req.log.error({ source, err }, "loading dropdown values failed");
+              throw err;
+            });
+          outcome = { ...outcome, stale: await staleScopes(design, opts.actions.specs, list) };
+        }
       }
     }
 

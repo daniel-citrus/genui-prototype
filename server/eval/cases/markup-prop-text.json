@@ -1,0 +1,48 @@
+{
+  "id": "markup-prop-text",
+  "prompt": "Show our saved status dot with the label Online.",
+  "checks": [
+    { "agentComponent": "StatusDot" },
+    { "uiMarkupTag": "circle" },
+    { "uiText": "Online" },
+    { "notesMentions": ["saved"] },
+    { "notesExcludes": "StatusDot" },
+    { "notesExcludes": "Markup" }
+  ],
+  "customComponents": [
+    {
+      "name": "StatusDot",
+      "description": "A small green dot followed by a short status label.",
+      "category": "display",
+      "children": "none",
+      "propsSchema": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "The status shown next to the dot, such as Online."
+          }
+        },
+        "required": ["label"],
+        "additionalProperties": false
+      },
+      "exampleProps": { "label": "Online" },
+      "template": {
+        "component": "Markup",
+        "props": {
+          "root": {
+            "tag": "span",
+            "children": [
+              {
+                "tag": "svg",
+                "attrs": { "width": "10", "height": "10", "viewBox": "0 0 10 10" },
+                "children": [{ "tag": "circle", "attrs": { "cx": "5", "cy": "5", "r": "5", "fill": "green" } }]
+              },
+              { "tag": "span", "text": { "$prop": "label" } }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

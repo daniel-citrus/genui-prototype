@@ -41,9 +41,15 @@ describe("checkGeneration", () => {
     ["uiNamedInput", { uiNamedInput: "email" }, { uiNamedInput: "phone" }],
     ["uiText", { uiText: "Hello" }, { uiText: "Goodbye" }],
     ["uiMarkupTag", { uiMarkupTag: "li" }, { uiMarkupTag: "svg" }],
+    [
+      "uiProps",
+      { uiProps: { component: "TextInput", props: { name: "email", label: "Email" } } },
+      { uiProps: { component: "TextInput", props: { name: "email", label: "Phone" } } },
+    ],
     ["agentComponent", { agentComponent: "Saved" }, { agentComponent: "Heading" }],
     ["notesMaxWords", { notesMaxWords: 3 }, { notesMaxWords: 2 }],
     ["notesExcludes", { notesExcludes: "JSON" }, { notesExcludes: "form" }],
+    ["notesMentions", { notesMentions: ["table", "FORM"] }, { notesMentions: ["table", "chart"] }],
   ];
 
   for (const [name, passing, failing] of cases) {
@@ -55,6 +61,51 @@ describe("checkGeneration", () => {
       assert.ok(failures[0]!.reason.startsWith(`${name}`));
     });
   }
+
+  it("labels a failure with the check and its value", () => {
+    assert.deepEqual(reasons({ maxAttempts: 0 }), ["maxAttempts 0: took 1 attempts"]);
+    assert.deepEqual(reasons({ notesMaxWords: 2 }), ["notesMaxWords 2: notes have 3 words"]);
+    assert.deepEqual(reasons({ uiComponent: "Card" }), ['uiComponent "Card": component not found in the tree']);
+    assert.deepEqual(reasons({ uiNamedInput: "phone" }), ['uiNamedInput "phone": named input not found in the tree']);
+    assert.deepEqual(reasons({ notesMentions: ["chart"] }), ['notesMentions ["chart"]: notes mention none of them']);
+    assert.deepEqual(reasons({ uiProps: { component: "Card", props: { title: "A" } } }), [
+      'uiProps {"component":"Card","props":{"title":"A"}}: no node of that component has those props',
+    ]);
+  });
+
+  it("uiProps needs every listed prop on one node, compared as JSON", () => {
+    const select: UiNode = {
+      component: "Stack",
+      children: [
+        { component: "Select", props: { name: "item", options: ["A", "B"], value: "A" } },
+        { component: "Select", props: { name: "size", disabled: true } },
+      ],
+    };
+    const generation = designed({ tree: select });
+    const check = (props: Record<string, unknown>) => reasons({ uiProps: { component: "Select", props } }, generation);
+    assert.deepEqual(check({ name: "item", options: ["A", "B"] }), []);
+    assert.equal(check({ name: "item", options: ["B", "A"] }).length, 1);
+    assert.equal(check({ name: "item", disabled: true }).length, 1);
+    assert.equal(reasons({ uiProps: { component: "TextInput", props: { name: "item" } } }, generation).length, 1);
+  });
+
+  it("finds components, text and Markup tags at any depth, in nested props too", () => {
+    const deep: UiNode = {
+      component: "Stack",
+      children: [{ component: "Card", children: [{ component: "Stack", children: [tree] }] }],
+    };
+    const generation = designed({ tree: deep });
+    const found: EvalCheck[] = [{ uiComponent: "Heading" }, { uiText: "Mocha" }, { uiMarkupTag: "li" }, { uiButtonAction: "demo_echo" }];
+    for (const check of found) {
+      assert.deepEqual(reasons(check, generation), [], JSON.stringify(check));
+    }
+    assert.equal(reasons({ noUiComponent: "Markup" }, generation).length, 1);
+  });
+
+  it("reads the expanded tree for ui checks, not the model's own tree", () => {
+    assert.equal(reasons({ uiComponent: "Saved" }).length, 1);
+    assert.deepEqual(reasons({ noUiComponent: "Saved" }), []);
+  });
 
   it("noButtonAction passes for a button without an action and fails with one or with no button", () => {
     const bare: UiNode = { component: "Button", props: { label: "Go" } };

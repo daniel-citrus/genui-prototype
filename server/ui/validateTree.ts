@@ -114,7 +114,7 @@ export function withPropsHint(problems: string[], name: string, hinted: Set<stri
   if (problems.length === 0 || hinted.has(name)) return problems;
   hinted.add(name);
   const [first, ...rest] = problems;
-  return [`${first} (call get_component ${name} for its props)`, ...rest];
+  return [`${first} (see ${name}'s propsSchema)`, ...rest];
 }
 
 /** A Select's `value` must be one of its options, and a disabled Select needs one. */
@@ -195,7 +195,7 @@ function bindingProblems(
     const spec = specs.get(button.action);
     if (!spec) {
       problems.push(
-        `${keyPath(button, "action")} "${button.action}" is not a registered action (call list_actions to see them)`,
+        `${keyPath(button, "action")} "${button.action}" is not a registered action (use a listed action, or leave it out)`,
       );
       continue;
     }
@@ -253,7 +253,7 @@ function bindingProblems(
       for (const option of input.options ?? []) {
         if (!values.includes(option)) {
           problems.push(
-            `${keyPath(input, "options")} "${option}" is not one of the ${source} values (call list_actions to get them)`,
+            `${keyPath(input, "options")} "${option}" is not one of the ${source} values (use the listed values)`,
           );
         }
       }

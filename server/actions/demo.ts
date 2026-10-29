@@ -4,7 +4,8 @@ import type { ActionDefinition } from "./types";
 /** Echoes its text back. No side effects: it proves the click pipeline end to end. */
 export const demoEchoAction: ActionDefinition = {
   name: "demo_echo",
-  description: "Demo action with no side effects: replies with the text it was sent.",
+  description:
+    "Demo action with no side effects: replies with the text it was sent. Use it only when the request asks for the demo or echo action, never in place of an action that isn't listed.",
   input_schema: {
     type: "object",
     properties: {

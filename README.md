@@ -39,7 +39,7 @@ Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
    npm run dev
    ```
 
-Open http://localhost:5173, type what you want in the prompt box and click Generate. The design appears in the sandbox, with the generator's notes under the prompt, and the Components button lists the saved custom components. `curl -s localhost:5173/api/health` should show `{"ok":true,"db":true,"agent":true}` when Postgres is up. Without a key the app still runs, with `"agent":false`, and generating answers with an error asking for `OPENAI_API_KEY`.
+Open http://localhost:5173, type what you want in the prompt box and click Generate. The design appears in the chat under your prompt, with the generator's notes directly below it; a newer design replaces the older ones, and a form whose action succeeds is marked Done. The Components button lists the saved custom components. `curl -s localhost:5173/api/health` should show `{"ok":true,"db":true,"agent":true}` when Postgres is up. Without a key the app still runs, with `"agent":false`, and generating answers with an error asking for `OPENAI_API_KEY`.
 
 ## Generate a UI
 
@@ -59,7 +59,7 @@ curl -s localhost:5173/api/actions/run \
   -d '{"designId":"<id from generate>","action":"demo_echo","values":{"text":"hi"}}'
 ```
 
-The answer is `{ ok, message }`. An action with a confirm question answers `{ ok: false, message, confirm }` first; send the same request again with `"confirmed": true` once the person says yes. A design the API no longer remembers (after a restart, or past 500 newer ones) answers 409: generate it again.
+The answer is `{ ok, message }`. A success also carries `stale`: the parts of the design with a dropdown that can now send a value that no longer exists (for example a category that was just renamed), each a Card's tree path (`"tree.children.1"`) or `"tree"` for dropdowns outside every Card; `[]` when there are none. An action with a confirm question answers `{ ok: false, message, confirm }` first; send the same request again with `"confirmed": true` once the person says yes. A design the API no longer remembers (after a restart, or past 500 newer ones) answers 409: generate it again.
 
 ### Registering the tool in a host agent
 
@@ -82,7 +82,7 @@ npm run preview       # serve dist/ on :4173
 npm run db:generate   # new migration after editing server/adapters/db/schema.ts
 npm run db:seed       # sync the components table with server/catalog/components.ts (rerun after pulling catalog changes)
 npm run db:studio     # browse the database
-npm run eval          # live OpenAI eval cases through the generator; gitignored eval-logs JSON per case; `-- --repeat N` (1-10) reruns each case, logs <id>.<k>.json (needs OPENAI_API_KEY; same model as the API; not run in CI)
+npm run eval          # live OpenAI eval cases through the generator; gitignored eval-logs JSON per case; `-- --repeat N` (1-10) reruns each case, logs <id>.<k>.json; `-- --case <id>` (repeatable) runs only those cases (needs OPENAI_API_KEY; same model as the API; not run in CI)
 ```
 
 ## Docker

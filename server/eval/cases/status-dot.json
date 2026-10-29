@@ -1,9 +1,0 @@
-{
-  "id": "markup-prop-text",
-  "prompt": "Define a custom component named StatusDot that uses Markup: an svg with a small green circle, then a span whose text is a label prop. Then show StatusDot with the label Online.",
-  "checks": [
-    { "agentComponent": "StatusDot" },
-    { "uiMarkupTag": "circle" },
-    { "uiText": "Online" }
-  ]
-}
