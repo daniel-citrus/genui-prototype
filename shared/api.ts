@@ -26,6 +26,13 @@ export interface ActionResult {
   message: string;
   /** The action did not run: ask this, then resend with confirmed: true. */
   confirm?: string;
+  /**
+   * `ok: true` only: the scopes of the design holding a dropdown that can now
+   * send a value its source no longer offers. A Card is named by its tree path
+   * ("tree.children.1"); "tree" stands for dropdowns outside every Card.
+   * Missing means none.
+   */
+  stale?: string[];
 }
 
 /** One entry of `GET /api/custom-components`; `deletedAt` is set for a deleted one. */

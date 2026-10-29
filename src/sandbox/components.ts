@@ -89,11 +89,13 @@ const Stack: Renderer = (props, children) => {
 
 const cardPadding = { sm: "p-3", md: "p-5", lg: "p-8" };
 
-const Card: Renderer = (props, children) => {
+const Card: Renderer = (props, children, path) => {
   const node = el(
     "section",
     `flex flex-col gap-4 rounded-xl border border-zinc-200 bg-white shadow-sm ${pick(props, "padding", cardPadding, "md")}`,
   );
+  // The page finds a Card by its tree path to lock it after an action.
+  node.dataset.card = path;
   const title = str(props, "title");
   if (title) node.append(el("h3", "text-base font-semibold text-zinc-900", title));
   node.append(...children);
