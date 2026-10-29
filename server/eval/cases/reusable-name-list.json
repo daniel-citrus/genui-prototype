@@ -3,7 +3,8 @@
   "prompt": "Show a list of the names Ana, Bo and Cy using our saved name list design.",
   "checks": [
     { "agentComponent": "NameList" },
-    { "uiText": "Cy" }
+    { "uiText": "Cy" },
+    { "notesMentions": ["saved"] }
   ],
   "customComponents": [
     {

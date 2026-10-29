@@ -1,0 +1,9 @@
+{
+  "id": "edit-item-preset",
+  "prompt": "Show a form to rename the Bạc xỉu.",
+  "checks": [
+    { "uiButtonAction": "menu_update_item" },
+    { "uiNamedInput": "name" },
+    { "uiProps": { "component": "Select", "props": { "name": "item", "value": "Bạc xỉu", "disabled": true } } }
+  ]
+}

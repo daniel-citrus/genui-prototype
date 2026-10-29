@@ -1,0 +1,9 @@
+{
+  "id": "attach-modifier-group",
+  "prompt": "Show a form to offer the sugar level choice on the Bạc xỉu.",
+  "checks": [
+    { "uiButtonAction": "menu_attach_modifier_group" },
+    { "uiProps": { "component": "Select", "props": { "name": "item", "value": "Bạc xỉu" } } },
+    { "uiProps": { "component": "Select", "props": { "name": "group", "value": "Mức đường (Sugar level)" } } }
+  ]
+}

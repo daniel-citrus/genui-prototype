@@ -10,9 +10,13 @@ export type EvalCheck =
   | { uiNamedInput: string }
   | { uiText: string }
   | { uiMarkupTag: string }
+  /** A node of `component` whose props include each of `props`, compared as JSON. */
+  | { uiProps: { component: string; props: Record<string, unknown> } }
   | { agentComponent: string }
   | { notesMaxWords: number }
-  | { notesExcludes: string };
+  | { notesExcludes: string }
+  /** The notes contain at least one of these, ignoring case. */
+  | { notesMentions: string[] };
 
 export interface EvalCase {
   id: string;

@@ -492,6 +492,7 @@ export function markupRules(): MarkupRules {
       valueChars: MAX_MARKUP_VALUE_CHARS,
     },
     notes: [
+      "Only the tags, attributes and style keys listed here are allowed. There is no a tag: nothing links to another page.",
       "Style keys are kebab-case (background-color) and go in style, never in attrs.",
       "There are no class names. img src must be an http: or https: URL.",
       "No position, z-index or CSS transform in style; svg elements may use the transform attribute.",

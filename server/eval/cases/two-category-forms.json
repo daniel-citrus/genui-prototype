@@ -1,0 +1,10 @@
+{
+  "id": "two-category-forms",
+  "prompt": "Show one page with two forms: one to add a new menu category, and one to rename an existing category.",
+  "checks": [
+    { "uiButtonAction": "menu_create_category" },
+    { "uiButtonAction": "menu_rename_category" },
+    { "uiNamedInput": "category" },
+    { "maxAttempts": 1 }
+  ]
+}

@@ -3,6 +3,7 @@
   "prompt": "Add a button labeled Send SMS that texts the customer their order status.",
   "checks": [
     { "uiComponent": "Button" },
-    { "noButtonAction": true }
+    { "noButtonAction": true },
+    { "notesMentions": ["yet", "do anything", "action", "for looks", "for show"] }
   ]
 }

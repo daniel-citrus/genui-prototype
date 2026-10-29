@@ -1,0 +1,9 @@
+{
+  "id": "size-price-form",
+  "prompt": "Show a form to change the price of the large Bạc xỉu.",
+  "checks": [
+    { "uiButtonAction": "menu_set_size_price" },
+    { "uiNamedInput": "price" },
+    { "uiProps": { "component": "Select", "props": { "name": "size", "value": "Bạc xỉu (L)" } } }
+  ]
+}

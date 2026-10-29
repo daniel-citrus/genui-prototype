@@ -16,9 +16,11 @@ const CHECK_KEYS = [
   "uiNamedInput",
   "uiText",
   "uiMarkupTag",
+  "uiProps",
   "agentComponent",
   "notesMaxWords",
   "notesExcludes",
+  "notesMentions",
 ] as const;
 
 const REMOVED_CHECK_KEYS = [
@@ -32,11 +34,15 @@ const REMOVED_CHECK_KEYS = [
   "replyExcludes",
 ];
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function assertPlainObject(value: unknown, context: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isPlainObject(value)) {
     throw new Error(`${context}: expected a JSON object`);
   }
-  return value as Record<string, unknown>;
+  return value;
 }
 
 function refuseExtraKeys(obj: Record<string, unknown>, allowed: readonly string[], context: string): void {
@@ -82,6 +88,27 @@ function parseCheck(raw: unknown, context: string): EvalCheck {
         throw new Error(`${context}: notesMaxWords must be an integer from 1 to 500`);
       }
       return { notesMaxWords: value };
+    }
+    case "uiProps": {
+      const value = obj.uiProps;
+      if (
+        !isPlainObject(value) ||
+        Object.keys(value).some((field) => field !== "component" && field !== "props") ||
+        typeof value.component !== "string" ||
+        value.component.length === 0 ||
+        !isPlainObject(value.props) ||
+        Object.keys(value.props).length === 0
+      ) {
+        throw new Error(`${context}: uiProps must be {"component": "<Name>", "props": {...}} with at least one prop`);
+      }
+      return { uiProps: { component: value.component, props: value.props } };
+    }
+    case "notesMentions": {
+      const value = obj.notesMentions;
+      if (!Array.isArray(value) || value.length === 0 || !value.every((text) => typeof text === "string" && text.length > 0)) {
+        throw new Error(`${context}: notesMentions must be a non-empty array of non-empty strings`);
+      }
+      return { notesMentions: value as string[] };
     }
     case "uiComponent":
     case "uiButtonAction":
