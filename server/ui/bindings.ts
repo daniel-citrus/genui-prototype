@@ -15,6 +15,10 @@ export interface NamedInput {
   type?: string;
   /** Select only: its string options. */
   options?: string[];
+  /** A Select component only: the option it starts on, when set. */
+  value?: string;
+  /** A Select component only: set when it is greyed out and fixed. */
+  disabled?: true;
   /** Path of the nearest Card around it, if any. */
   card?: string;
 }
@@ -96,6 +100,8 @@ export function collectBindings(tree: unknown): TreeBindings {
         input.options = Array.isArray(props.options)
           ? props.options.filter((o): o is string => typeof o === "string")
           : [];
+        if (typeof props.value === "string") input.value = props.value;
+        if (props.disabled === true) input.disabled = true;
       }
       bindings.inputs.push(input);
     } else if (component === "Markup") {
