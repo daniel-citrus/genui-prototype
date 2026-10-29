@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { MAX_PROMPT_CHARS } from "shared/generate";
 import type { CustomComponentDefinition } from "shared/customComponents";
 import { MAX_ATTEMPTS } from "../generate/generate";
+import { isObject } from "../ui/bindings";
 import type { EvalCase, EvalCheck } from "./types";
 
 const KEBAB_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -34,12 +35,8 @@ const REMOVED_CHECK_KEYS = [
   "replyExcludes",
 ];
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function assertPlainObject(value: unknown, context: string): Record<string, unknown> {
-  if (!isPlainObject(value)) {
+  if (!isObject(value)) {
     throw new Error(`${context}: expected a JSON object`);
   }
   return value;
@@ -92,11 +89,11 @@ function parseCheck(raw: unknown, context: string): EvalCheck {
     case "uiProps": {
       const value = obj.uiProps;
       if (
-        !isPlainObject(value) ||
+        !isObject(value) ||
         Object.keys(value).some((field) => field !== "component" && field !== "props") ||
         typeof value.component !== "string" ||
         value.component.length === 0 ||
-        !isPlainObject(value.props) ||
+        !isObject(value.props) ||
         Object.keys(value.props).length === 0
       ) {
         throw new Error(`${context}: uiProps must be {"component": "<Name>", "props": {...}} with at least one prop`);
