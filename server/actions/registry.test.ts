@@ -269,6 +269,40 @@ describe("createActionRegistry listChoices", () => {
   });
 });
 
+describe("createActionRegistry listChoiceGroups", () => {
+  it("returns a source's groups, passing the signal through", async () => {
+    let received: AbortSignal | undefined;
+    const sizes: ChoiceSource = {
+      ...source("sizes", ["S", "M"]),
+      async listGroups(signal) {
+        received = signal;
+        return [{ name: "Small", values: ["S"] }, { name: "Medium", values: ["M"] }];
+      },
+    };
+    const registry = createActionRegistry([action({ choices: { note: sizes } })]);
+    const { signal } = new AbortController();
+
+    assert.deepEqual(await registry.listChoiceGroups("sizes", signal), [
+      { name: "Small", values: ["S"] },
+      { name: "Medium", values: ["M"] },
+    ]);
+    assert.equal(received, signal);
+  });
+
+  it("resolves undefined for a source without groups", async () => {
+    const registry = createActionRegistry([action({ choices: { note: source("sizes", ["S"]) } })]);
+    assert.equal(await registry.listChoiceGroups("sizes", new AbortController().signal), undefined);
+  });
+
+  it("rejects an unknown source name", async () => {
+    const registry = createActionRegistry([action({ choices: { note: source("sizes") } })]);
+    await assert.rejects(
+      registry.listChoiceGroups("colours", new AbortController().signal),
+      /Unknown choice source: colours/,
+    );
+  });
+});
+
 describe("createActionRegistry run", () => {
   it("passes valid values and the context to the handler", async () => {
     let received: { values: unknown; designId: string } | undefined;

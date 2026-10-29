@@ -333,4 +333,44 @@ export const catalog: CatalogComponent[] = [
       },
     },
   },
+  {
+    name: "Tabs",
+    description:
+      "Shows one panel at a time, picked from a row of tabs, or from a Show dropdown past 4 labels. Use it to split a long list by its groups. Give exactly one child per label, in the same order; each child is one panel.",
+    category: "layout",
+    children: "any",
+    propsSchema: {
+      type: "object",
+      properties: {
+        labels: {
+          type: "array",
+          items: { type: "string", minLength: 1 },
+          minItems: 2,
+          maxItems: 20,
+          uniqueItems: true,
+          description: "The tab names, in display order; the first panel shows at start.",
+        },
+      },
+      required: ["labels"],
+      additionalProperties: false,
+    },
+    exampleProps: { labels: ["Starters", "Mains", "Desserts"] },
+  },
+  {
+    name: "Collapsible",
+    description:
+      "A titled section that opens and closes, with its children as the content. Use it for detail the person may not need to see at once.",
+    category: "layout",
+    children: "any",
+    propsSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Text on the bar that opens and closes the section." },
+        open: { type: "boolean", default: false, description: "Whether the section starts open." },
+      },
+      required: ["title"],
+      additionalProperties: false,
+    },
+    exampleProps: { title: "Allergens" },
+  },
 ];

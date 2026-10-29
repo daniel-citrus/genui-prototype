@@ -1,0 +1,9 @@
+{
+  "id": "short-list-flat",
+  "prompt": "Show our drinks list on one page. Hot: Espresso, Latte, Mocha. Cold: Iced Tea, Lemonade.",
+  "checks": [
+    { "noUiComponent": "Tabs" },
+    { "noUiComponent": "Collapsible" },
+    { "uiText": "Lemonade" }
+  ]
+}

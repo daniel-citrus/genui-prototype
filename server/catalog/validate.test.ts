@@ -21,8 +21,8 @@ function assertProblem(problems: string[], expected: RegExp) {
 }
 
 describe("validateCatalog", () => {
-  it("accepts the real catalog of thirteen components", () => {
-    assert.equal(catalog.length, 13);
+  it("accepts the real catalog of fifteen components", () => {
+    assert.equal(catalog.length, 15);
     assert.deepEqual(validateCatalog(catalog), []);
   });
 

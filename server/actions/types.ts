@@ -15,11 +15,19 @@ export interface ActionContext {
 export const ACTION_OPERATIONS = ["create", "edit", "archive", "delete", "attach", "detach", "other"] as const;
 export type ActionOperation = (typeof ACTION_OPERATIONS)[number];
 
+/** Some of a source's values under a shared name, e.g. the items of one category. */
+export interface ChoiceGroup {
+  name: string;
+  values: string[];
+}
+
 /** Where a dropdown's values come from. Actions that share a source pass the same object. */
 export interface ChoiceSource {
   /** snake_case, unique within a registry. */
   name: string;
   list(signal: AbortSignal): Promise<string[]>;
+  /** The same values split into ordered groups, for sources whose values fall into them. */
+  listGroups?(signal: AbortSignal): Promise<ChoiceGroup[]>;
 }
 
 /** An action's public description: what a Button may name and send. */
@@ -56,4 +64,6 @@ export interface ActionRegistry {
   run(name: string, values: Record<string, unknown>, ctx: ActionContext): Promise<ActionResult>;
   /** Current values of a source named in `specs`; rejects for an unknown name. */
   listChoices(source: string, signal: AbortSignal): Promise<string[]>;
+  /** Groups of a source named in `specs`, or undefined when it has none; rejects for an unknown name. */
+  listChoiceGroups(source: string, signal: AbortSignal): Promise<ChoiceGroup[] | undefined>;
 }

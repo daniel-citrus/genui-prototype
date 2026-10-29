@@ -2,6 +2,7 @@ import { MAX_FIELD_CHARS } from "shared/api";
 import type { MarkupElement } from "shared/markup";
 import type { RenderedComponentName } from "./componentNames";
 import { filterMarkup } from "./markup";
+import { tabForKey, tabPanels, tabsMode } from "./tabs";
 
 /**
  * Draws one catalog component. Props come from a tree the server already
@@ -103,6 +104,97 @@ const Card: Renderer = (props, children, path) => {
 };
 
 const Divider: Renderer = () => el("hr", "border-0 border-t border-zinc-200");
+
+const focusRing = "focus-visible:outline-2 focus-visible:outline-sky-700";
+// The focus ring is inset so the scrolling tab bar doesn't clip it.
+const tabClass = `shrink-0 whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-900 focus-visible:-outline-offset-2 aria-selected:border-sky-700 aria-selected:text-sky-800 ${focusRing}`;
+
+function showPanel(panels: HTMLElement[], index: number): void {
+  panels.forEach((panel, i) => (panel.hidden = i !== index));
+}
+
+/**
+ * A WAI-ARIA tab bar over `panels`, with a roving tabindex: arrow keys,
+ * Home and End move focus, and the focused tab is the selected one.
+ */
+function tabBar(labels: string[], panels: HTMLElement[]): HTMLElement {
+  const list = el("div", "flex overflow-x-auto border-b border-zinc-200");
+  list.setAttribute("role", "tablist");
+  const tabs = labels.map((label, i) => {
+    const tab = el("button", tabClass, label);
+    tab.type = "button";
+    tab.id = uniqueId("tab");
+    tab.setAttribute("role", "tab");
+    // Only changes what is shown, so a locked design leaves it working.
+    tab.dataset.viewControl = "";
+    const panel = panels[i];
+    panel.id = uniqueId("tabpanel");
+    panel.setAttribute("role", "tabpanel");
+    panel.setAttribute("aria-labelledby", tab.id);
+    panel.tabIndex = 0;
+    tab.setAttribute("aria-controls", panel.id);
+    tab.addEventListener("click", () => select(i));
+    tab.addEventListener("keydown", (e) => {
+      // Alt+Left and the like stay the browser's.
+      const next = e.altKey || e.ctrlKey || e.metaKey ? undefined : tabForKey(e.key, i, tabs.length);
+      if (next === undefined) return;
+      e.preventDefault();
+      select(next);
+      tabs[next].focus();
+    });
+    return tab;
+  });
+  function select(index: number) {
+    tabs.forEach((tab, i) => {
+      tab.setAttribute("aria-selected", String(i === index));
+      tab.tabIndex = i === index ? 0 : -1;
+    });
+    showPanel(panels, index);
+  }
+  list.append(...tabs);
+  select(0);
+  return list;
+}
+
+/** A labelled "Show" dropdown of `labels` that picks the panel to show. */
+function showSelect(labels: string[], panels: HTMLElement[]): HTMLElement {
+  const id = uniqueId("select");
+  const select = el("select", inputClass);
+  select.id = id;
+  select.dataset.viewControl = "";
+  select.append(...labels.map((label, i) => new Option(label, String(i))));
+  select.addEventListener("change", () => showPanel(panels, Number(select.value)));
+  showPanel(panels, 0);
+  return field("Show", select, id);
+}
+
+/**
+ * One child per label, each a panel; the first shows at start. The tab
+ * buttons and the Show dropdown have no name or path, so an action never reads them.
+ */
+const Tabs: Renderer = (props, children) => {
+  const node = el("div", "flex min-w-0 max-w-full flex-col gap-3");
+  const entries = tabPanels(props.labels, children);
+  if (entries.length === 0) return node;
+  const labels = entries.map((entry) => entry.label);
+  const panels = entries.map(({ panel }) => {
+    const panelEl = el("div", `rounded-lg ${focusRing}`);
+    if (panel) panelEl.append(panel);
+    return panelEl;
+  });
+  node.append(tabsMode(labels.length) === "bar" ? tabBar(labels, panels) : showSelect(labels, panels), ...panels);
+  return node;
+};
+
+const Collapsible: Renderer = (props, children) => {
+  const node = el("details", "rounded-lg border border-zinc-200 bg-white");
+  node.open = bool(props, "open", false);
+  const summaryClass = `cursor-pointer rounded-lg px-4 py-3 text-sm font-semibold text-zinc-900 ${focusRing}`;
+  const content = el("div", "flex flex-col gap-4 px-4 pb-4");
+  content.append(...children);
+  node.append(el("summary", summaryClass, str(props, "title") ?? ""), content);
+  return node;
+};
 
 const headingTag = { "1": "h1", "2": "h2", "3": "h3" } as const;
 const headingClass = {
@@ -333,4 +425,6 @@ export const components: Record<RenderedComponentName, Renderer> = {
   Badge,
   Alert,
   Markup,
+  Tabs,
+  Collapsible,
 };

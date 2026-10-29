@@ -42,6 +42,20 @@ describe("GENERATE_SYSTEM_PROMPT", () => {
     for (const phrase of phrases) assert.ok(GENERATE_SYSTEM_PROMPT.toLowerCase().includes(phrase.toLowerCase()), phrase);
   });
 
+  it("asks for compact lists, Tabs by group past 8 entries and forms kept in one tab or section", () => {
+    const phrases = [
+      "each entry of a list on one line",
+      "rather than one Card each, unless each entry needs its own form",
+      "more than 8 entries and they fall into groups",
+      "the groups listed with a dropdown source, or groups the request gives",
+      "split them with Tabs: one tab per group, labelled with the group names in their listed order",
+      "Keep 8 or fewer entries in one piece, and a list without groups as one compact list",
+      "Use Collapsible, closed,",
+      "its inputs and its button inside one tab or section",
+    ];
+    for (const phrase of phrases) assert.ok(GENERATE_SYSTEM_PROMPT.includes(phrase), phrase);
+  });
+
   it("asks for notes on missing actions, confirmations and reused components", () => {
     assert.match(GENERATE_SYSTEM_PROMPT, /a button has no action/);
     assert.match(GENERATE_SYSTEM_PROMPT, /asks a question before it runs/);
