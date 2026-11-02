@@ -1,10 +1,10 @@
 # genui-prototype
 
-**Verified:** b8418f4ea0f3ebf09578100b6bad4cdb9051b1da · **Written:** 2026-10-25
+**Verified:** 0fd56510f85ce21a7356f8ea5a625f3000c39aac · **Written:** 2026-11-02
 
 ## What this system is
 
-A UI generator for a host agent. The planned CapheViet POS agent gives it a plain-language prompt and gets back a checked UI design as a JSON tree, plus short notes for the person. A Vite preview page draws the design in a sandbox and lets someone click its buttons, which run registered backend actions on a demo café menu. It is a prototype: no authentication, and nothing reaches a real POS.
+A UI generator for a host agent. The planned CapheViet POS agent will call `generate_ui` with a plain-language prompt and receive a validated UI design as a JSON component tree, plus short notes for the person. A Vite preview page draws each design in a sandbox, runs registered backend actions when buttons are clicked, and lists saved custom components. Menu actions mutate an in-memory demo café menu only. The prototype has no authentication and nothing reaches a real POS.
 
 ## How it fits together
 
@@ -13,25 +13,26 @@ flowchart LR
   Host["Host agent (planned)"] --> Routes["Fastify routes"]
   Preview["Preview page"] --> Routes
   Routes --> Gen["Generator"]
-  Gen --> LLM["OpenAI, JSON mode"]
+  Gen --> LLM["OpenAI JSON mode"]
   Gen --> Checks["Design checks"]
   Checks --> DB[("Postgres")]
-  Routes --> Store["Design store (memory)"]
+  Routes --> Store["Design store"]
   Routes --> Actions["Action registry"]
-  Actions --> Menu["Demo menu (memory)"]
+  Actions --> Menu["Demo menu"]
   Eval["Eval CLI"] --> Gen
 ```
 
-The generator makes one model call and up to two repairs, then returns a validated tree. Designs are remembered in memory so button clicks can be checked against them.
+One OpenAI call plus up to two repairs produces an expanded, checked tree. The generate route stores it by id so action clicks are validated against that snapshot. Custom component definitions live in Postgres and expand into catalog trees at generation time.
 
 ## The pieces
 
-- **Entry and wiring:** `server/index.ts` builds the real adapters, applies migrations and the catalog seed in production, and listens.
-- **Generate route:** `server/routes/generate.ts` validates the prompt, runs the generator under a 90-second cap, and remembers the design.
-- **Action route:** `server/routes/actions.ts` runs the action a click names, with no model call.
-- **Schema:** `server/adapters/db/schema.ts` defines the catalog and custom component tables.
-- **Preview page:** the browser app in `src/`, which the docs describe as plain TypeScript with a sandbox renderer and a Components panel.
-- **Eval harness:** `npm run eval` runs committed cases through the generator (`package.json`).
+- **Wiring:** `server/index.ts` builds Drizzle repositories, the OpenAI adapter, the in-memory demo menu, the action registry, and `buildApp` from `server/app.ts`, then listens; production migrates and seeds the catalog on start.
+- **HTTP surface:** `server/app.ts` registers health, `POST /api/generate`, `POST /api/actions/run`, and `/api/custom-components` for the Components panel.
+- **Generate route:** `server/routes/generate.ts` validates the prompt, runs generation under a 90-second cap, and remembers successful designs in `server/designs.ts` (newest 500).
+- **Action route:** `server/routes/actions.ts` checks clicks against the stored tree, may ask confirm questions, runs handlers without a model call, and can return stale dropdown scopes after success.
+- **Persistence:** `server/adapters/db/schema.ts` defines the component catalog table and custom component version tables; the catalog file is seeded into Postgres.
+- **Preview:** `src/main.ts` hosts the chat transcript, prompt composer, and Components entry point; the sandbox renderer lives under `src/sandbox/`.
+- **Eval:** `npm run eval` in `package.json` runs committed live cases through the same generator as the API (OpenAI required; not in CI).
 
 ## A typical request
 
@@ -55,30 +56,31 @@ sequenceDiagram
   end
 ```
 
-A missing key gives 503, a failed model call 502, and a client disconnect aborts without an answer.
+Without `OPENAI_API_KEY` the generate route answers 503. A failed model call is 502; a forgotten design id on action run is 409.
 
 ## Data
 
-Postgres holds the component catalog (copied from a file by the seed) and custom components with every saved version. Generated designs and the demo menu live only in API memory. Designs keep the newest 500, and the menu resets on every start.
+Postgres holds the read-only component catalog (synced from a file by seed) and versioned custom component definitions. Generated UI trees and the demo menu exist only in API process memory: designs cap at 500 and vanish on restart; the menu resets to fixtures on every start.
 
 ## Outside systems
 
-OpenAI Chat Completions, called once per attempt in JSON mode. Postgres is the only other service.
+OpenAI Chat Completions in JSON mode, one call per generation attempt. Postgres 17 for catalog and custom components. No other outbound services in the default wiring.
+
+## Access
+
+There is no authentication. Anyone who can reach the API may generate designs; anyone who knows a design id may run its actions, including menu mutations on the shared demo menu. Rate limits apply per client IP in process memory on generate, actions, and custom-component routes.
 
 ## How it runs
 
-A Fastify API on Node 24 plus a Vite preview page. In development `npm run dev` starts both; production uses Docker, with an nginx web image proxying `/api` to the API image. The production API migrates and seeds on start and exits if either fails. CI is a single GitHub Actions workflow.
+Node 24: a Fastify API (default port 3001) and a Vite preview page (5173). `npm run dev` runs both locally with Postgres via Compose. Production Compose builds a nginx `Dockerfile` web image on port 8080 that proxies `/api` to the bundled API image (`Dockerfile.api`); the API migrates and seeds on start. GitHub Actions CI runs typecheck, tests, and both builds against Postgres 17.
 
 ## Decisions and tradeoffs
 
-The project began as a streaming chat agent with conversations, traces in a second database, and Redis. It became a one-call generator, and the chat pane, the agent loop, the SSE stream, trace storage and Redis were removed. Per-IP rate limits are kept in process memory, so each API instance counts on its own.
+The project replaced a streaming chat agent (SSE, conversations, trace Postgres, Redis, agent-defined custom components) with a one-call generator: the design store, deterministic action route, Components panel, and eval harness remain. Per-IP rate limits stayed in memory, so each API instance counts separately. Eval uses the live model and is kept out of CI.
 
 ## Limits and risks
 
-- There is no authentication: anyone who can reach the API can generate designs, and anyone with a design id can run its actions.
-- Designs are lost on restart, after which clicks answer 409.
-- Custom components can only be deleted, restored or reverted, not created.
-- Prompts are capped at 4000 characters and bodies at 32 KB.
+Prompts cap at 4000 characters; generate and action bodies at 32 KB. Generations time out at 90 seconds after up to three model calls. Custom components can be deleted, restored, or reverted in the panel but not created over HTTP yet. Menu actions cannot show current item values and do not persist past restart. No auth means knowing a design id is enough to run its actions.
 
 ## Sources
 
@@ -86,8 +88,14 @@ The project began as a streaming chat agent with conversations, traces in a seco
 - docs/ARCHITECTURE.md
 - package.json
 - server/index.ts
-- drizzle.config.ts
-- Dockerfile
+- server/app.ts
+- server/designs.ts
 - server/routes/generate.ts
 - server/routes/actions.ts
 - server/adapters/db/schema.ts
+- drizzle.config.ts
+- Dockerfile
+- docker-compose.yml
+- .github/workflows/ci.yml
+- src/main.ts
+- docs/debrief.md
